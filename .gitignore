@@ -15,7 +15,7 @@ coverage
 .env.*.local
 .env.production
 !.env.example
-!.env.production.test
+!.env.production.example
 # Vendor secret bundles (Alipay / Shouqianba / etc.) — drop the whole folder
 # in repo root and have git ignore it so we never accidentally commit private
 # keys. The folder name pattern matches "密钥<timestamp>".
