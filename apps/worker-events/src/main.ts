@@ -1,0 +1,194 @@
+import 'dotenv/config';
+import { Worker, type Job } from 'bullmq';
+import IORedis from 'ioredis';
+import { PrismaClient } from '@prisma/client';
+import {
+  buildClickHouseClient,
+  findArchivedRecipientById,
+  insertEmailEvents,
+  type BounceKind,
+  type EmailEventRow,
+  type EmailEventType,
+} from '@sendmast/clickhouse';
+import { QUEUE_NAMES } from '@sendmast/shared';
+
+const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const FLUSH_BATCH = Number(process.env.EVENTS_FLUSH_BATCH ?? '500');
+const FLUSH_INTERVAL_MS = Number(process.env.EVENTS_FLUSH_INTERVAL_MS ?? '1000');
+
+const prisma = new PrismaClient();
+const connection = new IORedis(REDIS_URL, { maxRetriesPerRequest: null });
+const ch = buildClickHouseClient({
+  url: process.env.CLICKHOUSE_URL ?? 'http://localhost:8123',
+  database: process.env.CLICKHOUSE_DATABASE ?? 'sendmast',
+  username: process.env.CLICKHOUSE_USER ?? 'default',
+  password: process.env.CLICKHOUSE_PASSWORD ?? '',
+});
+
+interface EventJobData {
+  kind: EmailEventType | 'o' | 'c' | 'u';
+  recipientId?: string;
+  externalRecipient?: string;
+  messageId?: string;
+  linkIndex?: number;
+  linkUrl?: string;
+  ip?: string;
+  userAgent?: string;
+  receivedAt: number;
+  rawMeta?: Record<string, unknown>;
+  /** Set by webhook for bounce events; '' / undefined for everything else. */
+  bounceKind?: BounceKind;
+}
+
+const KIND_MAP: Record<string, EmailEventType> = {
+  o: 'open',
+  c: 'click',
+  u: 'unsubscribe',
+};
+
+let buffer: EmailEventRow[] = [];
+let flushTimer: NodeJS.Timeout | null = null;
+
+async function flush(): Promise<void> {
+  if (buffer.length === 0) return;
+  const batch = buffer;
+  buffer = [];
+  try {
+    await insertEmailEvents(ch, batch);
+  } catch (err) {
+    console.error('ClickHouse insert failed; re-queueing batch:', err);
+    buffer = batch.concat(buffer);
+  }
+}
+
+function scheduleFlush() {
+  if (flushTimer) return;
+  flushTimer = setTimeout(async () => {
+    flushTimer = null;
+    await flush();
+  }, FLUSH_INTERVAL_MS);
+}
+
+async function resolveRecipient(data: EventJobData) {
+  if (data.recipientId) {
+    const hot = await prisma.campaignRecipient.findUnique({
+      where: { id: data.recipientId },
+      select: {
+        id: true,
+        accountId: true,
+        campaignId: true,
+        contactId: true,
+      },
+    });
+    if (hot) return hot;
+    // PG miss → try the ClickHouse cold archive. This is the normal path for
+    // open/click events that arrive >90 days after send (people opening old
+    // newsletters from their archive). Without this fallback those events
+    // would be dropped instead of recorded against the original campaign.
+    const cold = await findArchivedRecipientById(ch, data.recipientId);
+    return cold;
+  }
+  if (data.messageId) {
+    return prisma.campaignRecipient.findFirst({
+      where: { messageId: data.messageId },
+      select: {
+        id: true,
+        accountId: true,
+        campaignId: true,
+        contactId: true,
+      },
+    });
+  }
+  return null;
+}
+
+async function runEventJob(job: Job<EventJobData>) {
+  const data = job.data;
+  const eventType: EmailEventType = (KIND_MAP[data.kind as string] ?? data.kind) as EmailEventType;
+
+  const recipient = await resolveRecipient(data);
+  if (!recipient) {
+    console.warn(`Event for unknown recipient (kind=${eventType})`);
+    return;
+  }
+
+  // Update PG recipient row for hard outcomes. Wrapped in updateMany to
+  // tolerate the case where the recipient row has been moved to the CH
+  // archive (resolveRecipient's fallback path) — updateMany is a no-op
+  // instead of throwing P2025 when no rows match.
+  //
+  // Soft bounces are NOT marked as failed: the address is potentially still
+  // good and the user may retry the campaign. Only hard bounces flip status
+  // and add a suppression entry.
+  if (eventType === 'bounce' && data.bounceKind !== 'soft') {
+    await prisma.campaignRecipient.updateMany({
+      where: { id: recipient.id },
+      data: { status: 'failed', errorMessage: 'bounced' },
+    });
+    await prisma.suppressionEntry
+      .upsert({
+        where: { accountId_email: { accountId: recipient.accountId, email: '' } },
+        update: {},
+        create: {
+          accountId: recipient.accountId,
+          email: '',
+          reason: 'hard_bounce',
+        },
+      })
+      .catch(() => undefined);
+  }
+  if (eventType === 'complaint') {
+    const contact = await prisma.contact.findUnique({
+      where: { id: recipient.contactId },
+      select: { email: true },
+    });
+    if (contact) {
+      await prisma.suppressionEntry.upsert({
+        where: { accountId_email: { accountId: recipient.accountId, email: contact.email } },
+        update: { reason: 'complaint' },
+        create: { accountId: recipient.accountId, email: contact.email, reason: 'complaint' },
+      });
+    }
+  }
+
+  buffer.push({
+    account_id: recipient.accountId,
+    campaign_id: recipient.campaignId,
+    contact_id: recipient.contactId,
+    recipient_id: recipient.id,
+    event_type: eventType,
+    // CH 24.x's DateTime64 JSON parser rejects the `Z` UTC suffix; use space
+    // separator and strip Z. Column is declared `DateTime64(3, 'UTC')` so
+    // values are interpreted as UTC anyway.
+    event_time: new Date(data.receivedAt).toISOString().replace('T', ' ').replace('Z', ''),
+    ip: data.ip ?? null,
+    user_agent: data.userAgent ?? null,
+    link_url: data.linkUrl ?? null,
+    raw_meta: data.rawMeta ? JSON.stringify(data.rawMeta) : null,
+    bounce_kind: data.bounceKind ?? '',
+  });
+
+  if (buffer.length >= FLUSH_BATCH) {
+    await flush();
+  } else {
+    scheduleFlush();
+  }
+}
+
+new Worker<EventJobData>(QUEUE_NAMES.EVENTS_INGEST, runEventJob, {
+  connection,
+  concurrency: 16,
+});
+
+console.log('worker-events started');
+
+async function shutdown() {
+  console.log('Shutting down worker-events...');
+  await flush();
+  await ch.close();
+  await connection.quit();
+  await prisma.$disconnect();
+  process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

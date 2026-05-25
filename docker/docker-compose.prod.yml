@@ -1,0 +1,234 @@
+name: sendmast
+
+# SendMast production stack — single Ubuntu host, all-in-one Docker.
+#
+# Run from the repo root:
+#   docker compose --env-file .env.production -f docker/docker-compose.prod.yml up -d --build
+#
+# Volumes are bind-mounted under /var/lib/sendmast/* so backups can target
+# stable host paths instead of named volumes. Adjust DATA_ROOT in
+# .env.production if /var/lib isn't where you keep app data.
+#
+# Network model:
+#   - `caddy` is the ONLY service publishing ports (80/443).
+#   - All other services (api, workers, postgres, redis, clickhouse, minio)
+#     stay on the internal compose network — no public exposure, no firewall
+#     pinholes needed beyond 80/443.
+
+services:
+  # ─── Reverse proxy + static SPA + TLS ───────────────────────────────────
+  caddy:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: web
+    image: sendmast/web:latest
+    container_name: sendmast-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production, e.g. sendmast.example.com}
+    volumes:
+      - ${DATA_ROOT:-/var/lib/sendmast}/caddy-data:/data
+      - ${DATA_ROOT:-/var/lib/sendmast}/caddy-config:/config
+      # Cloudflare Origin Cert mount. Both files MUST exist before the
+      # caddy service starts, otherwise it crash-loops on cert load.
+      # See DEPLOY.md §"Cloudflare setup" for how to create them.
+      - ${DATA_ROOT:-/var/lib/sendmast}/caddy-certs:/etc/caddy/certs:ro
+    depends_on:
+      - api
+      - minio
+
+  # ─── API ─────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: api
+    image: sendmast/api:latest
+    container_name: sendmast-api
+    restart: unless-stopped
+    env_file: ../.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ─── Migrator (one-shot, run by scripts/deploy.sh) ──────────────────────
+  # `profiles: ["migrate"]` keeps it out of `docker compose up` and
+  # `compose ps` — only `compose --profile migrate run --rm migrator`
+  # invokes it.
+  migrator:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: migrator
+    image: sendmast/migrator:latest
+    profiles: ["migrate"]
+    env_file: ../.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  # ─── Workers ─────────────────────────────────────────────────────────────
+  worker-sender:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: worker-sender
+    image: sendmast/worker-sender:latest
+    container_name: sendmast-worker-sender
+    restart: unless-stopped
+    env_file: ../.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker-events:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: worker-events
+    image: sendmast/worker-events:latest
+    container_name: sendmast-worker-events
+    restart: unless-stopped
+    env_file: ../.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  worker-import:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: worker-import
+    image: sendmast/worker-import:latest
+    container_name: sendmast-worker-import
+    restart: unless-stopped
+    env_file: ../.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  # ─── Data services ───────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sendmast-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env.production}
+    volumes:
+      - ${DATA_ROOT:-/var/lib/sendmast}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: sendmast-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}"]
+    volumes:
+      - ${DATA_ROOT:-/var/lib/sendmast}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: sendmast-clickhouse
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-sendmast}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env.production}
+    volumes:
+      - ${DATA_ROOT:-/var/lib/sendmast}/clickhouse:/var/lib/clickhouse
+    healthcheck:
+      # Use 127.0.0.1 not localhost: Docker disables IPv6 in the container
+      # by default, so localhost may resolve to ::1 first which CH isn't
+      # listening on, and wget reports "connection refused".
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  minio:
+    image: minio/minio:latest
+    container_name: sendmast-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in .env.production}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set S3_SECRET_KEY in .env.production}
+    volumes:
+      - ${DATA_ROOT:-/var/lib/sendmast}/minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot bucket bootstrap (idempotent). Uses depends_on completion to
+  # gate workers/api implicitly via the order docker-compose starts them.
+  minio-init:
+    image: minio/mc:latest
+    container_name: sendmast-minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${S3_ACCESS_KEY} $${S3_SECRET_KEY};
+      mc mb -p local/$${S3_BUCKET:-sendmast-uploads} || true;
+      mc mb -p local/$${S3_PUBLIC_BUCKET:-sendmast-public} || true;
+      mc anonymous set download local/$${S3_PUBLIC_BUCKET:-sendmast-public} || true;
+      echo 'MinIO buckets ready';
+      "
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET:-sendmast-uploads}
+      S3_PUBLIC_BUCKET: ${S3_PUBLIC_BUCKET:-sendmast-public}
+
+networks:
+  default:
+    name: sendmast-net

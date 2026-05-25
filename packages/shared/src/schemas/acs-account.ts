@@ -1,0 +1,95 @@
+import { z } from 'zod';
+
+export const AcsAccountStatusSchema = z.enum(['active', 'suspended', 'retired']);
+export type AcsAccountStatusValue = z.infer<typeof AcsAccountStatusSchema>;
+
+export const CreateAcsAccountSchema = z.object({
+  name: z.string().min(1).max(120),
+  rpsLimit: z.coerce.number().int().min(1).max(100000),
+  rpmLimit: z.coerce.number().int().min(1).max(10000000),
+  rphLimit: z.coerce.number().int().min(1).max(100000000),
+  rpdLimit: z.coerce.number().int().min(1).max(10000000000),
+  status: AcsAccountStatusSchema.optional(),
+  // Azure ARM credentials so the API can manage domains under this ACS.
+  azureTenantId: z.string().min(1).max(120),
+  azureClientId: z.string().min(1).max(120),
+  azureClientSecret: z.string().min(1).max(2000),
+  azureSubscriptionId: z.string().min(1).max(120),
+  azureResourceGroup: z.string().min(1).max(120),
+  azureEmailServiceName: z.string().min(1).max(120),
+  // Optional for backward-compat with accounts created before this field
+  // existed; required at link-domain time, validated in the service layer.
+  azureCommunicationServiceName: z.string().min(1).max(120).optional().nullable(),
+});
+export type CreateAcsAccountInput = z.infer<typeof CreateAcsAccountSchema>;
+
+export const UpdateAcsAccountSchema = CreateAcsAccountSchema.partial();
+export type UpdateAcsAccountInput = z.infer<typeof UpdateAcsAccountSchema>;
+
+export interface AcsAccountView {
+  id: string;
+  name: string;
+  rpsLimit: number;
+  rpmLimit: number;
+  rphLimit: number;
+  rpdLimit: number;
+  status: AcsAccountStatusValue;
+  azureTenantId: string;
+  azureClientId: string;
+  /** Redacted in list, full in single-get (same convention as connectionString). */
+  azureClientSecret: string;
+  azureSubscriptionId: string;
+  azureResourceGroup: string;
+  azureEmailServiceName: string;
+  azureCommunicationServiceName: string | null;
+  /** Whether this account is the platform-wide default for new signups. */
+  isDefault: boolean;
+  senderDomainCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const AssignDefaultAcsAccountSchema = z.object({
+  acsAccountId: z.string().uuid().nullable(),
+});
+export type AssignDefaultAcsAccountInput = z.infer<typeof AssignDefaultAcsAccountSchema>;
+
+export interface AdminAccountView {
+  id: string;
+  name: string;
+  slug: string;
+  defaultAcsAccount: { id: string; name: string; status: AcsAccountStatusValue } | null;
+  senderDomainCount: number;
+  sendQuotaRemaining: number;
+  status: 'pending_activation' | 'active' | 'suspended';
+  activatedAt: string | null;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+  /** Owner email — shown in the admin table so the operator knows who they're suspending. */
+  ownerEmail: string | null;
+  createdAt: string;
+}
+
+export const SetTenantQuotaSchema = z.object({
+  remaining: z.coerce.number().int().min(0).max(2_000_000_000),
+});
+export type SetTenantQuotaInput = z.infer<typeof SetTenantQuotaSchema>;
+
+export interface TenantQuotaView {
+  remaining: number;
+}
+
+/**
+ * Admin-only state transition. Backend allows:
+ *   pending_activation -> active   (admin "manually activate" override)
+ *   active             -> suspended
+ *   pending_activation -> suspended
+ *   suspended          -> active   (unsuspend; back to fully usable)
+ *   suspended          -> pending_activation  (force re-verify; rare)
+ */
+export const SetAccountStatusSchema = z.object({
+  status: z.enum(['pending_activation', 'active', 'suspended']),
+  /** Optional human-readable reason; required-ish when status=suspended (UI enforces). */
+  reason: z.string().trim().max(200).optional(),
+});
+export type SetAccountStatusInput = z.infer<typeof SetAccountStatusSchema>;

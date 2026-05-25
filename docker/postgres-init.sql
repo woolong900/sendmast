@@ -1,0 +1,6 @@
+CREATE DATABASE sendwalk_shadow OWNER sendwalk;
+
+\c sendwalk;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";

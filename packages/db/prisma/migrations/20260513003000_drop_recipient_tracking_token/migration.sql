@@ -1,0 +1,12 @@
+-- The `tracking_token` column on campaign_recipients was a random per-recipient
+-- string with a UNIQUE index. It turned out to be dead weight — every email
+-- tracking URL is signed via HMAC over recipient.id (see signTrackingToken in
+-- packages/email-tracking), and no code path ever queried by tracking_token.
+--
+-- Removing the column reclaims ~50 bytes/row and — more importantly — drops
+-- one of the four indexes on a table that gets ~3 UPDATEs per row during a
+-- send (status: pending → queued → sending → sent), which is where most of
+-- the write amplification on this table came from.
+ALTER TABLE "campaign_recipients" DROP COLUMN "tracking_token";
+-- Postgres auto-drops the dependent UNIQUE index
+-- (campaign_recipients_tracking_token_key).

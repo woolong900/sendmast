@@ -1,0 +1,28 @@
+# Build artifacts that confuse fresh container builds.
+#
+# The tsbuildinfo files are the critical exclude here: with `incremental:
+# true` in tsconfig.base.json, leaving stale ones in the docker build
+# context makes tsc decide "nothing changed" and silently skip emit,
+# which then breaks downstream packages that import from `./dist`. Symptom
+# is `Cannot find module '@sendmast/clickhouse'` even though the package
+# clearly exists on disk.
+**/node_modules
+**/dist
+**/build
+**/.next
+**/.turbo
+**/coverage
+**/tsconfig.tsbuildinfo
+**/.cache
+
+# VCS / scratch — none of this needs to be in the image.
+.git
+.gitignore
+*.log
+
+# Local-only files that shouldn't end up baked into a prod image.
+.env
+.env.local
+.env.*.local
+密钥*
+edm需求文档.docx

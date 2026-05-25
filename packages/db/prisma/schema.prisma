@@ -1,0 +1,823 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// Identity & Tenancy
+// ============================================================================
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  passwordHash    String    @map("password_hash")
+  displayName     String?   @map("display_name")
+  emailVerified   Boolean   @default(false) @map("email_verified")
+  isPlatformAdmin Boolean   @default(false) @map("is_platform_admin")
+  lastLoginAt     DateTime? @map("last_login_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  memberships             AccountUser[]
+  refreshTokens           RefreshToken[]
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+
+  @@map("users")
+}
+
+/// Single-use, time-bound token a user redeems by clicking the activation
+/// link sent at signup (or via "resend activation"). On redeem we set
+/// `users.emailVerified = true` AND flip `accounts.status` from
+/// `pending_activation` to `active`. Same hash-storage pattern as
+/// PasswordResetToken — token plaintext never lands in the DB.
+model EmailVerificationToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  usedAt      DateTime? @map("used_at")
+  requestedIp String?   @map("requested_ip")
+  requestedUa String?   @map("requested_ua")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("email_verification_tokens")
+}
+
+/// Single-use, time-bound token a user redeems by clicking a link in a
+/// "reset password" email. Stored as SHA-256 hash so a DB leak doesn't
+/// equal account takeover.
+model PasswordResetToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime  @map("expires_at")
+  usedAt      DateTime? @map("used_at")
+  requestedIp String?   @map("requested_ip")
+  requestedUa String?   @map("requested_ua")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("password_reset_tokens")
+}
+
+/// Singleton — only one row exists, primary key is hard-coded to 'singleton'.
+/// Holds the platform-wide SMTP credentials used for sending system emails
+/// (password reset, future welcome / quota-low / etc.). Per the user's
+/// choice, the password is stored as plaintext readable by platform admins.
+model SystemSmtpConfig {
+  id          String   @id @default("singleton")
+  host        String
+  port        Int
+  secure      Boolean  @default(true)
+  username    String
+  password    String
+  fromName    String   @map("from_name")
+  fromAddress String   @map("from_address")
+  replyTo     String?  @map("reply_to")
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("system_smtp_config")
+}
+
+/// Self-service quota top-up: 9-tier pricing table editable in admin UI.
+/// Each row is one purchasable bundle (emails + USD price). Pricing is
+/// USD only — the gateway (currently Shouqianba, fronting Alipay/WeChat)
+/// settles in CNY, so we convert USD→CNY at order creation time using
+/// FxService and snapshot the rate onto the order. `active=false` hides
+/// a tier from buyers without breaking historical orders that reference it.
+model QuotaPricingTier {
+  id        String   @id @default(uuid()) @db.Uuid
+  emails    Int
+  priceUsd  Decimal  @map("price_usd") @db.Decimal(10, 2)
+  active    Boolean  @default(true)
+  sortOrder Int      @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  orders QuotaOrder[]
+
+  @@index([active, sortOrder])
+  @@map("quota_pricing_tiers")
+}
+
+/// Self-service top-up order. State machine: pending → paid (or failed /
+/// cancelled). Crediting `Account.sendQuotaRemaining` happens exactly once
+/// inside the same transaction that flips status → paid in the gateway
+/// notify handler — `provider_order_id` UNIQUE makes the handler idempotent
+/// against retries. `tier_id` is denormalized snapshot only; `emails` /
+/// amounts are also captured at order time so later edits to the tier table
+/// don't rewrite history.
+model QuotaOrder {
+  id              String   @id @default(uuid()) @db.Uuid
+  accountId       String   @map("account_id") @db.Uuid
+  tierId          String?  @map("tier_id") @db.Uuid
+  emails          Int
+  amountUsd       Decimal  @map("amount_usd") @db.Decimal(10, 2)
+  /// CNY actually charged at order creation time. Gateway settles in CNY,
+  /// so this is what the buyer's Alipay/WeChat is billed for.
+  amountCny       Decimal  @map("amount_cny") @db.Decimal(10, 2)
+  /// FX rate used to compute amountCny from amountUsd. Snapshot at order
+  /// time so a later rate change doesn't rewrite history.
+  fxRate          Decimal  @map("fx_rate")    @db.Decimal(12, 6)
+  status          String   @default("pending")
+  /// Which gateway placed this order — `shouqianba` for current orders,
+  /// `alipay` for legacy ones. Default reflects history; new code always
+  /// sets it explicitly.
+  provider        String   @default("alipay")
+  /// Our outgoing reference (Shouqianba calls this `client_sn`, Alipay
+  /// called it `out_trade_no`). UNIQUE so retried notify callbacks land
+  /// on the same row.
+  providerOrderId String   @unique @map("provider_order_id")
+  /// Gateway's internal trade id, returned in the notify body once paid.
+  providerTradeNo String?  @map("provider_trade_no")
+  paidAt          DateTime? @map("paid_at")
+  createdBy       String?  @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  account Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tier    QuotaPricingTier? @relation(fields: [tierId], references: [id], onDelete: SetNull)
+
+  @@index([accountId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@map("quota_orders")
+}
+
+/// FX rate cache (history). Latest row per (base, quote) is the "current"
+/// rate. Rows are inserted, never updated — we want an audit trail so a
+/// disputed order can be reconciled against the rate that was actually
+/// quoted that day. Source `frankfurter` = pulled from api.frankfurter.app
+/// (ECB mid-rate, daily, free, no key); `manual` = admin force-refresh.
+model FxRate {
+  id        String   @id @default(uuid()) @db.Uuid
+  base      String
+  quote     String
+  rate      Decimal  @db.Decimal(12, 6)
+  source    String
+  fetchedAt DateTime @map("fetched_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([base, quote, fetchedAt(sort: Desc)])
+  @@map("fx_rates")
+}
+
+/// Editable email templates for system notifications. The `code` is a fixed
+/// enum coupled to backend code that calls renderTemplate(code, vars) — admin
+/// can edit subject/body but cannot add new codes (that needs a code change).
+/// `variables` is the JSON list of `{{var}}` placeholders the body may use,
+/// shown to the admin in the editor as available substitutions.
+model NotificationTemplate {
+  code        String   @id
+  name        String
+  description String?
+  subject     String
+  bodyHtml    String   @map("body_html") @db.Text
+  variables   Json     @default("[]")
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("notification_templates")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  userAgent String?   @map("user_agent")
+  ip        String?
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Account {
+  id                  String        @id @default(uuid()) @db.Uuid
+  name                String
+  slug                String        @unique
+  planCode            String        @default("free") @map("plan_code")
+  /// Lifecycle state. New tenants land in `pending_activation` until the
+  /// signup user clicks the activation link in their inbox; admin-only flip
+  /// to `suspended` blocks all writes (read still works) until unsuspended.
+  /// Enforcement: AccountWriteGuard interceptor checks suspended; the
+  /// campaign create/start endpoints additionally check active.
+  status              AccountStatus @default(pending_activation)
+  /// Set the moment we flip status -> active. Useful for analytics ("how
+  /// many tenants reach active in <24h"). NULL while pending_activation.
+  activatedAt         DateTime?     @map("activated_at")
+  /// Set when admin moves status to `suspended`; cleared on unsuspend.
+  suspendedAt         DateTime?     @map("suspended_at")
+  /// Free-form admin note shown in the Suspended banner so the tenant
+  /// understands why writes are blocked. Optional.
+  suspendedReason     String?       @map("suspended_reason")
+  defaultAcsAccountId String?       @map("default_acs_account_id") @db.Uuid
+  /// Remaining prepaid send quota. Decremented atomically in runSend on
+  /// every ACS call attempt (success or failure). When it reaches 0, the
+  /// scheduler stops enqueueing for this tenant and any in-flight job
+  /// fails the recipient (and same-campaign pending) with a quota error.
+  /// Top-up is admin-driven via PATCH /api/admin/accounts/:id/quota.
+  sendQuotaRemaining  Int           @default(0) @map("send_quota_remaining")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  members            AccountUser[]
+  senderDomains      SenderDomain[]
+  contactLists       ContactList[]
+  contacts           Contact[]
+  suppressions       SuppressionEntry[]
+  tags               Tag[]
+  templates          EmailTemplate[]
+  campaigns          Campaign[]
+  campaignRecipients CampaignRecipient[]
+  sendLogs           SendLog[]
+  importJobs         ImportJob[]
+  customTags         CustomTag[]
+  segments           Segment[]
+  quotaOrders        QuotaOrder[]
+
+  defaultAcsAccount AcsAccount? @relation("AccountDefaultAcs", fields: [defaultAcsAccountId], references: [id], onDelete: SetNull)
+
+  @@index([defaultAcsAccountId])
+  @@map("accounts")
+}
+
+enum AccountStatus {
+  pending_activation
+  active
+  suspended
+
+  @@map("account_status")
+}
+
+model AccountUser {
+  accountId String   @map("account_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  role      String   @default("owner")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([accountId, userId])
+  @@index([userId])
+  @@map("account_users")
+}
+
+// ============================================================================
+// ACS Accounts (platform-level)
+// ============================================================================
+
+enum AcsAccountStatus {
+  active
+  suspended
+  retired
+
+  @@map("acs_account_status")
+}
+
+model AcsAccount {
+  id                            String           @id @default(uuid()) @db.Uuid
+  name                          String
+  rpsLimit                      Int              @map("rps_limit")
+  rpmLimit                      Int              @map("rpm_limit")
+  rphLimit                      Int              @map("rph_limit")
+  rpdLimit                      Int              @map("rpd_limit")
+  status                        AcsAccountStatus @default(active)
+  // Azure Resource Manager handles for managing domains under this account.
+  // All required to drive the Azure ARM SDK; secret is stored verbatim for
+  // the MVP — production should encrypt at rest.
+  azureTenantId                 String           @map("azure_tenant_id")
+  azureClientId                 String           @map("azure_client_id")
+  azureClientSecret             String           @map("azure_client_secret") @db.Text
+  azureSubscriptionId           String           @map("azure_subscription_id")
+  azureResourceGroup            String           @map("azure_resource_group")
+  azureEmailServiceName         String           @map("azure_email_service_name")
+  // Communication Service resource that verified domains get linked to
+  // (Microsoft.Communication/communicationServices). Different resource type
+  // than EmailService — same RG, but separate name. Required to actually
+  // send mail through the domain. Nullable so existing ACS accounts (created
+  // before this column existed) keep working — they'll be rejected at the
+  // link step until an admin edits and fills it in.
+  azureCommunicationServiceName String?          @map("azure_communication_service_name")
+  /// Platform-wide default. New tenant signups inherit this as their
+  /// defaultAcsAccountId. At most one row may be true at a time — enforced
+  /// by a partial unique index defined in migration SQL (Prisma 5 doesn't
+  /// support partial unique constraints declaratively).
+  isDefault                     Boolean          @default(false) @map("is_default")
+  createdAt                     DateTime         @default(now()) @map("created_at")
+  updatedAt                     DateTime         @updatedAt @map("updated_at")
+
+  senderDomains      SenderDomain[]
+  defaultForAccounts Account[]      @relation("AccountDefaultAcs")
+  sendLogs           SendLog[]
+
+  @@map("acs_accounts")
+}
+
+// ============================================================================
+// Sender Domains
+// ============================================================================
+
+enum SenderDomainStatus {
+  provisioning
+  pending
+  verified
+  failed
+
+  @@map("sender_domain_status")
+}
+
+model SenderDomain {
+  id                  String             @id @default(uuid()) @db.Uuid
+  accountId           String             @map("account_id") @db.Uuid
+  acsAccountId        String             @map("acs_account_id") @db.Uuid
+  domain              String
+  // The five DNS records Azure asks for (Domain, SPF, DKIM, DKIM2, DMARC).
+  // Stored as JSON because the record types are mixed (TXT + CNAME) and the
+  // exact selectors vary per Azure region.
+  verificationRecords Json               @map("verification_records")
+  // Latest verificationStates per record from ACS, refreshed on `verify`.
+  verificationStates  Json?              @map("verification_states")
+  status              SenderDomainStatus @default(pending)
+  lastCheckedAt       DateTime?          @map("last_checked_at")
+  verifiedAt          DateTime?          @map("verified_at")
+  // Set after the domain has been added to the AcsAccount's
+  // CommunicationService.linkedDomains array. Without this, sending from
+  // the domain returns 401 from ACS Email even if DNS is verified.
+  linkedAt            DateTime?          @map("linked_at")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  account         Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  acsAccount      AcsAccount       @relation(fields: [acsAccountId], references: [id], onDelete: Restrict)
+  senderUsernames SenderUsername[]
+
+  @@unique([accountId, domain])
+  @@index([accountId])
+  @@index([acsAccountId])
+  @@map("sender_domains")
+}
+
+model SenderUsername {
+  id              String   @id @default(uuid()) @db.Uuid
+  senderDomainId  String   @map("sender_domain_id") @db.Uuid
+  // Local part only — full address is `${username}@${senderDomain.domain}`.
+  username        String
+  displayName     String?  @map("display_name")
+  // Azure ARM resource id — kept so we can delete by exact id later.
+  azureResourceId String?  @map("azure_resource_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  senderDomain SenderDomain @relation(fields: [senderDomainId], references: [id], onDelete: Cascade)
+
+  @@unique([senderDomainId, username])
+  @@index([senderDomainId])
+  @@map("sender_usernames")
+}
+
+// ============================================================================
+// Contacts & Lists
+// ============================================================================
+
+enum SubscriptionStatus {
+  subscribed
+  unsubscribed
+  bounced
+  complained
+  pending
+
+  @@map("subscription_status")
+}
+
+model ContactList {
+  id          String   @id @default(uuid()) @db.Uuid
+  accountId   String   @map("account_id") @db.Uuid
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  account     Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  memberships ContactListMembership[]
+  campaigns   CampaignList[]
+
+  @@unique([accountId, name])
+  @@index([accountId])
+  @@map("contact_lists")
+}
+
+model Contact {
+  id                 String             @id @default(uuid()) @db.Uuid
+  accountId          String             @map("account_id") @db.Uuid
+  email              String
+  firstName          String?            @map("first_name")
+  lastName           String?            @map("last_name")
+  phone              String?
+  gender             String?
+  country            String?
+  state              String?
+  city               String?
+  zip                String?
+  birthday           DateTime?          @db.Date
+  language           String?
+  subscriptionStatus SubscriptionStatus @default(subscribed) @map("subscription_status")
+  source             String?
+  unsubscribedAt     DateTime?          @map("unsubscribed_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  account     Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  memberships ContactListMembership[]
+  tags        ContactTag[]
+
+  @@unique([accountId, email])
+  @@index([accountId, subscriptionStatus])
+  // NOTE: no [accountId, email] non-unique index — the @@unique above already
+  // produces a btree on (accountId, email) which PG will use for prefix /
+  // equality lookups. Keeping a duplicate non-unique would just double write
+  // amplification on contact upserts.
+  @@map("contacts")
+}
+
+model ContactListMembership {
+  listId    String   @map("list_id") @db.Uuid
+  contactId String   @map("contact_id") @db.Uuid
+  addedAt   DateTime @default(now()) @map("added_at")
+
+  list    ContactList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contact Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([listId, contactId])
+  @@index([contactId])
+  @@map("contact_list_memberships")
+}
+
+enum SuppressionReason {
+  hard_bounce
+  soft_bounce_threshold
+  complaint
+  unsubscribe
+  manual
+
+  @@map("suppression_reason")
+}
+
+model SuppressionEntry {
+  id        String            @id @default(uuid()) @db.Uuid
+  accountId String            @map("account_id") @db.Uuid
+  email     String
+  reason    SuppressionReason
+  meta      Json?
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, email])
+  @@index([accountId])
+  @@map("suppression_entries")
+}
+
+// ============================================================================
+// Tags
+// ============================================================================
+
+model Tag {
+  id        String   @id @default(uuid()) @db.Uuid
+  accountId String   @map("account_id") @db.Uuid
+  name      String
+  color     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  account  Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  contacts ContactTag[]
+
+  @@unique([accountId, name])
+  @@map("tags")
+}
+
+model ContactTag {
+  tagId     String   @map("tag_id") @db.Uuid
+  contactId String   @map("contact_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@id([tagId, contactId])
+  @@map("contact_tags")
+}
+
+// ============================================================================
+// Custom Tags (per-account placeholders for subject / preheader / body)
+//
+// Users define a tag like `greeting` with N possible values; at send time
+// worker-sender substitutes `{{tag:greeting}}` in the email with one value
+// chosen at random per recipient. See apps/worker-sender/src/custom-tags.ts.
+// ============================================================================
+
+model CustomTag {
+  id        String   @id @default(uuid()) @db.Uuid
+  accountId String   @map("account_id") @db.Uuid
+  /// Token used in placeholders, e.g. {{tag:greeting}}. Lowercase enforced in API layer.
+  name      String
+  /// Array of candidate replacement strings; one is chosen per recipient.
+  values    String[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, name])
+  @@index([accountId])
+  @@map("custom_tags")
+}
+
+// ============================================================================
+// Email Templates
+// ============================================================================
+
+enum TemplateScope {
+  system
+  user
+
+  @@map("template_scope")
+}
+
+model EmailTemplate {
+  id         String        @id @default(uuid()) @db.Uuid
+  accountId  String?       @map("account_id") @db.Uuid
+  scope      TemplateScope @default(user)
+  name       String
+  category   String?
+  thumbnail  String?
+  mjml       String?       @db.Text
+  html       String        @db.Text
+  designJson Json?         @map("design_json")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  account   Account?   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
+
+  @@index([accountId])
+  @@index([scope, category])
+  @@map("email_templates")
+}
+
+// ============================================================================
+// Campaigns
+// ============================================================================
+
+enum CampaignStatus {
+  draft
+  scheduled
+  sending
+  sent
+  paused
+  failed
+  canceled
+
+  @@map("campaign_status")
+}
+
+model Campaign {
+  id               String         @id @default(uuid()) @db.Uuid
+  accountId        String         @map("account_id") @db.Uuid
+  name             String
+  subject          String
+  preheader        String?
+  fromName         String         @map("from_name")
+  fromEmail        String         @map("from_email")
+  replyTo          String?        @map("reply_to")
+  templateId       String?        @map("template_id") @db.Uuid
+  mjml             String?        @db.Text
+  html             String?        @db.Text
+  designJson       Json?          @map("design_json")
+  /// Which editor produced the body. `visual` = Easy Email drag-drop (writes
+  /// designJson + mjml + html); `html` = raw HTML editor (writes html only,
+  /// designJson/mjml stay null). The campaign wizard's step-2 component
+  /// branches on this; switching modes clears all body fields by design so
+  /// we never end up with stale Easy Email state polluting a hand-written
+  /// HTML campaign or vice versa.
+  editorMode       String         @default("visual") @map("editor_mode")
+  // Pre-rendered preview thumbnail (PNG) shipped to the campaign list so the
+  // page doesn't have to ferry the full HTML body and render 50 iframes —
+  // see CampaignListPage. Generated client-side at content-save time and
+  // stored as a public-bucket URL (or path-relative URL in dev).
+  thumbnail        String?
+  status           CampaignStatus @default(draft)
+  scheduledAt      DateTime?      @map("scheduled_at")
+  sendingStartedAt DateTime?      @map("sending_started_at")
+  sentAt           DateTime?      @map("sent_at")
+  totalRecipients  Int            @default(0) @map("total_recipients")
+  utmEnabled       Boolean        @default(true) @map("utm_enabled")
+  utmSource        String?        @map("utm_source")
+  utmMedium        String?        @map("utm_medium")
+  utmCampaign      String?        @map("utm_campaign")
+  trackClicks      Boolean        @default(true) @map("track_clicks")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  account    Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  template   EmailTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  lists      CampaignList[]
+  segments   CampaignSegment[]
+  recipients CampaignRecipient[]
+  sendLogs   SendLog[]
+
+  @@index([accountId, status])
+  @@index([accountId, createdAt])
+  @@index([status])
+  @@map("campaigns")
+}
+
+model CampaignList {
+  campaignId String @map("campaign_id") @db.Uuid
+  listId     String @map("list_id") @db.Uuid
+
+  campaign Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  list     ContactList @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, listId])
+  @@map("campaign_lists")
+}
+
+/// Saved dynamic audience. `definition` is a versioned JSON tree validated
+/// against the SegmentDefinitionSchema in @sendmast/shared. `cachedCount`
+/// + `cachedAt` are display-only optimisations refreshed by /refresh or
+/// /preview; the campaign send path always re-evaluates from scratch so
+/// stale caches can never cause wrong-audience sends.
+model Segment {
+  id          String    @id @default(uuid()) @db.Uuid
+  accountId   String    @map("account_id") @db.Uuid
+  name        String
+  description String?
+  definition  Json
+  cachedCount Int?      @map("cached_count")
+  cachedAt    DateTime? @map("cached_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  account   Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  campaigns CampaignSegment[]
+
+  @@unique([accountId, name])
+  @@index([accountId, createdAt])
+  @@map("segments")
+}
+
+model CampaignSegment {
+  campaignId String @map("campaign_id") @db.Uuid
+  segmentId  String @map("segment_id") @db.Uuid
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  segment  Segment  @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, segmentId])
+  @@map("campaign_segments")
+}
+
+enum RecipientStatus {
+  pending
+  queued
+  sent
+  failed
+  skipped
+
+  @@map("recipient_status")
+}
+
+/// Marker table — one row per campaign whose recipient detail has been
+/// moved out of `campaign_recipients` into ClickHouse. The archive job
+/// uses this as a "do not re-archive" guard, and the read API consults
+/// it to decide whether to query PG or CH for a campaign's recipients.
+model CampaignArchiveState {
+  campaignId     String   @id @map("campaign_id") @db.Uuid
+  archivedAt     DateTime @default(now()) @map("archived_at")
+  recipientCount Int      @map("recipient_count")
+
+  @@map("campaign_archive_state")
+}
+
+model CampaignRecipient {
+  id           String          @id @default(uuid()) @db.Uuid
+  accountId    String          @map("account_id") @db.Uuid
+  campaignId   String          @map("campaign_id") @db.Uuid
+  contactId    String          @map("contact_id") @db.Uuid
+  email        String
+  status       RecipientStatus @default(pending)
+  messageId    String?         @map("message_id")
+  errorMessage String?         @map("error_message")
+  sentAt       DateTime?       @map("sent_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  campaign Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sendLogs SendLog[]
+
+  @@unique([campaignId, contactId])
+  @@index([campaignId, status])
+  @@index([accountId, status])
+  @@map("campaign_recipients")
+}
+
+// ============================================================================
+// Send Logs
+// ============================================================================
+
+/// One row per ACS send attempt. Append-only; multiple rows per recipient
+/// allowed (future retries). Pre-flight failures (no html / suspended account
+/// / transport build failure) are NOT logged here — those never reach ACS.
+model SendLog {
+  id           String  @id @default(uuid()) @db.Uuid
+  accountId    String  @map("account_id") @db.Uuid // tenant
+  acsAccountId String? @map("acs_account_id") @db.Uuid // SetNull on ACS account delete to retain history
+  campaignId   String  @map("campaign_id") @db.Uuid
+  recipientId  String  @map("recipient_id") @db.Uuid
+
+  fromAddress String  @map("from_address")
+  fromName    String? @map("from_name")
+  toAddress   String  @map("to_address")
+
+  ok              Boolean
+  /// ACS LRO terminal status (Succeeded / Failed / Canceled) or `Http<code>` / `Error`
+  /// when the SDK threw before reaching a terminal LRO state.
+  providerStatus  String?  @map("provider_status")
+  messageId       String?  @map("message_id")
+  errorCode       String?  @map("error_code")
+  errorMessage    String?  @map("error_message") @db.Text
+  latencyMs       Int?     @map("latency_ms")
+  /// Raw ACS response body (success: minimal; failure: cherry-picked RestError).
+  /// Request body is intentionally NOT stored — it's large and the campaign
+  /// row already carries fromEmail / subject / html.
+  responsePayload Json?    @map("response_payload")
+  sentAt          DateTime @default(now()) @map("sent_at")
+
+  account    Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  acsAccount AcsAccount?       @relation(fields: [acsAccountId], references: [id], onDelete: SetNull)
+  campaign   Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipient  CampaignRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, sentAt])
+  @@index([recipientId, sentAt])
+  @@index([acsAccountId, ok, sentAt])
+  @@index([accountId, sentAt])
+  @@map("send_logs")
+}
+
+// ============================================================================
+// Import Jobs
+// ============================================================================
+
+enum ImportStatus {
+  pending
+  processing
+  completed
+  failed
+
+  @@map("import_status")
+}
+
+model ImportJob {
+  id            String       @id @default(uuid()) @db.Uuid
+  accountId     String       @map("account_id") @db.Uuid
+  listId        String?      @map("list_id") @db.Uuid
+  filename      String
+  storageKey    String       @map("storage_key")
+  status        ImportStatus @default(pending)
+  totalRows     Int?         @map("total_rows")
+  processedRows Int          @default(0) @map("processed_rows")
+  insertedRows  Int          @default(0) @map("inserted_rows")
+  updatedRows   Int          @default(0) @map("updated_rows")
+  skippedRows   Int          @default(0) @map("skipped_rows")
+  errorMessage  String?      @map("error_message")
+  startedAt     DateTime?    @map("started_at")
+  finishedAt    DateTime?    @map("finished_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status])
+  @@map("import_jobs")
+}

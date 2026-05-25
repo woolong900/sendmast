@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SendMast — 企业级邮件营销自动化平台</title>
+  <meta name="description" content="SendMast 是面向出海与本土 SaaS 的企业级邮件营销平台。一套系统完成联系人管理、智能分群、可视化设计、多通道发送、实时分析,支持私有化部署。" />
+  <meta name="theme-color" content="#4f46e5" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta property="og:title" content="SendMast — 企业级邮件营销自动化平台" />
+  <meta property="og:description" content="联系人 · 智能分群 · 可视化设计 · 多通道发送 · 实时分析 —— 出海与本土 SaaS 的全链路选择。" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://sendmast.com" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50:  '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              800: '#3730a3',
+            },
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    html { scroll-behavior: smooth; }
+    body { font-feature-settings: "ss01", "cv11"; }
+    .bg-hero {
+      background:
+        radial-gradient(60% 80% at 75% 0%, rgba(124, 58, 237, 0.18) 0%, rgba(124, 58, 237, 0) 60%),
+        radial-gradient(40% 60% at 0% 100%, rgba(79, 70, 229, 0.18) 0%, rgba(79, 70, 229, 0) 60%),
+        linear-gradient(180deg, #ffffff 0%, #f9fafb 100%);
+    }
+    .bg-cta {
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    }
+    .grid-bg {
+      background-image:
+        linear-gradient(to right, rgba(79, 70, 229, 0.06) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(79, 70, 229, 0.06) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
+      -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
+    }
+  </style>
+</head>
+<body class="font-sans text-gray-900 antialiased">
+
+  <!-- ─── Top nav ──────────────────────────────────────────────────────────── -->
+  <header class="sticky top-0 z-50 backdrop-blur bg-white/80 border-b border-gray-200/70">
+    <nav class="mx-auto max-w-7xl px-6 lg:px-8 h-16 flex items-center justify-between">
+      <a href="#" class="flex items-center gap-2 group">
+        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 group-hover:bg-brand-700 transition">
+          <svg viewBox="0 0 24 24" class="h-5 w-5 text-white" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs>
+              <mask id="sm-nav-mask">
+                <rect width="24" height="24" fill="white" />
+                <path d="M8.5 7.5 L14 12 L8.5 16.5" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+              </mask>
+            </defs>
+            <path d="M6.5 3 V21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+            <path d="M7 4 Q 19 7 21 12 Q 19 17 7 20 Z" fill="currentColor" mask="url(#sm-nav-mask)" />
+          </svg>
+        </span>
+        <span class="text-lg font-bold tracking-tight">SendMast</span>
+      </a>
+      <div class="hidden md:flex items-center gap-8 text-sm font-medium text-gray-600">
+        <a href="#features" class="hover:text-gray-900 transition">功能</a>
+        <a href="#audience" class="hover:text-gray-900 transition">谁适合</a>
+        <a href="#tech" class="hover:text-gray-900 transition">技术与合规</a>
+        <a href="#contact" class="hover:text-gray-900 transition">联系</a>
+      </div>
+      <div class="flex items-center gap-3">
+        <a href="https://app.sendmast.com" class="hidden sm:inline-flex text-sm font-medium text-gray-700 hover:text-gray-900 transition">登录</a>
+        <a href="https://app.sendmast.com" class="inline-flex items-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 transition">
+          免费试用
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <!-- ─── Hero ────────────────────────────────────────────────────────────── -->
+  <section class="bg-hero relative overflow-hidden">
+    <div class="absolute inset-0 grid-bg pointer-events-none"></div>
+    <div class="relative mx-auto max-w-7xl px-6 lg:px-8 pt-20 pb-24 lg:pt-28 lg:pb-32">
+      <div class="max-w-3xl">
+        <span class="inline-flex items-center gap-2 rounded-full bg-brand-50 border border-brand-100 px-3 py-1 text-xs font-semibold text-brand-700">
+          <span class="h-1.5 w-1.5 rounded-full bg-brand-600 animate-pulse"></span>
+          企业级邮件营销自动化平台
+        </span>
+        <h1 class="mt-6 text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-gray-900 leading-[1.1]">
+          一套系统,
+          <br class="hidden sm:block" />
+          把邮件营销做成<span class="text-brand-600">增长引擎</span>
+        </h1>
+        <p class="mt-6 text-lg sm:text-xl text-gray-600 leading-relaxed max-w-2xl">
+          联系人 · 智能分群 · 可视化设计 · 多通道发送 · 实时分析 ——
+          覆盖出海与本土 SaaS 的全链路邮件营销平台,对标 <span class="font-semibold text-gray-900">Mailchimp · Klaviyo · Omnisend</span>,原生支持多 ESP 切换与私有化部署。
+        </p>
+        <div class="mt-10 flex flex-wrap items-center gap-4">
+          <a href="https://app.sendmast.com" class="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-brand-700 transition">
+            立即免费试用
+            <svg viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4"><path d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"/></svg>
+          </a>
+          <a href="#contact" class="inline-flex items-center gap-2 rounded-lg bg-white border border-gray-300 px-6 py-3 text-base font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition">
+            联系我们
+          </a>
+        </div>
+        <div class="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-gray-500">
+          <span class="inline-flex items-center gap-1.5">
+            <svg viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 text-emerald-500"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            多 ESP 通道(Azure ACS / SendGrid / SES)
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <svg viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 text-emerald-500"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            完整中文化
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <svg viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 text-emerald-500"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            私有化部署友好
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Pain points ────────────────────────────────────────────────────── -->
+  <section class="py-20 lg:py-24 bg-white">
+    <div class="mx-auto max-w-7xl px-6 lg:px-8">
+      <div class="max-w-2xl">
+        <h2 class="text-sm font-semibold text-brand-600 uppercase tracking-wide">为什么是 SendMast</h2>
+        <p class="mt-3 text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">我们解决三个真实存在的问题</p>
+      </div>
+      <div class="mt-14 grid gap-8 lg:grid-cols-3">
+        <div class="rounded-2xl border border-gray-200 p-8 hover:border-brand-200 hover:shadow-md transition">
+          <div class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 font-bold">01</div>
+          <h3 class="mt-5 text-lg font-semibold text-gray-900">工具碎片化</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">营销邮件、交易邮件、分群、追踪、合规 —— 用 5 个工具拼出来,数据对不上、出问题没人管。</p>
+        </div>
+        <div class="rounded-2xl border border-gray-200 p-8 hover:border-brand-200 hover:shadow-md transition">
+          <div class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 font-bold">02</div>
+          <h3 class="mt-5 text-lg font-semibold text-gray-900">出海找不到稳定的多通道方案</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">单一 ESP 有黑名单与投递率风险,但同时维护多家 ESP 的接入、切换、计量极其费工。</p>
+        </div>
+        <div class="rounded-2xl border border-gray-200 p-8 hover:border-brand-200 hover:shadow-md transition">
+          <div class="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600 font-bold">03</div>
+          <h3 class="mt-5 text-lg font-semibold text-gray-900">数据看板与营销动作脱节</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">打开率好看,但下一步该给谁发什么 —— 看板说不清,运营要靠拍脑袋。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Features grid ──────────────────────────────────────────────────── -->
+  <section id="features" class="py-20 lg:py-24 bg-gray-50">
+    <div class="mx-auto max-w-7xl px-6 lg:px-8">
+      <div class="max-w-2xl">
+        <h2 class="text-sm font-semibold text-brand-600 uppercase tracking-wide">核心能力</h2>
+        <p class="mt-3 text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">六大模块,串起完整营销链路</p>
+        <p class="mt-4 text-lg text-gray-600">从联系人入库到效果归因,所有环节在一个平台里完成。</p>
+      </div>
+
+      <div class="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <!-- Card 1 -->
+        <div class="group rounded-2xl bg-white p-7 ring-1 ring-gray-200 hover:ring-brand-300 hover:shadow-lg transition">
+          <div class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 group-hover:bg-brand-600 group-hover:text-white transition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <h3 class="mt-5 text-lg font-semibold text-gray-900">联系人 & 名单</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">多租户、多名单、订阅状态全生命周期管理,CSV 异步导入,自动黑名单(Suppression List)。</p>
+        </div>
+        <!-- Card 2 -->
+        <div class="group rounded-2xl bg-white p-7 ring-1 ring-gray-200 hover:ring-brand-300 hover:shadow-lg transition">
+          <div class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 group-hover:bg-brand-600 group-hover:text-white transition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+          </div>
+          <h3 class="mt-5 text-lg font-semibold text-gray-900">动态分群</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">属性 / 行为 / 活动多维条件 AND/OR 自由组合,成员实时计算,无需手动刷新。</p>
+        </div>
+        <!-- Card 3 -->
+        <div class="group rounded-2xl bg-white p-7 ring-1 ring-gray-200 hover:ring-brand-300 hover:shadow-lg transition">
+          <div class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 group-hover:bg-brand-600 group-hover:text-white transition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+          </div>
+          <h3 class="mt-5 text-lg font-semibold text-gray-900">邮件设计器</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">基于 Easy Email 引擎,完整中文化,拖拽式可视化编辑,变量插入与退订自动注入。</p>
+        </div>
+        <!-- Card 4 -->
+        <div class="group rounded-2xl bg-white p-7 ring-1 ring-gray-200 hover:ring-brand-300 hover:shadow-lg transition">
+          <div class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 group-hover:bg-brand-600 group-hover:text-white transition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+          <h3 class="mt-5 text-lg font-semibold text-gray-900">营销活动</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">立即 / 定时 / A/B 主题测试,审核与发送进度可见,十万联系人点击发送 &lt; 1 秒响应。</p>
+        </div>
+        <!-- Card 5 -->
+        <div class="group rounded-2xl bg-white p-7 ring-1 ring-gray-200 hover:ring-brand-300 hover:shadow-lg transition">
+          <div class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 group-hover:bg-brand-600 group-hover:text-white transition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </div>
+          <h3 class="mt-5 text-lg font-semibold text-gray-900">实时追踪与分析</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">投递 / 打开 / 点击 / 退订 / 退信全维度,ClickHouse 列式存储,百万级事件 5 秒延迟内可查。</p>
+        </div>
+        <!-- Card 6 -->
+        <div class="group rounded-2xl bg-white p-7 ring-1 ring-gray-200 hover:ring-brand-300 hover:shadow-lg transition">
+          <div class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 group-hover:bg-brand-600 group-hover:text-white transition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-6 w-6" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+          </div>
+          <h3 class="mt-5 text-lg font-semibold text-gray-900">多通道发送</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">Azure ACS / SendGrid / AWS SES 多 ESP 接入与切换,签名域校验、退订合规、按域名路由。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Stats strip ────────────────────────────────────────────────────── -->
+  <section class="py-16 bg-white border-y border-gray-100">
+    <div class="mx-auto max-w-7xl px-6 lg:px-8">
+      <div class="grid gap-10 grid-cols-2 lg:grid-cols-4 text-center">
+        <div>
+          <div class="text-4xl font-extrabold text-brand-600">1000 万+</div>
+          <div class="mt-1 text-sm text-gray-500">单机日发邮件能力</div>
+        </div>
+        <div>
+          <div class="text-4xl font-extrabold text-brand-600">&lt; 5 s</div>
+          <div class="mt-1 text-sm text-gray-500">事件流端到端延迟</div>
+        </div>
+        <div>
+          <div class="text-4xl font-extrabold text-brand-600">10+</div>
+          <div class="mt-1 text-sm text-gray-500">主流 ESP 通道支持</div>
+        </div>
+        <div>
+          <div class="text-4xl font-extrabold text-brand-600">100%</div>
+          <div class="mt-1 text-sm text-gray-500">中文化 + 私有化可选</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Audience ───────────────────────────────────────────────────────── -->
+  <section id="audience" class="py-20 lg:py-24 bg-gray-50">
+    <div class="mx-auto max-w-7xl px-6 lg:px-8">
+      <div class="max-w-2xl">
+        <h2 class="text-sm font-semibold text-brand-600 uppercase tracking-wide">谁适合用 SendMast</h2>
+        <p class="mt-3 text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">从一人增长团队到企业私有化</p>
+      </div>
+      <div class="mt-14 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div class="rounded-2xl bg-white p-7 ring-1 ring-gray-200">
+          <h3 class="text-lg font-semibold text-gray-900">出海 SaaS</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">一套系统覆盖中欧美用户的活动通知、激活、续费提醒,多 ESP 应对各地投递差异。</p>
+        </div>
+        <div class="rounded-2xl bg-white p-7 ring-1 ring-gray-200">
+          <h3 class="text-lg font-semibold text-gray-900">跨境电商</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">弃单挽回、复购促销、客户分群运营,行为条件 + A/B 主题让转化看得见。</p>
+        </div>
+        <div class="rounded-2xl bg-white p-7 ring-1 ring-gray-200">
+          <h3 class="text-lg font-semibold text-gray-900">内容订阅 / 媒体</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">Newsletter、社群运营、付费会员通知,设计器拖拽即所得,十分钟一封新刊物。</p>
+        </div>
+        <div class="rounded-2xl bg-white p-7 ring-1 ring-gray-200">
+          <h3 class="text-lg font-semibold text-gray-900">私有化客户</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">金融 / 制造 / 政企客户,数据需驻留自有机房,Docker 一键部署、Cloudflare 友好。</p>
+        </div>
+        <div class="rounded-2xl bg-white p-7 ring-1 ring-gray-200">
+          <h3 class="text-lg font-semibold text-gray-900">MarTech ISV</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">在 SendMast 之上做行业化增值,多租户隔离、API 友好,适合二次开发与白标。</p>
+        </div>
+        <div class="rounded-2xl bg-white p-7 ring-1 ring-gray-200">
+          <h3 class="text-lg font-semibold text-gray-900">独立产品 / 个人开发者</h3>
+          <p class="mt-2 text-gray-600 leading-relaxed">从注册激活到付费唤醒,免去自建邮件基建,小团队也能用上企业级营销栈。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Tech & security ────────────────────────────────────────────────── -->
+  <section id="tech" class="py-20 lg:py-24 bg-white">
+    <div class="mx-auto max-w-7xl px-6 lg:px-8 grid lg:grid-cols-2 gap-12 lg:gap-16 items-start">
+      <div>
+        <h2 class="text-sm font-semibold text-brand-600 uppercase tracking-wide">技术与架构</h2>
+        <p class="mt-3 text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">现代化全栈,工程化交付</p>
+        <p class="mt-4 text-lg text-gray-600 leading-relaxed">为可扩展、可观测、可私有化而设计的技术栈,数据自托管,worker 进程独立伸缩。</p>
+        <ul class="mt-8 space-y-3 text-gray-700">
+          <li class="flex items-start gap-3">
+            <svg viewBox="0 0 20 20" fill="currentColor" class="mt-1 h-4 w-4 text-brand-600 shrink-0"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span><span class="font-semibold text-gray-900">前端</span> — React + Vite + Tailwind + Arco Design</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg viewBox="0 0 20 20" fill="currentColor" class="mt-1 h-4 w-4 text-brand-600 shrink-0"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span><span class="font-semibold text-gray-900">后端</span> — NestJS + Prisma + PostgreSQL,业务侧强一致</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg viewBox="0 0 20 20" fill="currentColor" class="mt-1 h-4 w-4 text-brand-600 shrink-0"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span><span class="font-semibold text-gray-900">分析</span> — ClickHouse 列式存储,百万行秒级聚合</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg viewBox="0 0 20 20" fill="currentColor" class="mt-1 h-4 w-4 text-brand-600 shrink-0"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span><span class="font-semibold text-gray-900">队列</span> — BullMQ + Redis,异步任务、限速、重试一应俱全</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg viewBox="0 0 20 20" fill="currentColor" class="mt-1 h-4 w-4 text-brand-600 shrink-0"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+            <span><span class="font-semibold text-gray-900">存储与代理</span> — S3 兼容(MinIO / OSS),Caddy 自动 TLS</span>
+          </li>
+        </ul>
+      </div>
+      <div class="rounded-2xl bg-gradient-to-br from-brand-50 to-white p-8 ring-1 ring-brand-100">
+        <h3 class="text-xl font-semibold text-gray-900">安全与合规</h3>
+        <p class="mt-2 text-gray-600">面向严肃业务场景的默认能力。</p>
+        <dl class="mt-6 space-y-5">
+          <div class="flex gap-4">
+            <dt class="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-brand-600 ring-1 ring-brand-100">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </dt>
+            <dd>
+              <div class="font-semibold text-gray-900">多租户数据隔离</div>
+              <div class="text-sm text-gray-600">行级权限,租户间不可越权访问。</div>
+            </dd>
+          </div>
+          <div class="flex gap-4">
+            <dt class="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-brand-600 ring-1 ring-brand-100">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5"><rect x="3" y="11" width="18" height="11" rx="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 11V7a5 5 0 0 1 10 0v4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </dt>
+            <dd>
+              <div class="font-semibold text-gray-900">认证授权</div>
+              <div class="text-sm text-gray-600">JWT + 刷新令牌,角色与权限可配置。</div>
+            </dd>
+          </div>
+          <div class="flex gap-4">
+            <dt class="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-brand-600 ring-1 ring-brand-100">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22 4 12 14.01 9 11.01" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </dt>
+            <dd>
+              <div class="font-semibold text-gray-900">退订合规</div>
+              <div class="text-sm text-gray-600">RFC 8058 一键退订,自动 footer 注入。</div>
+            </dd>
+          </div>
+          <div class="flex gap-4">
+            <dt class="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white text-brand-600 ring-1 ring-brand-100">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5"><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </dt>
+            <dd>
+              <div class="font-semibold text-gray-900">数据驻留</div>
+              <div class="text-sm text-gray-600">支持自托管,数据不出企业。</div>
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Final CTA ──────────────────────────────────────────────────────── -->
+  <section id="contact" class="bg-cta">
+    <div class="mx-auto max-w-7xl px-6 lg:px-8 py-20 lg:py-24 text-center">
+      <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+        准备好换掉拼凑的邮件营销栈了吗?
+      </h2>
+      <p class="mt-4 text-lg text-white/90 max-w-2xl mx-auto">
+        创建账号、导入联系人、发出第一封活动邮件 —— 全流程不到 10 分钟。
+      </p>
+      <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
+        <a href="https://app.sendmast.com" class="inline-flex items-center gap-2 rounded-lg bg-white px-7 py-3.5 text-base font-semibold text-brand-700 shadow-sm hover:bg-gray-100 transition">
+          立即免费试用
+          <svg viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4"><path d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z"/></svg>
+        </a>
+        <a href="mailto:hello@sendmast.com" class="inline-flex items-center gap-2 rounded-lg bg-white/10 ring-1 ring-white/30 px-7 py-3.5 text-base font-semibold text-white hover:bg-white/20 transition">
+          联系销售 · hello@sendmast.com
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── Footer ─────────────────────────────────────────────────────────── -->
+  <footer class="bg-gray-900 text-gray-400">
+    <div class="mx-auto max-w-7xl px-6 lg:px-8 py-12 grid gap-10 md:grid-cols-4">
+      <div class="md:col-span-2">
+        <div class="flex items-center gap-2 text-white">
+          <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600">
+            <svg viewBox="0 0 24 24" class="h-5 w-5 text-white" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <defs>
+                <mask id="sm-footer-mask">
+                  <rect width="24" height="24" fill="white" />
+                  <path d="M8.5 7.5 L14 12 L8.5 16.5" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+                </mask>
+              </defs>
+              <path d="M6.5 3 V21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+              <path d="M7 4 Q 19 7 21 12 Q 19 17 7 20 Z" fill="currentColor" mask="url(#sm-footer-mask)" />
+            </svg>
+          </span>
+          <span class="text-lg font-bold">SendMast</span>
+        </div>
+        <p class="mt-4 text-sm leading-relaxed max-w-md">
+          企业级邮件营销自动化平台。一套系统完成联系人、分群、设计、发送、分析全链路,出海与本土 SaaS 的全链路选择。
+        </p>
+      </div>
+      <div>
+        <h4 class="text-white font-semibold text-sm">产品</h4>
+        <ul class="mt-4 space-y-2 text-sm">
+          <li><a href="#features" class="hover:text-white transition">功能</a></li>
+          <li><a href="#audience" class="hover:text-white transition">谁适合</a></li>
+          <li><a href="#tech" class="hover:text-white transition">技术与合规</a></li>
+          <li><a href="https://app.sendmast.com" class="hover:text-white transition">登录 / 注册</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="text-white font-semibold text-sm">联系</h4>
+        <ul class="mt-4 space-y-2 text-sm">
+          <li><a href="mailto:hello@sendmast.com" class="hover:text-white transition">hello@sendmast.com</a></li>
+          <li><a href="https://app.sendmast.com" class="hover:text-white transition">app.sendmast.com</a></li>
+          <li><a href="/terms/" class="hover:text-white transition">服务条款 · Terms</a></li>
+          <li><a href="/privacy/" class="hover:text-white transition">隐私政策 · Privacy</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="border-t border-gray-800">
+      <div class="mx-auto max-w-7xl px-6 lg:px-8 py-6 flex flex-wrap items-center justify-between text-xs text-gray-500">
+        <span>© <span id="year"></span> Shenzhen Chengjing Technology Co., Ltd. (深圳市诚璟科技有限公司). All rights reserved.</span>
+        <span>
+          <a href="/terms/" class="hover:text-gray-300">Terms</a> ·
+          <a href="/privacy/" class="hover:text-gray-300">Privacy</a>
+        </span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>

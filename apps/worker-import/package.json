@@ -1,0 +1,27 @@
+{
+  "name": "@sendmast/worker-import",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "dotenv -e ../../.env -- tsx watch src/main.ts",
+    "start": "dotenv -e ../../.env -- node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit --tsBuildInfoFile node_modules/.cache/.tsbuildinfo"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.685.0",
+    "@prisma/client": "^5.22.0",
+    "@sendmast/db": "workspace:*",
+    "@sendmast/shared": "workspace:*",
+    "bullmq": "^5.21.2",
+    "csv-parse": "^5.5.6",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "dotenv-cli": "^7.4.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.4"
+  }
+}
