@@ -13,7 +13,14 @@ coverage
 .env
 .env.local
 .env.*.local
+.env.production
 !.env.example
+!.env.production.test
+# Vendor secret bundles (Alipay / Shouqianba / etc.) — drop the whole folder
+# in repo root and have git ignore it so we never accidentally commit private
+# keys. The folder name pattern matches "密钥<timestamp>".
+密钥*/
+密钥*.txt
 
 .DS_Store
 Thumbs.db
