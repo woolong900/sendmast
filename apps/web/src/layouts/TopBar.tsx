@@ -106,7 +106,12 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {
         </button>
 
         {menuOpen && (
-          <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-md border bg-popover py-1 shadow-md">
+          // Right-align + min-width: on phones the trigger collapses to just
+          // avatar+chevron (~50px), and `left-0 right-0` would force the
+          // dropdown to that width, stacking Chinese characters vertically
+          // (see screenshot from 2026-05-26). Anchoring to the right edge
+          // lets the menu grow leftward into the page instead.
+          <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
             <MenuItem
               icon={<KeyRound className="size-4" />}
               label="修改密码"
