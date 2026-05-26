@@ -6,12 +6,17 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { AuthService } from '../auth/auth.service';
+import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlatformAdminGuard } from '../auth/platform-admin.guard';
+import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   AssignDefaultAcsAccountSchema,
@@ -130,6 +135,28 @@ export class AccountAdminController {
     return { ok: true, remaining: r.data.remaining };
   }
 
+  /**
+   * "代登录" — mint a fresh JWT pair that puts the calling Platform Admin
+   * inside the target tenant's workspace. All existing tenant-scoped routes
+   * (campaigns / contacts / segments / templates / sender-domains / orders /
+   * custom-tags / …) Just Work because they resolve `accountId` from
+   * `req.user.accountId`. The frontend swaps tokens, refetches `/auth/me`,
+   * and the new payload's `impersonation` field triggers the yellow banner.
+   */
+  @Post(':id/impersonate')
+  async impersonate(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    return this.auth.impersonate(
+      user.userId,
+      id,
+      req.headers['user-agent'],
+      requestIp(req),
+    );
+  }
+
   @Patch(':id/default-acs-account')
   async assignDefault(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
     const r = AssignDefaultAcsAccountSchema.safeParse(body);
@@ -152,4 +179,9 @@ export class AccountAdminController {
     });
     return { ok: true };
   }
+}
+
+function requestIp(req: Request): string | undefined {
+  const xff = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
+  return xff || req.ip;
 }

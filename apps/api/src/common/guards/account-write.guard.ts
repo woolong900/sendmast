@@ -42,7 +42,10 @@ export class AccountWriteInterceptor implements NestInterceptor {
     const method = req.method.toUpperCase();
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
       const user = req.user as AuthenticatedUser | undefined;
-      if (user?.accountId && !WRITE_WHITELIST.has(req.path)) {
+      // Platform Admins acting via "代登录" must keep write access even when
+      // the target tenant is suspended — that's literally the workflow for
+      // fixing data on a frozen account before lifting the suspension.
+      if (user?.accountId && !user.impersonatedBy && !WRITE_WHITELIST.has(req.path)) {
         await this.auth.assertWritable(user.accountId);
       }
     }

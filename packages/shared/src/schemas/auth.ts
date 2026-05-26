@@ -62,6 +62,19 @@ export interface MeResponse {
     /** Filled when status === 'suspended', shown in the suspended banner. */
     suspendedReason: string | null;
   };
+  /**
+   * Present only while a Platform Admin is acting "as" another tenant via the
+   * impersonation flow. `originalUser` identifies the admin so the UI can
+   * render the yellow banner ("代登录中：X | 退出代登录") and so the backend
+   * can audit-trace mutations back to the human who initiated them.
+   */
+  impersonation?: {
+    originalUser: {
+      id: string;
+      email: string;
+      displayName: string | null;
+    };
+  } | null;
 }
 
 export const ChangePasswordSchema = z.object({

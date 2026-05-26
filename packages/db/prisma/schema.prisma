@@ -238,6 +238,14 @@ model RefreshToken {
   expiresAt DateTime  @map("expires_at")
   revokedAt DateTime? @map("revoked_at")
   createdAt DateTime  @default(now()) @map("created_at")
+  /// Workspace this token's access tokens grant. Nullable for legacy rows
+  /// issued before the impersonation feature — refresh falls back to the
+  /// user's first AccountUser membership in that case.
+  accountId String?   @map("account_id") @db.Uuid
+  /// Set when a Platform Admin used this session to "代登录" another tenant.
+  /// Stores the admin's own user id so refresh keeps the impersonation
+  /// context alive across access-token rotations and the UI banner.
+  impersonatedBy String? @map("impersonated_by") @db.Uuid
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

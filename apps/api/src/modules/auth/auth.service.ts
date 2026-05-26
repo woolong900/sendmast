@@ -5,6 +5,7 @@ import {
   ConflictException,
   BadRequestException,
   ForbiddenException,
+  NotFoundException,
   Logger,
   forwardRef,
 } from '@nestjs/common';
@@ -174,7 +175,7 @@ export class AuthService {
       this.logger.error(`Activation mail to ${user.email} failed at signup: ${msg}`);
     });
 
-    return this.issueTokens(user.id, account.id, user.isPlatformAdmin, ua, ip);
+    return this.issueTokens(user.id, account.id, user.isPlatformAdmin, ua, ip, null);
   }
 
   /**
@@ -354,7 +355,7 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
-    return this.issueTokens(user.id, accountId, user.isPlatformAdmin, ua, ip);
+    return this.issueTokens(user.id, accountId, user.isPlatformAdmin, ua, ip, null);
   }
 
   async refresh(refreshToken: string, ua?: string, ip?: string): Promise<AuthTokens> {
@@ -375,9 +376,20 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
 
-    const accountId = stored.user.memberships[0]?.accountId;
+    // Carry impersonation context across rotation: if this refresh row was
+    // minted via "代登录", the new pair stays in the same target tenant.
+    // accountId on the row may be NULL for tokens issued before this feature
+    // shipped — fall back to the user's first membership in that case.
+    const accountId = stored.accountId ?? stored.user.memberships[0]?.accountId;
     if (!accountId) throw new UnauthorizedException('该账号未关联任何工作区');
-    return this.issueTokens(stored.userId, accountId, stored.user.isPlatformAdmin, ua, ip);
+    return this.issueTokens(
+      stored.userId,
+      accountId,
+      stored.user.isPlatformAdmin,
+      ua,
+      ip,
+      stored.impersonatedBy,
+    );
   }
 
   async logout(refreshToken: string): Promise<void> {
@@ -519,9 +531,51 @@ export class AuthService {
     ]);
   }
 
-  async me(userId: string, accountId: string): Promise<MeResponse> {
+  async me(
+    userId: string,
+    accountId: string,
+    impersonatedBy: string | null = null,
+  ): Promise<MeResponse> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException();
+
+    // Impersonation path: admin acts as a member of an account they don't own.
+    // Skip the AccountUser check (they're not a member) and load the target
+    // account directly. Surface the original admin so the UI can render the
+    // "代登录中" banner and offer a one-click way back.
+    if (impersonatedBy) {
+      if (!user.isPlatformAdmin || impersonatedBy !== userId) {
+        // Hardening: the only valid shape is admin-impersonating-as-self.
+        throw new UnauthorizedException();
+      }
+      const account = await this.prisma.account.findUnique({ where: { id: accountId } });
+      if (!account) throw new UnauthorizedException('代登录的工作区不存在');
+      return {
+        user: {
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          isPlatformAdmin: user.isPlatformAdmin,
+          emailVerified: user.emailVerified,
+        },
+        account: {
+          id: account.id,
+          name: account.name,
+          slug: account.slug,
+          role: 'admin',
+          status: account.status,
+          suspendedReason: account.suspendedReason,
+        },
+        impersonation: {
+          originalUser: {
+            id: user.id,
+            email: user.email,
+            displayName: user.displayName,
+          },
+        },
+      };
+    }
+
     const membership = await this.prisma.accountUser.findUnique({
       where: { accountId_userId: { accountId, userId } },
       include: { account: true },
@@ -543,7 +597,61 @@ export class AuthService {
         status: membership.account.status,
         suspendedReason: membership.account.suspendedReason,
       },
+      impersonation: null,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Impersonation (Platform Admin "代登录" any tenant)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Mint a fresh token pair that lets the calling Platform Admin act inside
+   * `targetAccountId` as if they were a member. The token still carries the
+   * admin's own `sub` (so audit/refresh stay tied to the human) but
+   * `accountId` flips to the target and `impersonatedBy` is set so the
+   * frontend can render the banner and downstream code can relax the
+   * suspension gate.
+   */
+  async impersonate(
+    adminUserId: string,
+    targetAccountId: string,
+    ua?: string,
+    ip?: string,
+  ): Promise<AuthTokens> {
+    const admin = await this.prisma.user.findUnique({ where: { id: adminUserId } });
+    if (!admin) throw new UnauthorizedException();
+    if (!admin.isPlatformAdmin) throw new ForbiddenException('需要平台管理员权限');
+
+    const target = await this.prisma.account.findUnique({
+      where: { id: targetAccountId },
+      select: { id: true },
+    });
+    if (!target) throw new NotFoundException('目标工作区不存在');
+
+    this.logger.log(
+      `Impersonation start: admin=${admin.email} (${admin.id}) -> account=${target.id}`,
+    );
+    return this.issueTokens(admin.id, target.id, true, ua, ip, admin.id);
+  }
+
+  /**
+   * Exit "代登录" and return to the admin's home workspace. We resolve the
+   * admin's first AccountUser membership (signup always creates exactly
+   * one). Token rotation is implicit: the new pair drops `impersonatedBy`.
+   */
+  async endImpersonate(adminUserId: string, ua?: string, ip?: string): Promise<AuthTokens> {
+    const admin = await this.prisma.user.findUnique({
+      where: { id: adminUserId },
+      include: { memberships: { take: 1 } },
+    });
+    if (!admin) throw new UnauthorizedException();
+    if (!admin.isPlatformAdmin) throw new ForbiddenException('需要平台管理员权限');
+    const home = admin.memberships[0]?.accountId;
+    if (!home) throw new UnauthorizedException('管理员未关联任何工作区');
+
+    this.logger.log(`Impersonation end: admin=${admin.email} (${admin.id})`);
+    return this.issueTokens(admin.id, home, true, ua, ip, null);
   }
 
   private async uniqueSlug(name: string): Promise<string> {
@@ -570,17 +678,17 @@ export class AuthService {
     userId: string,
     accountId: string,
     isPlatformAdmin: boolean,
-    ua?: string,
-    ip?: string,
+    ua: string | undefined,
+    ip: string | undefined,
+    impersonatedBy: string | null,
   ): Promise<AuthTokens> {
     const accessTtl = this.config.get<string>('JWT_ACCESS_TTL') ?? ACCESS_TTL_FALLBACK;
     const refreshTtl = this.config.get<string>('JWT_REFRESH_TTL') ?? REFRESH_TTL_FALLBACK;
     const refreshSecret = this.config.getOrThrow<string>('JWT_REFRESH_SECRET');
 
-    const accessToken = await this.jwt.signAsync(
-      { sub: userId, accountId, isPlatformAdmin },
-      { expiresIn: accessTtl },
-    );
+    const accessPayload: Record<string, unknown> = { sub: userId, accountId, isPlatformAdmin };
+    if (impersonatedBy) accessPayload.impersonatedBy = impersonatedBy;
+    const accessToken = await this.jwt.signAsync(accessPayload, { expiresIn: accessTtl });
     // jti makes each refresh token unique even when issued in the same second
     // — without it, two issuances with identical { sub, type, iat } collide on
     // the refresh_tokens.token_hash UNIQUE constraint (revoked rows still
@@ -598,6 +706,8 @@ export class AuthService {
         userAgent: ua,
         ip,
         expiresAt,
+        accountId,
+        impersonatedBy,
       },
     });
 

@@ -65,7 +65,7 @@ export class AuthController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   async me(@CurrentUser() user: AuthenticatedUser) {
-    return this.auth.me(user.userId, user.accountId);
+    return this.auth.me(user.userId, user.accountId, user.impersonatedBy);
   }
 
   @Post('change-password')
@@ -142,6 +142,24 @@ export class AuthController {
       requestIp(req),
     );
     return { ok: true };
+  }
+
+  /**
+   * Exit "代登录" — issues a fresh token pair pointing back at the calling
+   * Platform Admin's home workspace. The endpoint is gated on
+   * isPlatformAdmin (not on the impersonation flag) so the admin can call
+   * it idempotently even if their session has already returned to its home
+   * account; the worst case is a token rotation.
+   */
+  @Post('end-impersonation')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  async endImpersonation(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
+    return this.auth.endImpersonate(
+      user.userId,
+      req.headers['user-agent'],
+      requestIp(req),
+    );
   }
 }
 

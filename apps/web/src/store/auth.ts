@@ -19,18 +19,36 @@ export interface AuthAccount {
   suspendedReason?: string | null;
 }
 
+/**
+ * Set whenever the calling Platform Admin is acting "as" another tenant via
+ * the 代登录 flow. Drives the yellow top banner + the «退出代登录» button.
+ * Hydrated from `/api/auth/me`'s `impersonation` field.
+ */
+export interface ImpersonationInfo {
+  originalUser: {
+    id: string;
+    email: string;
+    displayName: string | null;
+  };
+}
+
 interface AuthState {
   token: string | null;
   refreshToken: string | null;
   user: AuthUser | null;
   account: AuthAccount | null;
+  impersonation: ImpersonationInfo | null;
   setSession(payload: {
     token: string;
     refreshToken: string;
     user?: AuthUser | null;
     account?: AuthAccount | null;
   }): void;
-  setProfile(p: { user: AuthUser; account: AuthAccount }): void;
+  setProfile(p: {
+    user: AuthUser;
+    account: AuthAccount;
+    impersonation?: ImpersonationInfo | null;
+  }): void;
   logout(): void;
 }
 
@@ -41,6 +59,7 @@ export const useAuth = create<AuthState>()(
       refreshToken: null,
       user: null,
       account: null,
+      impersonation: null,
       setSession: ({ token, refreshToken, user, account }) =>
         set({
           token,
@@ -48,8 +67,16 @@ export const useAuth = create<AuthState>()(
           user: user ?? null,
           account: account ?? null,
         }),
-      setProfile: ({ user, account }) => set({ user, account }),
-      logout: () => set({ token: null, refreshToken: null, user: null, account: null }),
+      setProfile: ({ user, account, impersonation }) =>
+        set({ user, account, impersonation: impersonation ?? null }),
+      logout: () =>
+        set({
+          token: null,
+          refreshToken: null,
+          user: null,
+          account: null,
+          impersonation: null,
+        }),
     }),
     { name: 'sendmast-auth' },
   ),

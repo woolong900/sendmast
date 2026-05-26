@@ -6,6 +6,7 @@ import { TopBar } from './TopBar';
 import { api } from '@/lib/api';
 import { useAuth } from '@/store/auth';
 import { AccountStatusBanner } from '@/components/AccountStatusBanner';
+import { ImpersonationBanner } from '@/components/ImpersonationBanner';
 
 export function Layout() {
   const navigate = useNavigate();
@@ -44,7 +45,13 @@ export function Layout() {
   });
 
   useEffect(() => {
-    if (data) setProfile({ user: data.user, account: data.account });
+    if (data) {
+      setProfile({
+        user: data.user,
+        account: data.account,
+        impersonation: data.impersonation ?? null,
+      });
+    }
   }, [data, setProfile]);
 
   useEffect(() => {
@@ -56,7 +63,8 @@ export function Layout() {
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
-      {/* 全宽置顶,在侧栏与顶栏之上 — 与参考图一致 */}
+      {/* 全宽置顶条 — 顺序: 代登录提示 → 账号状态(待激活/封禁) → 侧栏与顶栏 */}
+      <ImpersonationBanner />
       <AccountStatusBanner />
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {/* Desktop sidebar — always visible at md+ */}

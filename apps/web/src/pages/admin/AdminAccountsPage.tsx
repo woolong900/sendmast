@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -7,9 +8,11 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/utils';
+import { useAuth } from '@/store/auth';
 import type {
   AcsAccountView,
   AdminAccountView,
+  AuthTokens,
   SetAccountStatusInput,
 } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
@@ -32,7 +35,10 @@ export function AdminAccountsPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
+  const navigate = useNavigate();
+  const setSession = useAuth((s) => s.setSession);
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
+  const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const { data: accounts, isLoading } = useQuery<AdminAccountView[]>({
     queryKey: ['admin', 'accounts'],
     queryFn: async () => (await api.get('/api/admin/accounts')).data,
@@ -127,6 +133,36 @@ export function AdminAccountsPage() {
     });
     if (!ok) return;
     statusMut.mutate({ id: a.id, status: 'active' });
+  }
+
+  async function handleImpersonate(a: AdminAccountView) {
+    const ok = await confirm({
+      title: `代登录 ${a.name}?`,
+      description: (
+        <span>
+          将以管理员身份进入工作区 <b>{a.name}</b>,可对其营销活动、联系人、分群、模板、发件域名、订单、自定义标签等执行任意读写操作。顶栏会一直显示«代登录中»提示,可随时退出。
+        </span>
+      ),
+      confirmLabel: '代登录',
+    });
+    if (!ok) return;
+    setImpersonatingId(a.id);
+    try {
+      const r = await api.post<AuthTokens>(`/api/admin/accounts/${a.id}/impersonate`);
+      setSession({
+        token: r.data.accessToken,
+        refreshToken: r.data.refreshToken,
+        user: null,
+        account: null,
+      });
+      await qc.invalidateQueries();
+      toast(`已代登录:${a.name}`, 'success');
+      navigate('/dashboard', { replace: true });
+    } catch (e) {
+      toast(apiErrMessage(e), 'error');
+    } finally {
+      setImpersonatingId(null);
+    }
   }
 
   function commitQuota() {
@@ -286,6 +322,15 @@ export function AdminAccountsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleImpersonate(a)}
+                        disabled={impersonatingId === a.id}
+                        title="以管理员身份进入该工作区,可读写其全部数据"
+                      >
+                        {impersonatingId === a.id ? '进入中…' : '代登录'}
+                      </Button>
                       {a.status === 'pending_activation' && (
                         <Button
                           size="sm"
