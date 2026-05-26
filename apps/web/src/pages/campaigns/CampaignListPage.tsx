@@ -186,7 +186,7 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
           onClick={(e) => e.stopPropagation()}
           className="block text-[17px] font-semibold leading-snug text-foreground transition-colors group-hover:text-primary"
         >
-          {c.subject || c.name}
+          {c.name}
         </Link>
         <div className="mt-2 flex items-center gap-6">
           <div className="min-w-0 flex-1 text-xs text-muted-foreground">
