@@ -71,6 +71,33 @@ www.sendmast.com {
 	redir https://sendmast.com{uri} 301
 }
 
+# ─── API subdomain (third-party integrations) ───────────────────────────────
+# Dedicated host for webhooks (Azure Event Grid, payment providers) and
+# future public REST surfaces. NestJS uses a global `/api` prefix; we rewrite
+# inbound `api.sendmast.com/foo` → upstream `api:4000/api/foo` so external
+# URLs stay clean (api.sendmast.com/webhooks/azure-event-grid) while the
+# server code keeps its existing route shape unchanged.
+#
+# Browser-facing paths (SPA, /sendmast-public/*) intentionally NOT routed
+# here — those stay on app.sendmast.com.
+api.sendmast.com {
+	tls /etc/caddy/certs/origin-cert.pem /etc/caddy/certs/origin-key.pem
+	encode gzip zstd
+
+	rewrite * /api{uri}
+	reverse_proxy api:4000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
 # ─── App subdomain (SaaS product) ───────────────────────────────────────────
 {$DOMAIN} {
 	# Cloudflare Origin Certificate. Issue once via CF Dashboard
