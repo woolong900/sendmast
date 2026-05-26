@@ -65,12 +65,19 @@ function toRecipientView(
 }
 
 /**
- * Pull the bounce classification + human-readable reason out of an ACS-shaped
- * raw_meta payload. ACS Email Event Grid puts:
- *   data.status                           → "Delivered" | "Bounced" | "Failed" | "Suppressed" | ...
- *   data.deliveryStatusDetails.statusMessage  → "550 5.1.1 user unknown" / etc.
- * For non-ACS / dev-mode events raw_meta may be absent or have a different
- * shape — we silently degrade to nulls rather than throw.
+ * Pull the bounce classification + human-readable reason out of a raw_meta
+ * payload. We have two producers writing into the same CH column with
+ * different shapes:
+ *
+ *   1) ACS bounce events (worker-events, from Event Grid):
+ *        { status: "Bounced" | ..., deliveryStatusDetails: { statusMessage: "550 ..." }, ... }
+ *
+ *   2) Self-tracked unsubscribe events (tracking.service.ts):
+ *        { reason: "Too many emails" }
+ *
+ * The parser yields `bounceType` only for shape (1) and `reason` for either
+ * shape, preferring the ACS field when both are present. Unknown / missing
+ * payloads degrade to nulls instead of throwing.
  */
 function parseRawMetaReason(rawMeta: string | null): {
   bounceType: string | null;
@@ -81,14 +88,18 @@ function parseRawMetaReason(rawMeta: string | null): {
     const obj = JSON.parse(rawMeta) as {
       status?: unknown;
       deliveryStatusDetails?: { statusMessage?: unknown };
+      reason?: unknown;
     };
-    const status =
-      typeof obj.status === 'string' ? obj.status : null;
-    const reason =
+    const status = typeof obj.status === 'string' ? obj.status : null;
+    const acsReason =
       typeof obj.deliveryStatusDetails?.statusMessage === 'string'
         ? obj.deliveryStatusDetails.statusMessage
         : null;
-    return { bounceType: status, reason };
+    const selfReason =
+      typeof obj.reason === 'string' && obj.reason.trim().length > 0
+        ? obj.reason
+        : null;
+    return { bounceType: status, reason: acsReason ?? selfReason };
   } catch {
     return { bounceType: null, reason: null };
   }
