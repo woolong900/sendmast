@@ -8,17 +8,16 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { ContactService } from './contact.service';
-import {
-  CreateContactListSchema,
-  UpdateContactListSchema,
-} from '@sendmast/shared';
+import { CreateContactListSchema, UpdateContactListSchema } from '@sendmast/shared';
 import { firstZodError } from '../../common/zod-error';
 
 @ApiTags('contact-lists')
@@ -59,5 +58,21 @@ export class ContactListController {
   @Delete(':id')
   remove(@CurrentUser() user: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.deleteList(user.accountId, id);
+  }
+
+  /**
+   * Stream the list's contacts as a CSV file. Columns mirror the import
+   * template so an export can be re-imported untouched. Service is
+   * cursor-paginated so memory stays bounded even for million-row lists.
+   * Always exports the full list — UI-level search / status filters are
+   * intentionally ignored so the affordance has predictable semantics.
+   */
+  @Get(':id/export')
+  async export(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.svc.exportListToCsv(user.accountId, id, res);
   }
 }

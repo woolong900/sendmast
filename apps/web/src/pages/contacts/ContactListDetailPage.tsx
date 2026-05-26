@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ChevronDown, Plus, Search, Trash2, Upload, X } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Download, Plus, Search, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -53,6 +53,7 @@ export function ContactListDetailPage() {
   const [pageSize, setPageSize] = useState(20);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -92,10 +93,8 @@ export function ContactListDetailPage() {
 
   const items = contacts.data?.items ?? [];
   const visibleIds = useMemo(() => items.map((c) => c.id), [items]);
-  const allVisibleSelected =
-    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
-  const someVisibleSelected =
-    !allVisibleSelected && visibleIds.some((id) => selectedIds.has(id));
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const someVisibleSelected = !allVisibleSelected && visibleIds.some((id) => selectedIds.has(id));
 
   useEffect(() => {
     if (selectedIds.size === 0) return;
@@ -142,6 +141,39 @@ export function ContactListDetailPage() {
     });
   };
 
+  /** Download the full list as CSV. Always full list (ignores current
+   *  search/status) to keep the affordance predictable; layout + columns
+   *  mirror the import template so round-trips work. */
+  async function handleExport() {
+    if (!listId) return;
+    setExporting(true);
+    try {
+      const r = await api.get(`/api/contact-lists/${listId}/export`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([r.data], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      // Honour the server's `Content-Disposition: filename*=UTF-8''...`
+      // when present so Chinese list names round-trip cleanly; fall back
+      // to a date-stamped default.
+      const filename =
+        parseFilenameFromContentDisposition(
+          r.headers['content-disposition'] as string | undefined,
+        ) ?? `contacts-${new Date().toISOString().slice(0, 10)}.csv`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast(`导出失败:${apiErrMessage(err)}`, 'error');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Button variant="outline" size="sm" asChild>
@@ -159,7 +191,23 @@ export function ContactListDetailPage() {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" onClick={() => setShowImport(true)} className="w-full sm:w-auto">
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            disabled={exporting || (detail.data?.contactsCount ?? 0) === 0}
+            className="w-full sm:w-auto"
+            title={
+              (detail.data?.contactsCount ?? 0) === 0 ? '该列表暂无联系人,无可导出内容' : undefined
+            }
+          >
+            <Download className="mr-1 size-4" />
+            {exporting ? '导出中…' : '导出 CSV'}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setShowImport(true)}
+            className="w-full sm:w-auto"
+          >
             <Upload className="mr-1 size-4" />
             导入 CSV
           </Button>
@@ -201,149 +249,150 @@ export function ContactListDetailPage() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
-            <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
-              {selectedIds.size > 0 ? (
-                <tr>
-                  <th className="w-10 px-4 py-3">
-                    <TriCheckbox
-                      checked={allVisibleSelected}
-                      indeterminate={someVisibleSelected}
-                      onChange={toggleAllVisible}
-                      aria-label="全选当前页"
-                    />
-                  </th>
-                  <th colSpan={4} className="px-2 py-2 normal-case tracking-normal">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground">
-                        已选择 {selectedIds.size} 项
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={batchMut.isPending}
-                        onClick={() => batchMut.mutate('subscribe')}
-                      >
-                        批量订阅
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={batchMut.isPending}
-                        className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                        onClick={() => batchMut.mutate('unsubscribe')}
-                      >
-                        批量退订
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={batchMut.isPending}
-                        className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                        onClick={async () => {
-                          const ok = await confirm({
-                            title: '从列表移除联系人',
-                            description: `确定从当前列表移除 ${selectedIds.size} 位联系人吗?联系人本身不会被删除,仍可在其他列表中找到。`,
-                            confirmLabel: '移除',
-                            variant: 'danger',
-                          });
-                          if (ok) batchMut.mutate('removeFromList');
-                        }}
-                      >
-                        移除
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={clearSelection}
-                        aria-label="清空选择"
-                      >
-                        <X className="size-4" />
-                      </Button>
-                    </div>
-                  </th>
-                </tr>
-              ) : (
-                <tr>
-                  <th className="w-10 px-4 py-3">
-                    <TriCheckbox
-                      checked={allVisibleSelected}
-                      indeterminate={someVisibleSelected}
-                      onChange={toggleAllVisible}
-                      disabled={visibleIds.length === 0}
-                      aria-label="全选当前页"
-                    />
-                  </th>
-                  <th className="px-4 py-3 font-medium">邮箱</th>
-                  <th className="px-4 py-3 font-medium">姓名</th>
-                  <th className="px-4 py-3 font-medium">订阅状态</th>
-                  <th className="px-4 py-3 font-medium">添加时间</th>
-                  <th className="px-4 py-3 font-medium" />
-                </tr>
-              )}
-            </thead>
-            <tbody>
-              {contacts.isLoading && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
-              {contacts.data?.items.length === 0 && <EmptyStateRow colSpan={6} />}
-              {items.map((c) => {
-                const checked = selectedIds.has(c.id);
-                return (
-                  <tr
-                    key={c.id}
-                    className={`border-b last:border-0 ${checked ? 'bg-[hsl(220,100%,98%)]' : ''}`}
-                  >
-                    <td className="w-10 px-4 py-3">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                {selectedIds.size > 0 ? (
+                  <tr>
+                    <th className="w-10 px-4 py-3">
                       <TriCheckbox
-                        checked={checked}
-                        onChange={() => toggleOne(c.id)}
-                        aria-label={`选择 ${c.email}`}
+                        checked={allVisibleSelected}
+                        indeterminate={someVisibleSelected}
+                        onChange={toggleAllVisible}
+                        aria-label="全选当前页"
                       />
-                    </td>
-                    <td className="px-4 py-3 font-medium">{c.email}</td>
-                    <td className="px-4 py-3">
-                      {[c.firstName, c.lastName].filter(Boolean).join(' ') || '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={STATUS_VARIANT[c.subscriptionStatus]}>
-                        {STATUS_LABEL[c.subscriptionStatus]}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {formatDateTime(c.createdAt)}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        disabled={deleteMut.isPending}
-                        onClick={async () => {
-                          const ok = await confirm({
-                            title: '删除联系人',
-                            description: (
-                              <>
-                                确定从所有列表中删除 <span className="font-medium">{c.email}</span> 吗?该操作不可撤销。
-                              </>
-                            ),
-                            confirmLabel: '删除',
-                            variant: 'danger',
-                          });
-                          if (ok) deleteMut.mutate(c.id);
-                        }}
-                      >
-                        <Trash2 className="size-4 text-destructive" />
-                      </Button>
+                    </th>
+                    <th colSpan={4} className="px-2 py-2 normal-case tracking-normal">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-foreground">
+                          已选择 {selectedIds.size} 项
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={batchMut.isPending}
+                          onClick={() => batchMut.mutate('subscribe')}
+                        >
+                          批量订阅
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={batchMut.isPending}
+                          className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                          onClick={() => batchMut.mutate('unsubscribe')}
+                        >
+                          批量退订
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={batchMut.isPending}
+                          className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: '从列表移除联系人',
+                              description: `确定从当前列表移除 ${selectedIds.size} 位联系人吗?联系人本身不会被删除,仍可在其他列表中找到。`,
+                              confirmLabel: '移除',
+                              variant: 'danger',
+                            });
+                            if (ok) batchMut.mutate('removeFromList');
+                          }}
+                        >
+                          移除
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={clearSelection}
+                          aria-label="清空选择"
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      </div>
+                    </th>
+                  </tr>
+                ) : (
+                  <tr>
+                    <th className="w-10 px-4 py-3">
+                      <TriCheckbox
+                        checked={allVisibleSelected}
+                        indeterminate={someVisibleSelected}
+                        onChange={toggleAllVisible}
+                        disabled={visibleIds.length === 0}
+                        aria-label="全选当前页"
+                      />
+                    </th>
+                    <th className="px-4 py-3 font-medium">邮箱</th>
+                    <th className="px-4 py-3 font-medium">姓名</th>
+                    <th className="px-4 py-3 font-medium">订阅状态</th>
+                    <th className="px-4 py-3 font-medium">添加时间</th>
+                    <th className="px-4 py-3 font-medium" />
+                  </tr>
+                )}
+              </thead>
+              <tbody>
+                {contacts.isLoading && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
+                      加载中...
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                )}
+                {contacts.data?.items.length === 0 && <EmptyStateRow colSpan={6} />}
+                {items.map((c) => {
+                  const checked = selectedIds.has(c.id);
+                  return (
+                    <tr
+                      key={c.id}
+                      className={`border-b last:border-0 ${checked ? 'bg-[hsl(220,100%,98%)]' : ''}`}
+                    >
+                      <td className="w-10 px-4 py-3">
+                        <TriCheckbox
+                          checked={checked}
+                          onChange={() => toggleOne(c.id)}
+                          aria-label={`选择 ${c.email}`}
+                        />
+                      </td>
+                      <td className="px-4 py-3 font-medium">{c.email}</td>
+                      <td className="px-4 py-3">
+                        {[c.firstName, c.lastName].filter(Boolean).join(' ') || '-'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={STATUS_VARIANT[c.subscriptionStatus]}>
+                          {STATUS_LABEL[c.subscriptionStatus]}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatDateTime(c.createdAt)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          disabled={deleteMut.isPending}
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: '删除联系人',
+                              description: (
+                                <>
+                                  确定从所有列表中删除{' '}
+                                  <span className="font-medium">{c.email}</span> 吗?该操作不可撤销。
+                                </>
+                              ),
+                              confirmLabel: '删除',
+                              variant: 'danger',
+                            });
+                            if (ok) deleteMut.mutate(c.id);
+                          }}
+                        >
+                          <Trash2 className="size-4 text-destructive" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
           {contacts.data && contacts.data.total > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-xs text-muted-foreground">
@@ -477,6 +526,24 @@ function TriCheckbox({
   );
 }
 
+/** Pull the filename out of an HTTP `Content-Disposition` header. Prefers
+ *  the RFC 5987 `filename*=UTF-8''...` form (handles Chinese), falls back
+ *  to the plain `filename="..."` field. Returns null if neither is present
+ *  so the caller can pick a sane default. */
+function parseFilenameFromContentDisposition(header: string | undefined): string | null {
+  if (!header) return null;
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      // fall through to ASCII form
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);
+  return plain ? plain[1].trim() : null;
+}
+
 function AddContactInline({ listId, onDone }: { listId: string; onDone: () => void }) {
   const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -500,15 +567,21 @@ function AddContactInline({ listId, onDone }: { listId: string; onDone: () => vo
     <Card>
       <CardContent className="grid grid-cols-1 gap-3 p-4 md:grid-cols-4">
         <div>
-          <Label htmlFor="ce" className="text-xs">邮箱 *</Label>
+          <Label htmlFor="ce" className="text-xs">
+            邮箱 *
+          </Label>
           <Input id="ce" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <div>
-          <Label htmlFor="cf" className="text-xs">名</Label>
+          <Label htmlFor="cf" className="text-xs">
+            名
+          </Label>
           <Input id="cf" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
         </div>
         <div>
-          <Label htmlFor="cl" className="text-xs">姓</Label>
+          <Label htmlFor="cl" className="text-xs">
+            姓
+          </Label>
           <Input id="cl" value={lastName} onChange={(e) => setLastName(e.target.value)} />
         </div>
         <div className="flex items-end">
