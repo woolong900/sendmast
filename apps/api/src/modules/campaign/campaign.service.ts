@@ -841,6 +841,21 @@ export class CampaignService {
     // hasn't activated (or got suspended after creating) is also blocked.
     await this.auth.assertActive(accountId);
 
+    // Quota gate: refuse to even enter the sending state when remaining=0.
+    // Without this check the campaign would flip to `status='sending'` and
+    // sit there forever — the worker tick is also quota-aware (it will
+    // force-finalize stuck campaigns) but bouncing the request here is the
+    // honest behaviour the UI hints at via its disabled send button.
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      select: { sendQuotaRemaining: true },
+    });
+    if (!account || account.sendQuotaRemaining <= 0) {
+      throw new BadRequestException(
+        '发送额度为 0,无法发送活动。请先购买额度。',
+      );
+    }
+
     // Read-only pre-flight: validates fields that don't participate in the
     // status race (html body, verified sender domain, non-empty audience).
     const c = await this.prisma.campaign.findFirst({

@@ -64,6 +64,7 @@ import { VariablesHelper } from '@/components/VariablesHelper';
 import {
   type SegmentView,
   type SenderDomainView,
+  type TenantQuotaView,
 } from '@sendmast/shared';
 
 interface ContactList {
@@ -347,6 +348,17 @@ export function CampaignWizardPage() {
     queryKey: ['templates'],
     queryFn: async () => (await api.get('/api/templates')).data,
   });
+  // Reuses the same query key/endpoint as TopBar / DashboardPage / QuotaPage
+  // so all four read from one cache. `refetchInterval` matches QuotaPage so
+  // the wizard's send-button gate can re-enable within ~30s of a top-up,
+  // even if the user doesn't reload the page.
+  const quota = useQuery<TenantQuotaView>({
+    queryKey: ['me', 'quota'],
+    queryFn: async () => (await api.get('/api/accounts/me/quota')).data,
+    refetchInterval: 30_000,
+  });
+  const quotaRemaining = quota.data?.remaining ?? 0;
+  const quotaExhausted = quota.data !== undefined && quotaRemaining <= 0;
 
   const verifiedDomains = useMemo(
     () => domains.data?.filter((d) => d.status === 'verified') ?? [],
@@ -1271,6 +1283,20 @@ export function CampaignWizardPage() {
           </div>
         )}
 
+        {quotaExhausted && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 shrink-0" />
+              <span>
+                当前账户发送额度为 0,无法发送活动。可先保存草稿,购买额度后再发送。
+              </span>
+            </div>
+            <Button asChild size="sm" variant="outline" className="border-destructive/60 text-destructive hover:bg-destructive/10">
+              <Link to="/settings/quota">购买额度</Link>
+            </Button>
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-2 pt-2">
           <Button
             variant="outline"
@@ -1279,22 +1305,34 @@ export function CampaignWizardPage() {
           >
             {saveDraftMut.isPending ? '保存中...' : '保存草稿'}
           </Button>
-          <Button
-            onClick={() => finalizeMut.mutate()}
-            disabled={
-              !sendableId ||
-              finalizeMut.isPending ||
-              saveDraftMut.isPending ||
-              (sendMode === 'schedule' && !scheduleAt)
+          {/* Wrap in a span so the native browser tooltip from `title` shows
+              even while the Button is disabled (disabled <button> doesn't
+              receive mouseenter on most browsers). */}
+          <span
+            title={
+              quotaExhausted
+                ? '发送额度为 0,不允许创建活动。请先购买额度。'
+                : undefined
             }
           >
-            <Send className="mr-1 size-4" />
-            {finalizeMut.isPending
-              ? '发送中...'
-              : sendMode === 'schedule'
-                ? '定时发送'
-                : '立即发送'}
-          </Button>
+            <Button
+              onClick={() => finalizeMut.mutate()}
+              disabled={
+                !sendableId ||
+                finalizeMut.isPending ||
+                saveDraftMut.isPending ||
+                quotaExhausted ||
+                (sendMode === 'schedule' && !scheduleAt)
+              }
+            >
+              <Send className="mr-1 size-4" />
+              {finalizeMut.isPending
+                ? '发送中...'
+                : sendMode === 'schedule'
+                  ? '定时发送'
+                  : '立即发送'}
+            </Button>
+          </span>
         </div>
       </div>
     );

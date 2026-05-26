@@ -258,6 +258,51 @@ async function runTick(_job: Job): Promise<void> {
     tenants.map((t) => [t.id, t.sendQuotaRemaining]),
   );
 
+  // 2b. Force-finalize campaigns whose tenant has zero quota. Without this
+  //     the campaign would sit in `status='sending'` indefinitely (the loop
+  //     below would `continue` past it every tick). Per product spec: when
+  //     quota is exhausted mid-campaign — including the partial case where
+  //     a previous tick drained the last unit — we mark all still-pending
+  //     and queued recipients as failed and flip the campaign to 'sent'
+  //     (sentAt=now), so the user sees a definitive end-state instead of
+  //     a stuck "发送中" indicator. The wizard's quota=0 send-button gate
+  //     prevents new sends from entering this state in the first place.
+  const exhausted = campaigns.filter(
+    (c) => (tenantBudget.get(c.accountId) ?? 0) <= 0,
+  );
+  for (const c of exhausted) {
+    try {
+      await prisma.$transaction([
+        prisma.campaignRecipient.updateMany({
+          where: {
+            campaignId: c.id,
+            status: { in: ['pending', 'queued'] },
+          },
+          data: {
+            status: 'failed',
+            errorMessage: '账户额度不足,本次未发送',
+          },
+        }),
+        prisma.campaign.update({
+          where: { id: c.id },
+          data: { status: 'sent', sentAt: new Date() },
+        }),
+      ]);
+      console.log(
+        `[tick] tenant=${c.accountId} quota=0; finalised campaign ${c.id} ` +
+          `(unsent recipients flipped to failed, status=sent)`,
+      );
+    } catch (err) {
+      console.error(
+        `[tick] failed to finalise quota-exhausted campaign ${c.id}:`,
+        err,
+      );
+    }
+  }
+  // After finalisation those campaigns are out of the working set — only
+  // tenants with budget > 0 reach the routing step below.
+  if (exhausted.length === campaigns.length) return;
+
   // 3. Group eligible campaigns (tenant has quota) by ACS account.
   const groups = new Map<string, Array<{ id: string; accountId: string }>>();
   for (const c of campaigns) {
