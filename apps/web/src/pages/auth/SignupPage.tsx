@@ -44,7 +44,7 @@ export function SignupPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[hsl(220,17%,97%)] p-6">
-      <div className="w-full max-w-md rounded-xl border bg-card p-10 shadow-sm">
+      <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-sm sm:p-10">
         <div className="mb-6 flex items-center gap-2">
           <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <BrandLogo className="size-4" />

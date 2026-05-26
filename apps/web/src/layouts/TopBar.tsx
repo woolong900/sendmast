@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, KeyRound, LogOut, Mail } from 'lucide-react';
+import { ChevronDown, KeyRound, LogOut, Mail, Menu } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { api } from '@/lib/api';
 import { formatNumber, cn } from '@/lib/utils';
 import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
 import type { TenantQuotaView } from '@sendmast/shared';
 
-export function TopBar() {
+export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {}) {
   const { user, token, refreshToken, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -59,7 +59,20 @@ export function TopBar() {
         : 'border-border bg-muted/40 text-muted-foreground';
 
   return (
-    <header className="flex h-14 items-center justify-end gap-3 border-b border-border bg-card px-6">
+    <header className="flex h-14 items-center justify-between gap-3 border-b border-border bg-card px-4 sm:px-6">
+      {/* Hamburger — only visible below md; tap target 44×44 for iOS/Android. */}
+      <button
+        type="button"
+        onClick={onOpenMobileNav}
+        aria-label="打开导航菜单"
+        className="-ml-2 flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground md:hidden"
+      >
+        <Menu className="size-5" />
+      </button>
+      {/* Desktop spacer — pushes the right group flush right via justify-between
+          when the hamburger is hidden. md:block so it only takes space at md+. */}
+      <div className="hidden md:block" />
+      <div className="flex items-center gap-3">
       <Link
         to="/settings/quota"
         className={cn(
@@ -81,7 +94,9 @@ export function TopBar() {
           <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
             {(user?.displayName ?? user?.email ?? '?').charAt(0).toUpperCase()}
           </div>
-          <span className="text-sm font-medium">{user?.displayName ?? user?.email}</span>
+          {/* Hide name on phones — avatar + chevron are enough; full name + email
+              don't fit alongside the quota pill at <640px. */}
+          <span className="hidden text-sm font-medium sm:inline">{user?.displayName ?? user?.email}</span>
           <ChevronDown
             className={cn(
               'size-3.5 text-muted-foreground transition-transform',
@@ -109,6 +124,7 @@ export function TopBar() {
             />
           </div>
         )}
+      </div>
       </div>
 
       <ChangePasswordDialog open={pwOpen} onClose={() => setPwOpen(false)} />

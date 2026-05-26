@@ -1,4 +1,4 @@
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Sidebar } from './Sidebar';
@@ -15,6 +15,24 @@ export function Layout() {
   const fullWidth =
     location.pathname === '/templates/new' ||
     /^\/templates\/[^/]+\/edit$/.test(location.pathname);
+
+  // Mobile sidebar drawer state. Below the `md` breakpoint (768px) the
+  // permanent sidebar is hidden; the hamburger in TopBar opens this slide-in
+  // panel. Auto-closes on every route change so the user doesn't have to
+  // dismiss it manually after navigating.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+  // ESC closes the drawer. Bound only while open to avoid a permanent
+  // global key listener.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (e: KeyboardEvent) =>
+      e.key === 'Escape' && setMobileNavOpen(false);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileNavOpen]);
 
   const { data, isError } = useQuery({
     queryKey: ['me'],
@@ -41,9 +59,12 @@ export function Layout() {
       {/* 全宽置顶,在侧栏与顶栏之上 — 与参考图一致 */}
       <AccountStatusBanner />
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        <Sidebar />
+        {/* Desktop sidebar — always visible at md+ */}
+        <aside className="hidden h-full w-56 shrink-0 bg-sidebar text-sidebar-foreground md:flex">
+          <Sidebar />
+        </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <TopBar />
+          <TopBar onOpenMobileNav={() => setMobileNavOpen(true)} />
           <main className="flex-1 overflow-auto bg-[hsl(220,17%,97%)]">
             {/* Inner Suspense keeps sidebar/topbar/banner mounted while a lazy
                 page chunk loads — without this the App-level Suspense fallback
@@ -54,7 +75,7 @@ export function Layout() {
                   <Outlet />
                 </div>
               ) : (
-                <div className="mx-auto w-[1200px] py-4">
+                <div className="mx-auto w-full max-w-screen-xl px-4 py-4 sm:px-6 lg:px-8">
                   <Outlet />
                 </div>
               )}
@@ -62,6 +83,28 @@ export function Layout() {
           </main>
         </div>
       </div>
+
+      {/* Mobile drawer — only mounts while open so it doesn't steal touch
+          events at md+ (also gated by md:hidden so any accidental open at
+          desktop width is invisible). Hand-rolled instead of pulling in a
+          dialog library; ~20 lines, no new deps. */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setMobileNavOpen(false)}
+            aria-hidden
+          />
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="主导航"
+            className="absolute inset-y-0 left-0 flex w-64 max-w-[80vw] bg-sidebar text-sidebar-foreground shadow-xl"
+          >
+            <Sidebar onNavigate={() => setMobileNavOpen(false)} />
+          </aside>
+        </div>
+      )}
     </div>
   );
 }

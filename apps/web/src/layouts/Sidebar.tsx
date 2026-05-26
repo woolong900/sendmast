@@ -69,11 +69,20 @@ const ADMIN_NAV: NavGroup = {
   ],
 };
 
-export function Sidebar() {
+/**
+ * Sidebar nav contents — renders branding header + groups + footer settings.
+ * Intentionally does NOT include the outer <aside>/width/background so it can
+ * be reused inside both the desktop sidebar (always visible md+) and the
+ * mobile drawer (toggleable, full-height slide-in). Callers wrap it.
+ *
+ * `onNavigate` lets the mobile drawer close itself when a link is clicked;
+ * desktop usage simply omits it.
+ */
+export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const { user } = useAuth();
   const groups = user?.isPlatformAdmin ? [...BASE_NAV, ADMIN_NAV] : BASE_NAV;
   return (
-    <aside className="flex h-full w-56 flex-col bg-sidebar text-sidebar-foreground">
+    <div className="flex h-full w-full flex-col">
       <div className="flex h-14 items-center gap-2 px-5">
         <div className="flex size-7 items-center justify-center rounded-md bg-sidebar-accent">
           <BrandLogo className="size-4 text-sidebar-accent-foreground" />
@@ -95,6 +104,7 @@ export function Sidebar() {
                   <NavLink
                     to={item.to}
                     end={item.end}
+                    onClick={onNavigate}
                     className={({ isActive }) =>
                       cn(
                         'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors',
@@ -116,12 +126,13 @@ export function Sidebar() {
       <div className="border-t border-white/10 p-3">
         <NavLink
           to="/settings/domains"
+          onClick={onNavigate}
           className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm hover:bg-sidebar-accent/20"
         >
           <Settings className="size-4" />
           <span>设置</span>
         </NavLink>
       </div>
-    </aside>
+    </div>
   );
 }
