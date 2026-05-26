@@ -54,6 +54,14 @@ if (( PULL )); then
   git pull --ff-only
 fi
 
+# Bind-mount sources must exist before `docker compose up` or it errors with
+# "no such file or directory". This list is the canonical set — keep in sync
+# with `docker/docker-compose.prod.yml`.
+DATA_ROOT="${DATA_ROOT:-/var/lib/sendmast}"
+for d in caddy-data caddy-config caddy-certs caddy-tracking.d; do
+  mkdir -p "$DATA_ROOT/$d"
+done
+
 # Build with BuildKit so the multi-stage Dockerfile's deps cache works.
 echo "▶ docker compose build"
 DOCKER_BUILDKIT=1 dc_mig build --pull
