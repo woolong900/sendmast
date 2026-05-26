@@ -13,7 +13,21 @@ export interface EventGridEvent {
   dataVersion?: string;
 }
 
-/** Azure Communication Services Email event types we care about. */
+/**
+ * Azure Communication Services Email event types we care about.
+ *
+ * In production we only subscribe to `EmailDeliveryReportReceived` in Azure
+ * Event Grid. open / click / unsubscribe are tracked by our own `/t/*`
+ * routes (open pixel + link redirect + one-click unsubscribe), which gives
+ * us per-link click data and a recipient-side definition of "open" that
+ * matches what the user actually sees in the UI. The engagement-tracking
+ * mapping below is kept for two reasons:
+ *   1. flexibility — if we ever want ACS as a backup signal it's a one-line
+ *      Azure subscription change away;
+ *   2. defensive — if Azure starts pushing engagement events to a
+ *      mis-configured subscription, mapAcsEvent will recognise them
+ *      instead of warning "Unknown event type" forever.
+ */
 const ACS_EVENT_MAP: Record<string, 'delivered' | 'bounce' | 'complaint' | 'open' | 'click' | 'failed'> = {
   'Microsoft.Communication.EmailDeliveryReportReceived': 'delivered',
   'Microsoft.Communication.EmailEngagementTrackingReportReceived': 'open',
