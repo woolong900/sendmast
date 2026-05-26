@@ -15,6 +15,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RedisService } from '../../common/redis/redis.service';
 import { SystemMailService } from '../system-mail/system-mail.service';
+import { ReferralService } from '../referral/referral.service';
 import type {
   ActivateResponse,
   AuthTokens,
@@ -62,6 +63,8 @@ export class AuthService {
     private readonly redis: RedisService,
     @Inject(forwardRef(() => SystemMailService))
     private readonly systemMail: SystemMailService,
+    @Inject(forwardRef(() => ReferralService))
+    private readonly referral: ReferralService,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -98,12 +101,7 @@ export class AuthService {
       suspendedReason: row.suspendedReason,
     };
     try {
-      await this.redis.client.set(
-        key,
-        JSON.stringify(payload),
-        'EX',
-        ACCOUNT_STATUS_CACHE_TTL_SEC,
-      );
+      await this.redis.client.set(key, JSON.stringify(payload), 'EX', ACCOUNT_STATUS_CACHE_TTL_SEC);
     } catch (err) {
       this.logger.warn(`status cache SET failed for ${accountId}: ${(err as Error).message}`);
     }
@@ -120,9 +118,7 @@ export class AuthService {
     try {
       await this.redis.client.del(this.statusKey(accountId));
     } catch (err) {
-      this.logger.warn(
-        `status cache DEL failed for ${accountId}: ${(err as Error).message}`,
-      );
+      this.logger.warn(`status cache DEL failed for ${accountId}: ${(err as Error).message}`);
     }
   }
 
@@ -132,6 +128,10 @@ export class AuthService {
 
     const passwordHash = await argon2.hash(input.password, { type: argon2.argon2id });
     const slug = await this.uniqueSlug(input.accountName);
+
+    // Resolve referral code BEFORE opening the txn — never blocks signup
+    // (unknown/disabled codes resolve to null and just don't attribute).
+    const referredByChannelId = await this.referral.resolveChannelIdForSignup(input.referralCode);
 
     const { user, account } = await this.prisma.$transaction(async (tx) => {
       // Inherit the platform-wide default ACS account (if one is set and
@@ -149,6 +149,8 @@ export class AuthService {
           // user gains read+limited-write access immediately, but campaign
           // create/start is gated until they redeem the activation link.
           defaultAcsAccountId: platformDefault?.id ?? null,
+          referredByChannelId,
+          referredAt: referredByChannelId ? new Date() : null,
         },
       });
       const user = await tx.user.create({
@@ -167,12 +169,10 @@ export class AuthService {
     // Fire-and-forget: never block the signup HTTP response on SMTP latency
     // or failure. If it fails, the user can hit "resend activation" from
     // the in-app banner. Logged for ops.
-    this.dispatchActivationEmail(user.id, user.email, user.displayName, ua, ip).catch(
-      (err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.error(`Activation mail to ${user.email} failed at signup: ${msg}`);
-      },
-    );
+    this.dispatchActivationEmail(user.id, user.email, user.displayName, ua, ip).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Activation mail to ${user.email} failed at signup: ${msg}`);
+    });
 
     return this.issueTokens(user.id, account.id, user.isPlatformAdmin, ua, ip);
   }
@@ -331,9 +331,7 @@ export class AuthService {
     const a = await this.getAccountStatusCached(accountId);
     if (!a) throw new UnauthorizedException();
     if (a.status === 'pending_activation') {
-      throw new ForbiddenException(
-        '请先激活账号(点击注册邮箱里的激活链接)后再创建/发送活动。',
-      );
+      throw new ForbiddenException('请先激活账号(点击注册邮箱里的激活链接)后再创建/发送活动。');
     }
     if (a.status === 'suspended') {
       throw new ForbiddenException('账号已被封禁,无法创建/发送活动。');
@@ -379,13 +377,7 @@ export class AuthService {
 
     const accountId = stored.user.memberships[0]?.accountId;
     if (!accountId) throw new UnauthorizedException('该账号未关联任何工作区');
-    return this.issueTokens(
-      stored.userId,
-      accountId,
-      stored.user.isPlatformAdmin,
-      ua,
-      ip,
-    );
+    return this.issueTokens(stored.userId, accountId, stored.user.isPlatformAdmin, ua, ip);
   }
 
   async logout(refreshToken: string): Promise<void> {
@@ -555,11 +547,12 @@ export class AuthService {
   }
 
   private async uniqueSlug(name: string): Promise<string> {
-    const base = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'workspace';
+    const base =
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'workspace';
     let slug = base;
     let i = 1;
     while (await this.prisma.account.findUnique({ where: { slug } })) {

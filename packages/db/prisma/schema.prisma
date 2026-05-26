@@ -250,6 +250,15 @@ model Account {
   name                String
   slug                String        @unique
   planCode            String        @default("free") @map("plan_code")
+  /// Set at signup time when the visitor came in through /signup?ref=CODE.
+  /// Used to attribute every future paid quota order back to a partner
+  /// channel for commission accrual. Immutable after signup — admins can
+  /// re-point manually via SQL if a mistake needs correcting, but no UI.
+  referredByChannelId String?       @map("referred_by_channel_id") @db.Uuid
+  /// Snapshot of when the attribution was first written. Equal to
+  /// signup time for normal flow; useful for analytics ("how long
+  /// from referral signup to first paid order").
+  referredAt          DateTime?     @map("referred_at")
   /// Lifecycle state. New tenants land in `pending_activation` until the
   /// signup user clicks the activation link in their inbox; admin-only flip
   /// to `suspended` blocks all writes (read still works) until unsuspended.
@@ -288,10 +297,13 @@ model Account {
   customTags         CustomTag[]
   segments           Segment[]
   quotaOrders        QuotaOrder[]
+  commissionRecords  CommissionRecord[]
 
   defaultAcsAccount AcsAccount? @relation("AccountDefaultAcs", fields: [defaultAcsAccountId], references: [id], onDelete: SetNull)
+  referredByChannel ReferralChannel? @relation(fields: [referredByChannelId], references: [id], onDelete: SetNull)
 
   @@index([defaultAcsAccountId])
+  @@index([referredByChannelId])
   @@map("accounts")
 }
 
@@ -856,4 +868,76 @@ model ImportJob {
 
   @@index([accountId, status])
   @@map("import_jobs")
+}
+
+// ============================================================================
+// Referral / Commission
+// ============================================================================
+
+/// Platform-managed referral channel (a third-party partner / reseller).
+/// Each row exposes a short URL-safe `code` that anchors a public referral
+/// link: `https://app/signup?ref=<code>`. When a visitor signs up while
+/// carrying that code, we stamp `accounts.referredByChannelId` and from
+/// then on every paid QuotaOrder for that account spawns a CommissionRecord
+/// at the prevailing global rate.
+///
+/// `payoutInfo` is intentionally free-form text (bank / Alipay / WeChat /
+/// whatever the partner gave us) — we never auto-transfer; settlement is
+/// off-platform, the per-month CSV export is the operator's source of truth.
+model ReferralChannel {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(32)
+  name        String
+  contact     String?
+  payoutInfo  String?  @map("payout_info") @db.Text
+  notes       String?  @db.Text
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  accounts          Account[]
+  commissionRecords CommissionRecord[]
+
+  @@map("referral_channels")
+}
+
+/// One row per paid QuotaOrder placed by a referred account. `orderId` is
+/// UNIQUE so the create runs exactly once even if the Shouqianba notify
+/// is retried after we already credited the order. `ratePercent` is the
+/// snapshot of the global setting at the moment of creation — later edits
+/// to ReferralSetting.ratePercent do NOT rewrite history.
+model CommissionRecord {
+  id             String   @id @default(uuid()) @db.Uuid
+  channelId      String   @map("channel_id") @db.Uuid
+  orderId        String   @unique @map("order_id") @db.Uuid
+  accountId      String   @map("account_id") @db.Uuid
+  orderAmountCny Decimal  @map("order_amount_cny") @db.Decimal(10, 2)
+  ratePercent    Decimal  @map("rate_percent") @db.Decimal(5, 2)
+  commissionCny  Decimal  @map("commission_cny") @db.Decimal(10, 2)
+  /// Mirrors `quota_orders.paid_at` — copied here so per-month export can
+  /// `WHERE paid_at >= ... AND paid_at < ...` on a single indexed column
+  /// without joining quota_orders.
+  paidAt         DateTime @map("paid_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  channel ReferralChannel @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  account Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, paidAt])
+  @@index([paidAt])
+  @@map("commission_records")
+}
+
+/// Singleton — only one row exists, primary key hard-coded to 'singleton'.
+/// Holds the platform-wide commission rate (percent, e.g. 15.00 = 15%)
+/// applied to every new CommissionRecord. Edits don't rewrite past
+/// CommissionRecord rows (those snapshot the rate at insert time).
+model ReferralSetting {
+  id          String   @id @default("singleton")
+  ratePercent Decimal  @default(15.00) @map("rate_percent") @db.Decimal(5, 2)
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("referral_settings")
 }

@@ -13,17 +13,18 @@ export type AccountStatus = z.infer<typeof AccountStatusSchema>;
 // at the schema boundary so the DB only ever stores one canonical form,
 // avoiding "Foo@x.com" and "foo@x.com" colliding (or worse, BOTH being
 // allowed to sign up).
-const emailField = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .pipe(z.string().email());
+const emailField = z.string().trim().toLowerCase().pipe(z.string().email());
 
 export const SignupSchema = z.object({
   email: emailField,
   password: z.string().min(8).max(128),
   displayName: z.string().min(1).max(80).optional(),
   accountName: z.string().min(1).max(80),
+  /// Optional partner referral code carried from `/signup?ref=<code>`.
+  /// We accept any short alphanumeric string here and let the backend
+  /// resolve it: unknown / disabled codes are silently ignored so a
+  /// stale link never blocks signup.
+  referralCode: z.string().trim().toUpperCase().max(32).optional(),
 });
 export type SignupInput = z.infer<typeof SignupSchema>;
 

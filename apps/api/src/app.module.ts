@@ -30,6 +30,7 @@ import { SegmentModule } from './modules/segment/segment.module';
 import { QuotaBillingModule } from './modules/quota-billing/quota-billing.module';
 import { FxModule } from './modules/fx/fx.module';
 import { TrackingDomainModule } from './modules/tracking-domain/tracking-domain.module';
+import { ReferralModule } from './modules/referral/referral.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { TrackingDomainModule } from './modules/tracking-domain/tracking-domain.
     CustomTagModule,
     SegmentModule,
     FxModule,
+    ReferralModule,
     QuotaBillingModule,
     TrackingDomainModule,
   ],

@@ -107,6 +107,11 @@ const AdminTrackingDomainsPage = lazy(() =>
     default: m.AdminTrackingDomainsPage,
   })),
 );
+const AdminReferralPage = lazy(() =>
+  import('@/pages/admin/AdminReferralPage').then((m) => ({
+    default: m.AdminReferralPage,
+  })),
+);
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
@@ -228,6 +233,14 @@ export default function App() {
                 element={
                   <RequirePlatformAdmin>
                     <AdminTrackingDomainsPage />
+                  </RequirePlatformAdmin>
+                }
+              />
+              <Route
+                path="admin/referral"
+                element={
+                  <RequirePlatformAdmin>
+                    <AdminReferralPage />
                   </RequirePlatformAdmin>
                 }
               />

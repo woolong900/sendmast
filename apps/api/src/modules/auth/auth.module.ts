@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { PlatformAdminGuard } from './platform-admin.guard';
 import { SystemMailModule } from '../system-mail/system-mail.module';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
   imports: [
@@ -21,6 +22,9 @@ import { SystemMailModule } from '../system-mail/system-mail.module';
     // SystemMailModule re-imports AuthModule for guards, so we need the
     // forwardRef on at least one side of the cycle.
     forwardRef(() => SystemMailModule),
+    // ReferralModule also imports AuthModule for the admin guards, so we
+    // break the cycle with a forwardRef on this side.
+    forwardRef(() => ReferralModule),
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, PlatformAdminGuard],

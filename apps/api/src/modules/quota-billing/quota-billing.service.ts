@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ShouqianbaService } from './shouqianba.service';
 import { FxService } from '../fx/fx.service';
+import { ReferralService } from '../referral/referral.service';
 import type {
   CreateQuotaOrderResponse,
   QuotaPricingTierInput,
@@ -26,6 +27,7 @@ export class QuotaBillingService {
     private readonly shouqianba: ShouqianbaService,
     private readonly fx: FxService,
     private readonly config: ConfigService,
+    private readonly referral: ReferralService,
   ) {}
 
   // ---------- Tier read (user) ------------------------------------------
@@ -110,9 +112,7 @@ export class QuotaBillingService {
     channel: 'alipay' | 'wechat';
   }): Promise<CreateQuotaOrderResponse> {
     if (!this.shouqianba.isConfigured()) {
-      throw new ServiceUnavailableException(
-        '支付通道未配置,请联系平台管理员完成支付接入。',
-      );
+      throw new ServiceUnavailableException('支付通道未配置,请联系平台管理员完成支付接入。');
     }
     const tier = await this.prisma.quotaPricingTier.findUnique({ where: { id: args.tierId } });
     if (!tier || !tier.active) throw new BadRequestException('该档位不可用');
@@ -251,9 +251,7 @@ export class QuotaBillingService {
     if (truth.orderStatus !== 'PAID') {
       // Common when notify lands on a non-payment transition (e.g.
       // PAY_CANCELED). Ack-success so retries stop; account untouched.
-      this.logger.log(
-        `Shouqianba notify: ${outTradeNo} status=${truth.orderStatus}, no credit`,
-      );
+      this.logger.log(`Shouqianba notify: ${outTradeNo} status=${truth.orderStatus}, no credit`);
       return 'success';
     }
 
@@ -275,6 +273,12 @@ export class QuotaBillingService {
           where: { id: order.accountId },
           data: { sendQuotaRemaining: { increment: order.emails } },
         });
+        // Referral commission. No-op for non-referred accounts; on
+        // retried notifies the orderId UNIQUE constraint inside
+        // recordCommissionForPaidOrder makes this idempotent. Errors
+        // there are swallowed + logged so a referral bookkeeping
+        // failure never rolls back the user's paid order.
+        await this.referral.recordCommissionForPaidOrder(order.id, tx);
         this.logger.log(
           `Shouqianba notify: ${outTradeNo} credited ${order.emails} to account ${order.accountId}`,
         );
