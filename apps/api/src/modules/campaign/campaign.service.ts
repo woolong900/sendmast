@@ -36,15 +36,30 @@ function toRecipientView(
     errorMessage: string | null;
     sentAt: Date | null;
     createdAt: Date;
+    updatedAt?: Date;
     contactId?: string;
   },
   contactName?: ContactNamePair | null,
   eventTime?: Date | string | null,
 ): RecipientView {
+  // eventTime resolution priority:
+  //   1. explicit param (used by event-sourced tabs, e.g. opened/clicked/bounced)
+  //   2. r.sentAt — set by worker-sender on successful ACS accept
+  //   3. r.updatedAt — Prisma's @updatedAt; for status=failed rows worker-sender
+  //      sets {status, errorMessage} which bumps updatedAt to "the time we
+  //      decided this row was failed", which is exactly what the 失败时间 column
+  //      should display
+  // Falls through to null if none are present (e.g. archive table doesn't
+  // store updatedAt — archived failed rows remain blank by design).
   const evt =
     eventTime instanceof Date
       ? eventTime.toISOString()
-      : eventTime ?? (r.sentAt ? r.sentAt.toISOString() : null);
+      : (eventTime ??
+        (r.sentAt
+          ? r.sentAt.toISOString()
+          : r.updatedAt
+            ? r.updatedAt.toISOString()
+            : null));
   return {
     id: r.id,
     email: r.email,
