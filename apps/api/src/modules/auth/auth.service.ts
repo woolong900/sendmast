@@ -540,23 +540,43 @@ export class AuthService {
     if (!user) throw new UnauthorizedException();
 
     // Impersonation path: admin acts as a member of an account they don't own.
-    // Skip the AccountUser check (they're not a member) and load the target
-    // account directly. Surface the original admin so the UI can render the
-    // "代登录中" banner and offer a one-click way back.
+    // The displayed identity (greeting on /dashboard, top-right avatar) should
+    // match the workspace context — i.e. the tenant's owner, not the admin
+    // who's puppeting them. The admin's own identity is surfaced in
+    // `impersonation.originalUser` so the yellow banner stays accurate.
+    //
+    // `isPlatformAdmin` is also returned as false so the sidebar drops the
+    // platform-admin group and route guards (RequirePlatformAdmin) keep the
+    // admin scoped to tenant-side pages. The JWT still carries
+    // `isPlatformAdmin=true` so the API enforces the right authorization on
+    // /admin/* endpoints — this is purely a UI-presentation choice.
     if (impersonatedBy) {
       if (!user.isPlatformAdmin || impersonatedBy !== userId) {
-        // Hardening: the only valid shape is admin-impersonating-as-self.
         throw new UnauthorizedException();
       }
-      const account = await this.prisma.account.findUnique({ where: { id: accountId } });
+      const account = await this.prisma.account.findUnique({
+        where: { id: accountId },
+        include: {
+          members: {
+            where: { role: 'owner' },
+            orderBy: { createdAt: 'asc' },
+            take: 1,
+            include: { user: true },
+          },
+        },
+      });
       if (!account) throw new UnauthorizedException('代登录的工作区不存在');
+      // Fall back to the admin's identity if the tenant has no owner row
+      // (shouldn't happen — signup always creates one — but be defensive).
+      const owner = account.members[0]?.user;
+      const displayedUser = owner ?? user;
       return {
         user: {
-          id: user.id,
-          email: user.email,
-          displayName: user.displayName,
-          isPlatformAdmin: user.isPlatformAdmin,
-          emailVerified: user.emailVerified,
+          id: displayedUser.id,
+          email: displayedUser.email,
+          displayName: displayedUser.displayName,
+          isPlatformAdmin: false,
+          emailVerified: displayedUser.emailVerified,
         },
         account: {
           id: account.id,
