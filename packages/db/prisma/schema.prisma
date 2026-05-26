@@ -174,6 +174,42 @@ model FxRate {
   @@map("fx_rates")
 }
 
+/// Pool of host names used to serve open-pixel / click-redirect / unsubscribe
+/// URLs. Existing only to spread spam-complaint risk across multiple domains
+/// instead of relying on the single primary app domain — if a tenant sends
+/// abusive volume on one tracking domain, only that one gets blacklisted.
+///
+/// Selection (worker-sender): for each recipient we hash `recipient.id` and
+/// pick `domains[hash % activeCount]`. Same recipient always gets the same
+/// host across opens/clicks/unsubscribes, so analytics and consent flows
+/// stay consistent for that user.
+///
+/// Pool empty → send fails (deliberate, surfaces config drift). No fallback
+/// to the primary app host because the whole point is to keep the app host
+/// out of email tracking.
+///
+/// Domain availability is enforced by the operator: each row needs a matching
+/// Caddy site block on the server (see docker/tracking.d/) plus DNS pointing
+/// at the server. We don't probe automatically — the admin marks `active`
+/// only after they've confirmed the config works.
+model TrackingDomain {
+  id        String   @id @default(uuid()) @db.Uuid
+  /// Bare hostname, no protocol/path. Stored lowercase.
+  domain    String   @unique @db.VarChar(253)
+  /// 'active'   — in rotation
+  /// 'disabled' — taken out by an admin (e.g. blacklisted)
+  /// Two-state for now; if we add automated DNS/TLS probing later we'll
+  /// expand to pending/failed.
+  status    String   @default("active") @db.VarChar(16)
+  /// Free-form admin note (e.g. "purchased 2026-05, registrar Namecheap").
+  notes     String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("tracking_domains")
+}
+
 /// Editable email templates for system notifications. The `code` is a fixed
 /// enum coupled to backend code that calls renderTemplate(code, vars) — admin
 /// can edit subject/body but cannot add new codes (that needs a code change).

@@ -38,6 +38,12 @@ services:
       # caddy service starts, otherwise it crash-loops on cert load.
       # See DEPLOY.md §"Cloudflare setup" for how to create them.
       - ${DATA_ROOT:-/var/lib/sendmast}/caddy-certs:/etc/caddy/certs:ro
+      # Tracking-domain site blocks. Each tracking_domains row needs a matching
+      # `<domain>.caddy` file here so Caddy can serve TLS for it. Admin UI's
+      # "复制 Caddy 片段" button outputs the contents; admin scp's the file in
+      # and runs `caddy reload`. Bind-mount (not named volume) so editing on
+      # the host is immediately visible to the container without a restart.
+      - ${DATA_ROOT:-/var/lib/sendmast}/caddy-tracking.d:/etc/caddy/tracking.d:ro
     depends_on:
       - api
       - minio

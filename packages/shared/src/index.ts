@@ -10,4 +10,5 @@ export * from './schemas/custom-tag.js';
 export * from './schemas/system-tags.js';
 export * from './schemas/segment.js';
 export * from './schemas/quota-billing.js';
+export * from './schemas/tracking-domain.js';
 export * from './queue-names.js';

@@ -10,10 +10,15 @@ import { QuotaManager } from './quota';
 import { runArchiveJob } from './archive';
 import { applyCustomTags, indexCustomTags } from './custom-tags';
 import { applySystemTags, ensureUnsubscribeFooter } from './system-tags';
+import { getActiveTrackingDomains, pickTrackingHost } from './tracking-pool';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
-const TRACKING_BASE_URL = process.env.TRACKING_BASE_URL ?? 'http://localhost:4000';
 const TRACKING_SECRET = process.env.TRACKING_TOKEN_SECRET;
+// `TRACKING_BASE_URL` (env) is intentionally NOT consumed here any more —
+// every outbound URL is built from a host picked out of the
+// `tracking_domains` pool (see `tracking-pool.ts`). Kept around in env
+// schemas for the API's own URL building (none today; placeholder for
+// future). Pool empty = send fails — see the recipient-fail path below.
 const SEND_CONCURRENCY = Number(process.env.SEND_CONCURRENCY ?? '8');
 
 if (!TRACKING_SECRET) {
@@ -439,12 +444,34 @@ async function runSend(job: Job<SendJobData>) {
     return;
   }
 
+  // Pick a tracking host for this recipient before building any URL.
+  // Same recipient → same host (hashed selection) so opens/clicks/unsubs
+  // for one user all hit one domain. Empty pool → bail this recipient
+  // and force the rest of the campaign to fail; sending without a tracking
+  // host would either embed `https://undefined/...` or, worse, silently
+  // drop pixels — both worse than a loud failure.
+  const trackingDomains = await getActiveTrackingDomains(prisma);
+  const trackingHost = pickTrackingHost(trackingDomains, r.id);
+  if (!trackingHost) {
+    const reason = '追踪域名池为空,请联系管理员在「平台管理 > 追踪域名」中添加域名';
+    await prisma.campaignRecipient.updateMany({
+      where: {
+        campaignId: c.id,
+        status: { in: ['pending', 'queued'] },
+      },
+      data: { status: 'failed', errorMessage: reason },
+    });
+    await maybeFinaliseCampaign(c.id);
+    return;
+  }
+  const trackingBaseUrl = `https://${trackingHost}`;
+
   // Generate the unsub URL up front so {unsubscribe_url} can resolve to it
   // during system-tag substitution. We also load contact name fields here
   // (one extra query per send; CampaignRecipient has contactId but no Prisma
   // relation declared, hence the explicit fetch).
   const unsubToken = signTrackingToken({ r: r.id, k: 'u' }, TRACKING_SECRET!);
-  const unsubUrl = `${TRACKING_BASE_URL.replace(/\/$/, '')}/t/u/${unsubToken}`;
+  const unsubUrl = `${trackingBaseUrl}/t/u/${unsubToken}`;
   const contact = await prisma.contact.findUnique({
     where: { id: r.contactId },
     select: { firstName: true, lastName: true },
@@ -475,7 +502,7 @@ async function runSend(job: Job<SendJobData>) {
   const bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
 
   const { html } = rewriteHtml(bodyHtml, {
-    baseUrl: TRACKING_BASE_URL,
+    baseUrl: trackingBaseUrl,
     secret: TRACKING_SECRET!,
     recipientId: r.id,
     utm: c.utmEnabled

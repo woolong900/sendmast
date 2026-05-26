@@ -102,6 +102,11 @@ const OrdersPage = lazy(() =>
 const AdminQuotaTiersPage = lazy(() =>
   import('@/pages/admin/AdminQuotaTiersPage').then((m) => ({ default: m.AdminQuotaTiersPage })),
 );
+const AdminTrackingDomainsPage = lazy(() =>
+  import('@/pages/admin/AdminTrackingDomainsPage').then((m) => ({
+    default: m.AdminTrackingDomainsPage,
+  })),
+);
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
@@ -215,6 +220,14 @@ export default function App() {
                 element={
                   <RequirePlatformAdmin>
                     <AdminQuotaTiersPage />
+                  </RequirePlatformAdmin>
+                }
+              />
+              <Route
+                path="admin/tracking-domains"
+                element={
+                  <RequirePlatformAdmin>
+                    <AdminTrackingDomainsPage />
                   </RequirePlatformAdmin>
                 }
               />

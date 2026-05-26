@@ -29,6 +29,7 @@ import { CustomTagModule } from './modules/custom-tag/custom-tag.module';
 import { SegmentModule } from './modules/segment/segment.module';
 import { QuotaBillingModule } from './modules/quota-billing/quota-billing.module';
 import { FxModule } from './modules/fx/fx.module';
+import { TrackingDomainModule } from './modules/tracking-domain/tracking-domain.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { FxModule } from './modules/fx/fx.module';
     SegmentModule,
     FxModule,
     QuotaBillingModule,
+    TrackingDomainModule,
   ],
   providers: [
     // Global IP-level rate limit (default 240 req/min, see ThrottlerModule

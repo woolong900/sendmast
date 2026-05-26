@@ -170,3 +170,15 @@ api.sendmast.com {
 		format console
 	}
 }
+
+# ─── Tracking domain pool ──────────────────────────────────────────────────
+# Each `tracking_domains` row in Postgres needs a matching site block here so
+# Caddy terminates TLS and reverse-proxies `/t/*` to the API. To avoid editing
+# this file every time an admin adds a domain, we import a directory of
+# auto-generated snippets. The admin UI's "复制 Caddy 片段" button outputs the
+# exact contents of a file to drop into `docker/tracking.d/<domain>.caddy`,
+# then `caddy reload` is enough — no rebuild.
+#
+# The directory is mounted read-only by docker-compose.prod.yml. Empty in dev
+# / fresh deploys; the glob just no-ops in that case.
+import /etc/caddy/tracking.d/*.caddy
