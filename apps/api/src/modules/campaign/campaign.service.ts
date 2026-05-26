@@ -1148,6 +1148,7 @@ export class CampaignService {
         fromEmail: c.fromEmail,
         replyTo: c.replyTo,
         templateId: c.templateId,
+        editorMode: c.editorMode,
         mjml: c.mjml,
         html: c.html,
         thumbnail: c.thumbnail,
