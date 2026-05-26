@@ -83,8 +83,12 @@ const ADMIN_NAV: NavGroup = {
  * desktop usage simply omits it.
  */
 export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
-  const { user } = useAuth();
-  const groups = user?.isPlatformAdmin ? [...BASE_NAV, ADMIN_NAV] : BASE_NAV;
+  const { user, impersonation } = useAuth();
+  // While "代登录"ing a tenant, hide the platform-admin group: the admin is
+  // intentionally acting AS that tenant and should see exactly what the tenant
+  // sees. The yellow top banner's «退出代登录» button is the way back.
+  const showAdmin = user?.isPlatformAdmin && !impersonation;
+  const groups = showAdmin ? [...BASE_NAV, ADMIN_NAV] : BASE_NAV;
   return (
     <div className="flex h-full w-full flex-col">
       <div className="flex h-14 items-center gap-2 px-5">
