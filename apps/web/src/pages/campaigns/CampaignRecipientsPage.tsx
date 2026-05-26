@@ -169,6 +169,23 @@ const COL_REASON = (header: string): Column => ({
     </span>
   ),
 });
+// Distinct from COL_REASON because failed/invalid tabs come from PG
+// (campaign_recipients.error_message — written by worker-sender on send
+// failure or by tick on quota exhaustion), while bounced/unsubscribed
+// tabs come from CH events (raw_meta.deliveryStatusDetails). Keeping the
+// two sources in separate columns avoids a confusing `reason ?? errorMessage`
+// fallback that would silently hide bugs if either source went stale.
+const COL_ERROR_MESSAGE = (header: string): Column => ({
+  header,
+  cell: (r) => (
+    <span
+      className="block max-w-md truncate text-muted-foreground"
+      title={r.errorMessage ?? undefined}
+    >
+      {r.errorMessage ?? '-'}
+    </span>
+  ),
+});
 
 const COL_TIME = (header: string, key: 'sentAt' | 'deliveredAt' | 'eventTime'): Column => ({
   header,
@@ -202,7 +219,12 @@ const COLUMNS_BY_DIM: Record<Dimension, Column[]> = {
     COL_URL,
   ],
   sales: [COL_NAME, COL_EMAIL, COL_TIME('下单时间', 'eventTime')],
-  failed: [COL_NAME, COL_EMAIL, COL_TIME('失败时间', 'eventTime')],
+  failed: [
+    COL_NAME,
+    COL_EMAIL,
+    COL_ERROR_MESSAGE('失败原因'),
+    COL_TIME('失败时间', 'eventTime'),
+  ],
   invalid: [COL_NAME, COL_EMAIL, COL_TIME('失效时间', 'eventTime')],
   unsubscribed: [
     COL_NAME,
