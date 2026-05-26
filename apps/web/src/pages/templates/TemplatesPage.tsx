@@ -36,12 +36,12 @@ export function TemplatesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold">模板库</h1>
           <p className="mt-1 text-sm text-muted-foreground">挑选合适的主题模板，或创建你自己的模板。</p>
         </div>
-        <Button asChild>
+        <Button asChild className="w-full sm:w-auto">
           <Link to="/templates/new">
             <Plus className="mr-1 size-4" />
             创建自定义模板

@@ -74,7 +74,11 @@ export function OrdersPage() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
+          {/* 7 columns can't fit a phone — wrap with horizontal scroll
+              instead of trying to hide columns. min-w on the table forces
+              the row to its natural width inside the scroll container. */}
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">订单号</th>
@@ -121,6 +125,7 @@ export function OrdersPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
     </div>

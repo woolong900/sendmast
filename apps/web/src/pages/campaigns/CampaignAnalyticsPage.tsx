@@ -150,8 +150,8 @@ export function CampaignAnalyticsPage() {
           {/* Row 3 — secondary deliverability strip. Each label is a link to
               the matching tab. 无效邮箱率 = hard bounces only (permanent
               failures); 弹回邮箱率 = all bounces (hard + soft). */}
-          <div className="rounded-lg bg-muted/40 px-5 py-3">
-            <div className="flex flex-wrap items-center gap-x-10 gap-y-2 text-sm">
+          <div className="rounded-lg bg-muted/40 px-4 py-3 sm:px-5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm sm:gap-x-10">
               <SmallStat
                 to={recipientLink(id, 'invalid')}
                 label="无效邮箱率"
@@ -297,7 +297,11 @@ function HorizontalFunnel({ funnel }: { funnel: FunnelStep[] }) {
   );
 
   return (
-    <div className="grid grid-cols-5 gap-2">
+    // Funnel keeps 5 columns at every breakpoint — splitting them visually
+    // breaks the "connected slope" semantic that the SVG depends on.
+    // Instead we shrink the text + tighten gaps below sm so a 360px screen
+    // shows all 5 cells without horizontal scroll.
+    <div className="grid grid-cols-5 gap-1 sm:gap-2">
       {steps.map((step, i) => (
         <FunnelCell key={step.step} step={step} next={steps[i + 1]} />
       ))}
@@ -315,14 +319,16 @@ function FunnelCell({ step, next }: { step: FunnelStep; next?: FunnelStep }) {
   const nextTop = (1 - nextH) * 100;
 
   return (
-    <div className="text-primary">
+    <div className="min-w-0 text-primary">
       <div className="px-1">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="mt-1 flex items-baseline gap-2">
-          <div className="text-2xl font-semibold tabular-nums text-foreground">
+        <div className="truncate text-xs text-muted-foreground">{label}</div>
+        {/* Stack value over count below sm — 5 cells at 60px wide can't
+            host "98.7% (送达数 12,345)" on one line. */}
+        <div className="mt-1 flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
+          <div className="text-base font-semibold tabular-nums text-foreground sm:text-2xl">
             {formatPercent(step.pct, 2)}
           </div>
-          <div className="text-xs text-muted-foreground">
+          <div className="truncate text-[11px] text-muted-foreground sm:text-xs">
             {countLabel} {formatNumber(step.value)}
           </div>
         </div>

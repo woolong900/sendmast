@@ -138,7 +138,10 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
       <div
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-4xl overflow-hidden rounded-xl bg-background shadow-2xl"
+        // max-h + overflow-y-auto so the modal scrolls inside its own
+        // viewport on phones — tier grid + payment channel + footer can
+        // exceed 667px (iPhone SE) once everything is stacked.
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-y-auto rounded-xl bg-background shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between border-b px-6 py-4">
@@ -250,7 +253,7 @@ function SelectStep({
               暂无可购买档位
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {tiers.map((t) => {
                 const isSelected = t.id === selected;
                 return (

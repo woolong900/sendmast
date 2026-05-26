@@ -53,12 +53,12 @@ export function ContactListsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold">联系人</h1>
           <p className="mt-1 text-sm text-muted-foreground">管理你的联系人列表，可分组、导入、维护订阅状态。</p>
         </div>
-        <Button onClick={() => setShowCreate((v) => !v)}>
+        <Button onClick={() => setShowCreate((v) => !v)} className="w-full sm:w-auto">
           <Plus className="mr-1 size-4" />
           新建列表
         </Button>
@@ -95,7 +95,8 @@ export function ContactListsPage() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">名称</th>
@@ -181,6 +182,7 @@ export function ContactListsPage() {
               })}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
     </div>

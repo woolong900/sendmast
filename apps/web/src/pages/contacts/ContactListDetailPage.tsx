@@ -151,19 +151,19 @@ export function ContactListDetailPage() {
         </Link>
       </Button>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold">{detail.data?.name ?? '...'}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             共 {formatNumber(detail.data?.contactsCount ?? 0)} 位联系人
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowImport(true)}>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="outline" onClick={() => setShowImport(true)} className="w-full sm:w-auto">
             <Upload className="mr-1 size-4" />
             导入 CSV
           </Button>
-          <Button onClick={() => setShowAdd((v) => !v)}>
+          <Button onClick={() => setShowAdd((v) => !v)} className="w-full sm:w-auto">
             <Plus className="mr-1 size-4" />
             添加联系人
           </Button>
@@ -200,7 +200,8 @@ export function ContactListDetailPage() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               {selectedIds.size > 0 ? (
                 <tr>
@@ -343,6 +344,7 @@ export function ContactListDetailPage() {
               })}
             </tbody>
           </table>
+          </div>
           {contacts.data && contacts.data.total > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-xs text-muted-foreground">
               <span>共 {formatNumber(contacts.data.total)} 条</span>

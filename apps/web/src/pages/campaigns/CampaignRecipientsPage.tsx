@@ -340,7 +340,7 @@ export function CampaignRecipientsPage() {
                     <th
                       key={c.header}
                       className={cn(
-                        'px-6 py-3 text-left font-medium',
+                        'px-3 py-3 text-left font-medium sm:px-6',
                         c.className,
                       )}
                     >
@@ -369,7 +369,7 @@ export function CampaignRecipientsPage() {
                 {list.data?.rows.map((r) => (
                   <tr key={r.id} className="border-t hover:bg-muted/30">
                     {columns.map((c) => (
-                      <td key={c.header} className="px-6 py-4">
+                      <td key={c.header} className="px-3 py-4 sm:px-6">
                         {c.cell(r)}
                       </td>
                     ))}
@@ -379,7 +379,7 @@ export function CampaignRecipientsPage() {
             </table>
           </div>
 
-          <div className="flex items-center justify-between border-t px-6 py-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs text-muted-foreground sm:px-6">
             <div>
               {list.data?.total != null
                 ? `共 ${formatNumber(list.data.total)} 条`

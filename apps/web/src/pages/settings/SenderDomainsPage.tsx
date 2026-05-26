@@ -47,14 +47,14 @@ export function SenderDomainsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold">发件域名</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             添加并验证发件域名后才能使用 SendMast 发送邮件。
           </p>
         </div>
-        <Button asChild>
+        <Button asChild className="w-full sm:w-auto">
           <Link to="/settings/domains/new">
             <Plus className="mr-1 size-4" />
             添加域名
@@ -64,7 +64,8 @@ export function SenderDomainsPage() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">域名</th>
@@ -198,6 +199,7 @@ export function SenderDomainsPage() {
               })}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
 

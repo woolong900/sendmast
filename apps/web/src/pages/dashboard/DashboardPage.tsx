@@ -40,22 +40,22 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">
+          <h1 className="text-xl font-semibold sm:text-2xl">
             欢迎，{user?.displayName ?? '朋友'} 👋
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{account?.name} 的运营概览</p>
         </div>
         {canCreate ? (
-          <Button asChild>
+          <Button asChild className="w-full sm:w-auto">
             <Link to="/campaigns/new">
               <Plus className="mr-1 size-4" />
               新建营销活动
             </Link>
           </Button>
         ) : (
-          <Button disabled title={disabledHint}>
+          <Button disabled title={disabledHint} className="w-full sm:w-auto">
             <Plus className="mr-1 size-4" />
             新建营销活动
           </Button>

@@ -16,6 +16,7 @@ import {
   HelpCircle,
   LayoutTemplate,
   LogOut,
+  Monitor,
   Send,
   X,
 } from 'lucide-react';
@@ -230,6 +231,7 @@ export function CampaignWizardPage() {
   const { id: editingId } = useParams<{ id?: string }>();
   const isEdit = !!editingId;
   const [step, setStep] = useState(0);
+  const isMobileViewport = useIsMobileViewport();
 
   const [name, setName] = useState('');
   const [subject, setSubject] = useState('');
@@ -756,7 +758,7 @@ export function CampaignWizardPage() {
 
               <div>
                 <div className="mb-3 text-sm font-semibold text-foreground">寄件人</div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <div className="flex h-5 items-center justify-between">
                       <Label className="text-xs text-muted-foreground">
@@ -846,7 +848,7 @@ export function CampaignWizardPage() {
               数据追踪参数自定义
             </label>
             {utmCustomized && (
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">utm_source</Label>
                   <Input
@@ -972,6 +974,17 @@ export function CampaignWizardPage() {
 
   // Step 2 — full-screen editor (Easy Email visual / CodeMirror HTML).
   if (step === 2) {
+    // Mobile blocker — both editors (Easy Email visual + side-by-side HTML)
+    // are desktop-only flows. Easy Email mounts a fixed 100vh canvas with
+    // a left sidebar of block categories; the HTML editor splits the screen
+    // horizontally into code + preview. Both are unusable below md and the
+    // upstream libraries have no mobile mode. Better to redirect than to
+    // half-render something broken — basic info / recipients / send (steps
+    // 0 + 3) still work fine on phones, so the user can build everything
+    // around the body and finish editing on a desktop.
+    if (isMobileViewport) {
+      return <MobileEditorBlocker mode={editorMode} onBack={() => setStep(0)} />;
+    }
     // HTML mode: doesn't need step2Initial (that's the Easy Email seed).
     if (editorMode === 'html') {
       return (
@@ -1447,7 +1460,7 @@ function SummarySection({
 
 function Stepper({ step, steps }: { step: number; steps: string[] }) {
   return (
-    <ol className="flex items-center gap-2">
+    <ol className="flex flex-wrap items-center gap-2">
       {steps.map((label, i) => {
         const active = step === i;
         const done = step > i;
@@ -1465,10 +1478,23 @@ function Stepper({ step, steps }: { step: number; steps: string[] }) {
             >
               {done ? <Check className="size-3.5" /> : i + 1}
             </div>
-            <span className={active ? 'font-medium' : 'text-muted-foreground'}>
+            {/* Hide step labels below sm — at 360px three labels with
+                connecting lines push the stepper past the viewport. The
+                circled number alone is enough wayfinding on phones; the
+                active step still shows its label only (so the user knows
+                where they are). */}
+            <span
+              className={
+                (active ? 'font-medium ' : 'text-muted-foreground ') +
+                (active ? '' : 'hidden ') +
+                'sm:inline'
+              }
+            >
               {label}
             </span>
-            {i < steps.length - 1 && <div className="mx-2 h-px w-10 bg-border" />}
+            {i < steps.length - 1 && (
+              <div className="mx-1 h-px w-4 bg-border sm:mx-2 sm:w-10" />
+            )}
           </li>
         );
       })}
@@ -2322,6 +2348,74 @@ function DateTimePopup({
           确定
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Tracks whether the viewport is below `md` (768px) so step 2 can swap in a
+ * "go back to a desktop" message instead of mounting Easy Email or the
+ * side-by-side HTML editor — both are upstream desktop-only flows.
+ *
+ * Subscribes via matchMedia rather than polling so a phone rotated to
+ * landscape (or a tablet hitting the breakpoint) updates instantly.
+ * SSR-safe (initial value falls back to false during render in non-browser
+ * envs even though this app ships fully client-rendered).
+ */
+function useIsMobileViewport() {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 767px)').matches;
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 767px)');
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    // Older Safari uses addListener/removeListener; modern browsers use
+    // addEventListener('change'). Try the modern path first.
+    if (mq.addEventListener) {
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
+    }
+    mq.addListener(handler);
+    return () => mq.removeListener(handler);
+  }, []);
+  return isMobile;
+}
+
+/**
+ * Full-screen takeover shown when the user lands on step 2 from a phone.
+ * Communicates *why* and gives two actions: go back to step 0 to keep
+ * editing recipients/basics, or stay (the user can also rotate to landscape
+ * on a tablet — matchMedia will re-evaluate and show the editor).
+ */
+function MobileEditorBlocker({
+  mode,
+  onBack,
+}: {
+  mode: EditorMode;
+  onBack: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-background px-6 text-center">
+      <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <Monitor className="size-8" />
+      </div>
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold">请在电脑上编辑邮件内容</h2>
+        <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+          {mode === 'html'
+            ? 'HTML 编辑器需要左右分栏的代码与预览界面,在手机屏幕上无法正常使用。'
+            : '可视化邮件编辑器(拖拽组件、自由排版)在手机屏幕上无法正常使用。'}
+          <br />
+          <br />
+          您可以现在保存草稿,稍后在电脑上访问 SendMast 完成邮件设计。基本信息、收件人选择和发送步骤在手机上仍可正常操作。
+        </p>
+      </div>
+      <Button onClick={onBack} className="w-full max-w-xs">
+        <ArrowLeft className="mr-2 size-4" />
+        返回基本信息
+      </Button>
     </div>
   );
 }

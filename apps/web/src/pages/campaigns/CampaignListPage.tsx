@@ -93,17 +93,17 @@ export function CampaignListPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold">营销活动</h1>
         {canCreate ? (
-          <Button asChild>
+          <Button asChild className="w-full sm:w-auto">
             <Link to="/campaigns/new">
               <Plus className="mr-1 size-4" />
               新建营销活动
             </Link>
           </Button>
         ) : (
-          <Button disabled title={disabledHint}>
+          <Button disabled title={disabledHint} className="w-full sm:w-auto">
             <Plus className="mr-1 size-4" />
             新建营销活动
           </Button>
@@ -113,7 +113,7 @@ export function CampaignListPage() {
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[200px] flex-1">
+            <div className="relative w-full min-w-0 flex-1 sm:min-w-[200px]">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
                 value={search}
@@ -127,7 +127,7 @@ export function CampaignListPage() {
               value={dateRange}
               onChange={setDateRange}
               placeholder="开始日期 至 结束日期"
-              className="min-w-[280px] shrink-0"
+              className="w-full shrink-0 sm:w-auto sm:min-w-[280px]"
             />
           </div>
         </CardContent>
@@ -184,11 +184,14 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
         <Link
           to={titleHref}
           onClick={(e) => e.stopPropagation()}
-          className="block text-[17px] font-semibold leading-snug text-foreground transition-colors group-hover:text-primary"
+          className="block text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-primary sm:text-[17px]"
         >
           {c.name}
         </Link>
-        <div className="mt-2 flex items-center gap-6">
+        {/* Below md the row's right-hand details (meta + stats + status + menu)
+            stack vertically so they fit on a 360px screen; sm+ keeps the
+            original horizontal layout. */}
+        <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
           <div className="min-w-0 flex-1 text-xs text-muted-foreground">
             <div className="leading-5">
               发送时间：{formatDateTime(c.sentAt ?? c.scheduledAt ?? c.createdAt)}
@@ -198,21 +201,25 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
               {c.lists.length > 0 ? c.lists.map((l) => l.name).join('、') : '-'}
             </div>
           </div>
-          <div className="flex shrink-0 gap-7">
+          <div className="flex shrink-0 gap-4 sm:gap-7">
             <StatItem value={c.stats.sent} label="发送" />
             <StatItem value={c.stats.opened} label="打开" />
             <StatItem value={c.stats.clicked} label="点击" />
           </div>
-          <div className="w-[100px] shrink-0">
-            <Badge variant={STATUS_VARIANT[c.status]}>
-              <span className="mr-1 inline-block size-1.5 rounded-full bg-current opacity-70" />
-              {STATUS_LABEL[c.status]}
-            </Badge>
-          </div>
-          {/* Action menu trigger and items must not bubble — otherwise
-              clicking "..." or any menu item would also navigate. */}
-          <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-            <ActionMenu c={c} />
+          {/* Status + action menu share a row on mobile (justify-between)
+              and revert to inline-with-the-rest at sm+ via `sm:contents`. */}
+          <div className="flex items-center justify-between gap-2 sm:contents">
+            <div className="shrink-0 sm:w-[100px]">
+              <Badge variant={STATUS_VARIANT[c.status]}>
+                <span className="mr-1 inline-block size-1.5 rounded-full bg-current opacity-70" />
+                {STATUS_LABEL[c.status]}
+              </Badge>
+            </div>
+            {/* Action menu trigger and items must not bubble — otherwise
+                clicking "..." or any menu item would also navigate. */}
+            <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+              <ActionMenu c={c} />
+            </div>
           </div>
         </div>
       </td>
@@ -277,6 +284,18 @@ function ThumbnailWithHover({
   }, []);
 
   const show = () => {
+    // Skip the hover preview on touch-only devices: mouseenter still fires on
+    // first-tap simulation, but showing a 420×480 popover next to the
+    // thumbnail (a) covers half the screen, (b) traps the user because there's
+    // no obvious way to dismiss it without leaving the row. On true hover-
+    // capable devices (desktop, laptop with trackpad, iPad with mouse) the
+    // matchMedia probe is true and the preview behaves as before.
+    if (
+      typeof window !== 'undefined' &&
+      !window.matchMedia('(hover: hover)').matches
+    ) {
+      return;
+    }
     if (closeTimer.current) {
       clearTimeout(closeTimer.current);
       closeTimer.current = null;

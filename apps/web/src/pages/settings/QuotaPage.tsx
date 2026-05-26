@@ -25,21 +25,21 @@ export function QuotaPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold">发送额度</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {account?.name} 的剩余发送额度。每次邮件发送(成功或失败)消耗 1 个额度;额度归零后活动会立即停止发送。
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" asChild>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="outline" asChild className="w-full sm:w-auto">
             <Link to="/settings/orders">
               <Receipt className="mr-1 size-4" />
               我的订单
             </Link>
           </Button>
-          <Button onClick={() => setUpgradeOpen(true)}>
+          <Button onClick={() => setUpgradeOpen(true)} className="w-full sm:w-auto">
             <Plus className="mr-1 size-4" />
             购买额度
           </Button>

@@ -40,14 +40,14 @@ export function SegmentsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
           <h1 className="text-xl font-semibold">动态分群</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             基于属性、列表、标签和行为筛选联系人,创建活动时可直接选用。
           </p>
         </div>
-        <Button onClick={() => navigate('/segments/new')}>
+        <Button onClick={() => navigate('/segments/new')} className="w-full sm:w-auto">
           <Plus className="mr-1 size-4" />
           创建分群
         </Button>
@@ -56,7 +56,8 @@ export function SegmentsPage() {
       <UsageHint />
 
       <div className="overflow-hidden rounded-lg border bg-card">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
               <th className="px-6 py-3 text-left font-medium">名称</th>
@@ -155,6 +156,7 @@ export function SegmentsPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

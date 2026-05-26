@@ -75,14 +75,14 @@ export function CustomTagsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
           <h1 className="text-xl font-semibold">自定义标签</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             创建和管理邮件模板中的自定义变量
           </p>
         </div>
-        <Button onClick={() => setEditor({ mode: 'create' })}>
+        <Button onClick={() => setEditor({ mode: 'create' })} className="w-full sm:w-auto">
           <Plus className="mr-1 size-4" />
           创建标签
         </Button>
@@ -91,7 +91,8 @@ export function CustomTagsPage() {
       <UsageHint />
 
       <div className="overflow-hidden rounded-lg border bg-card">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[680px] text-sm">
           <thead>
             <tr className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
               <th className="px-6 py-3 text-left font-medium">标签名称</th>
@@ -182,6 +183,7 @@ export function CustomTagsPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {editor.mode !== 'closed' && (
