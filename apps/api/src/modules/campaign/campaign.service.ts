@@ -527,25 +527,41 @@ export class CampaignService {
     }
 
     let rows: EventGroupRow[] = [];
+    let total: number | null = null;
     try {
-      rows = await this.ch.query<EventGroupRow>(
-        `SELECT
-           recipient_id,
-           max(event_time) AS ts,
-           argMax(user_agent, event_time) AS user_agent,
-           argMax(link_url, event_time) AS link_url,
-           argMax(raw_meta, event_time) AS raw_meta,
-           argMax(bounce_kind, event_time) AS bounce_kind
-         FROM sendmast.email_events
-         WHERE account_id = {acc:UUID}
-           AND campaign_id = {cid:UUID}
-           AND event_type = {et:String}${bounceClause}
-         GROUP BY recipient_id
-         HAVING 1=1 ${cursorClause}
-         ORDER BY ts DESC
-         LIMIT {lim:UInt32}`,
-        params,
-      );
+      // Rows (cursor-paginated) + grand total (unique recipients for this
+      // event, ignoring the cursor) in one round-trip. The total mirrors the
+      // analytics card's uniqExact count so the tab footer can show 共 N 条.
+      const [rowsRes, countRes] = await Promise.all([
+        this.ch.query<EventGroupRow>(
+          `SELECT
+             recipient_id,
+             max(event_time) AS ts,
+             argMax(user_agent, event_time) AS user_agent,
+             argMax(link_url, event_time) AS link_url,
+             argMax(raw_meta, event_time) AS raw_meta,
+             argMax(bounce_kind, event_time) AS bounce_kind
+           FROM sendmast.email_events
+           WHERE account_id = {acc:UUID}
+             AND campaign_id = {cid:UUID}
+             AND event_type = {et:String}${bounceClause}
+           GROUP BY recipient_id
+           HAVING 1=1 ${cursorClause}
+           ORDER BY ts DESC
+           LIMIT {lim:UInt32}`,
+          params,
+        ),
+        this.ch.query<{ total: string }>(
+          `SELECT toString(uniqExact(recipient_id)) AS total
+           FROM sendmast.email_events
+           WHERE account_id = {acc:UUID}
+             AND campaign_id = {cid:UUID}
+             AND event_type = {et:String}${bounceClause}`,
+          params,
+        ),
+      ]);
+      rows = rowsRes;
+      total = Number(countRes[0]?.total ?? 0);
     } catch (err) {
       // ClickHouse unreachable → degrade to empty rather than 500. The UI
       // already shows the analytics card so users know events exist.
@@ -554,7 +570,7 @@ export class CampaignService {
     }
 
     if (rows.length === 0) {
-      return { source: 'events', rows: [], nextCursor: null, total: null };
+      return { source: 'events', rows: [], nextCursor: null, total };
     }
 
     const hasMore = rows.length > q.pageSize;
@@ -666,7 +682,7 @@ export class CampaignService {
       source: 'events',
       rows: view,
       nextCursor: hasMore ? page[page.length - 1].ts : null,
-      total: null,
+      total,
     };
   }
 
