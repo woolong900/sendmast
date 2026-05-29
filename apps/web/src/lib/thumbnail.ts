@@ -63,20 +63,27 @@ export async function generateEmailThumbnail(html: string): Promise<Blob | null>
   document.body.appendChild(iframe);
 
   try {
-    // Wait for the iframe's document to finish loading. We give it a hard
-    // 4s ceiling — emails with broken external assets shouldn't block the
-    // user's save click forever.
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('iframe load timeout')), 4000);
-      iframe.addEventListener(
-        'load',
-        () => {
-          clearTimeout(timer);
-          // One paint frame so html-to-image sees final layout.
-          requestAnimationFrame(() => resolve());
-        },
-        { once: true },
-      );
+    // Wait until the iframe is laid out enough to snapshot — but DON'T block on
+    // the `load` event. `load` only fires once every subresource (incl. every
+    // external <img>) has finished, so an email referencing remote images would
+    // stall here until the 4s ceiling and we'd bail with no thumbnail, silently
+    // keeping the previously-stored (often the HTML_STARTER) image. Cross-origin
+    // images can't be embedded into the canvas anyway (CORS taint → html-to-image
+    // skips them), so waiting for them buys nothing. Instead: take whichever
+    // comes first between `load` and a short fallback delay, then give layout a
+    // couple of frames. We resolve (never reject) so generation always proceeds.
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const proceed = () => {
+        if (settled) return;
+        settled = true;
+        // Two paint frames so html-to-image sees the final laid-out DOM.
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      };
+      iframe.addEventListener('load', proceed, { once: true });
+      // Fallback: snapshot the laid-out HTML even if remote images keep `load`
+      // pending. 1.2s is plenty for the browser to parse + lay out inline markup.
+      setTimeout(proceed, 1200);
     });
 
     const doc = iframe.contentDocument;
