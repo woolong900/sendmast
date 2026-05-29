@@ -91,30 +91,31 @@ export class WebhookService {
  * the only signal that reliably distinguishes a permanent failure from a
  * transient/sender-side one:
  *
- *   - 4xx code        → 'soft'    (transient; address may still be good)
  *   - 5xx code        → 'hard'    (permanent; address unusable → suppress)
- *   - no parseable code → 'unknown' (sender-side policy / reputation / DNS, e.g.
- *                         AUP#DNS — NOT a bad address; don't suppress, don't
- *                         count as 无效邮箱)
+ *   - anything else   → 'soft'    (4xx transient, OR no parseable code such as
+ *                         sender-side policy / reputation / DNS like AUP#DNS —
+ *                         the address is probably fine, so don't suppress and
+ *                         don't count as 无效邮箱)
  *
+ * We only ever emit 'hard' or 'soft' — there is no 'unknown' bucket. Code-less
+ * rejections default to soft (the safe choice) rather than hard, so we never
+ * over-suppress good recipients when our own IP/DNS/reputation is the problem.
  * We deliberately do NOT fall back on ACS's `status` (Bounced/Suppressed/…):
- * those don't reliably mean "bad mailbox", and defaulting code-less rejections
- * to hard over-suppresses good recipients whenever our own IP/DNS/reputation
- * is the actual problem. Only hard (5xx) drives suppression downstream
- * (worker-events).
+ * those don't reliably mean "bad mailbox". Only hard (5xx) drives suppression
+ * downstream (worker-events).
  *
  * Source: data.deliveryStatusDetails.statusMessage — free-form, often
  * "550 5.1.1 user unknown" or "452 4.2.2 mailbox full".
  */
-function classifyBounce(data: Record<string, unknown>): 'hard' | 'soft' | 'unknown' {
+function classifyBounce(data: Record<string, unknown>): 'hard' | 'soft' {
   const msg = String(
     (data as { deliveryStatusDetails?: { statusMessage?: string } })
       .deliveryStatusDetails?.statusMessage ?? '',
   );
   // Match the basic 3-digit SMTP reply code (4xx/5xx), e.g. "452", "550".
   const m = /\b([45])\d{2}\b/.exec(msg);
-  if (!m) return 'unknown';
-  return m[1] === '4' ? 'soft' : 'hard';
+  // Only a parseable 5xx is permanent; everything else (4xx or no code) is soft.
+  return m && m[1] === '5' ? 'hard' : 'soft';
 }
 
 function mapAcsEvent(ev: EventGridEvent): 'delivered' | 'bounce' | 'complaint' | 'failed' | null {

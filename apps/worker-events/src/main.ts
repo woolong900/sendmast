@@ -117,10 +117,10 @@ async function runEventJob(job: Job<EventJobData>) {
   // (resolveRecipient's fallback path) — updateMany is a no-op instead of
   // throwing P2025 when no rows match.
   //
-  // soft (4xx, transient) and unknown (no SMTP code — sender-side policy /
-  // reputation / DNS rejections like AUP#DNS) are deliberately NOT suppressed:
-  // the recipient address is probably fine, so we keep it mailable rather than
-  // permanently blacklisting a good contact over our own deliverability issue.
+  // soft bounces (4xx transient, OR code-less sender-side policy / reputation /
+  // DNS rejections like AUP#DNS) are deliberately NOT suppressed: the recipient
+  // address is probably fine, so we keep it mailable rather than permanently
+  // blacklisting a good contact over our own deliverability issue.
   if (eventType === 'bounce' && data.bounceKind === 'hard') {
     // We deliberately do NOT flip campaignRecipient.status to 'failed': the
     // address WAS transmitted to (status stays 'sent'), and the bounce already

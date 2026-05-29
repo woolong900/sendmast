@@ -62,7 +62,7 @@ export type EmailEventType =
  *   - ''        : non-bounce events (we use empty string instead of NULL to
  *                 keep the LowCardinality column dense).
  */
-export type BounceKind = '' | 'hard' | 'soft' | 'unknown';
+export type BounceKind = '' | 'hard' | 'soft';
 
 export interface EmailEventRow {
   account_id: string;

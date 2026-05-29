@@ -686,9 +686,7 @@ export class CampaignService {
           ? '硬退'
           : r.last_bounce_kind === 'soft'
             ? '软退'
-            : r.last_bounce_kind === 'unknown'
-              ? '未知'
-              : parsed.bounceType;
+            : parsed.bounceType;
       return {
         id: r.recipient_id,
         email: meta?.email ?? '(unknown)',
