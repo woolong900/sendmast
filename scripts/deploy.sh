@@ -92,7 +92,7 @@ dc_mig run --rm migrator
 # Now (and only now) flip app traffic. docker compose only recreates
 # containers whose image hash changed → unaffected services keep running.
 echo "▶ Starting application services (rolling)"
-dc up -d caddy api worker-sender worker-events worker-import
+dc up -d caddy api worker-sender worker-events worker-import worker-thumbnail
 
 echo "▶ Pruning old images"
 docker image prune -f --filter "until=168h" >/dev/null

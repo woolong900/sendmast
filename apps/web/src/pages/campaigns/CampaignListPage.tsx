@@ -22,11 +22,11 @@ interface CampaignListItem {
   status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'paused' | 'failed' | 'canceled';
   fromName: string;
   fromEmail: string;
-  // Pre-rendered preview thumbnail URL (PNG). Populated by the editor at
-  // content-save (see apps/web/src/lib/thumbnail.ts). Old campaigns saved
-  // before this feature shipped will have null — UI falls back to a
-  // text-only placeholder via <img onError>.
+  // Server-rendered preview thumbnail URL (WebP), produced by worker-thumbnail.
+  // `thumbnailPending` is true while a (re)render is queued — the list shows a
+  // placeholder and polls until it lands.
   thumbnail: string | null;
+  thumbnailPending: boolean;
   totalRecipients: number;
   scheduledAt: string | null;
   sentAt: string | null;
@@ -89,6 +89,10 @@ export function CampaignListPage() {
         total: number;
       };
     },
+    // While any campaign's thumbnail is still rendering server-side, poll so the
+    // preview swaps in automatically once worker-thumbnail finishes.
+    refetchInterval: (query) =>
+      query.state.data?.items.some((c) => c.thumbnailPending) ? 4000 : false,
   });
 
   return (
@@ -178,7 +182,12 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
       }}
     >
       <td className="py-4 pl-4 pr-2 align-middle">
-        <ThumbnailWithHover campaignId={c.id} subject={c.subject || c.name} />
+        <ThumbnailWithHover
+          campaignId={c.id}
+          thumbnail={c.thumbnail}
+          pending={c.thumbnailPending}
+          subject={c.subject || c.name}
+        />
       </td>
       <td className="py-4 pl-2 pr-4 align-middle">
         <Link
@@ -241,58 +250,42 @@ function StatItem({ value, label }: { value: number; label: string }) {
 const PREVIEW_HEIGHT = 480;
 
 /**
- * Two-tier preview, both rendered from the campaign's real HTML in an iframe:
- *   - Small thumbnail = the HTML scaled down to fit the 88×88 cell. We render
- *     the live document (not a pre-baked PNG) because client-side canvas
- *     snapshots (html-to-image) cannot capture emails that reference remote
- *     images — cross-origin pixels taint the canvas and the export fails, so
- *     the saved PNG would silently stay on its initial/placeholder content. An
- *     iframe just *displays* the document, so remote images load normally.
- *   - Hover preview = the same HTML at full preview size.
- * HTML is fetched lazily (only when the row scrolls into view, or on hover) and
- * cached by react-query keyed on campaign id, so we never load all 50 at once.
+ * Two-tier preview:
+ *   - Small thumbnail = a cheap <img> of the server-rendered WebP (produced by
+ *     worker-thumbnail via headless Chromium). While the render is still queued
+ *     (`pending`) or the campaign has none yet, we show a subject placeholder.
+ *   - Hover preview = the campaign's full HTML in an iframe, fetched on-demand
+ *     the first time the user hovers (one campaign's HTML at a time, never all
+ *     50) and cached by react-query.
  */
 function ThumbnailWithHover({
   campaignId,
+  thumbnail,
+  pending,
   subject,
 }: {
   campaignId: string;
+  thumbnail: string | null;
+  pending: boolean;
   subject: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [visible, setVisible] = useState(false);
   const [flipUp, setFlipUp] = useState(false);
+  const [thumbBroken, setThumbBroken] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch once the thumbnail scrolls near the viewport (or on hover). Keyed by
-  // campaign id and cached forever — campaign HTML only changes on re-edit,
-  // which invalidates ['campaigns'] and remounts these rows.
+  // `enabled: open` keeps the fetch off until the user actually hovers; once
+  // fired, react-query caches the result keyed by campaign id so re-hovering
+  // is free. `staleTime: Infinity` — HTML only changes on re-edit, which
+  // invalidates ['campaigns'] and remounts these rows.
   const preview = useQuery<{ html: string | null }>({
     queryKey: ['campaign-html', campaignId],
     queryFn: async () =>
       (await api.get(`/api/campaigns/${campaignId}`)).data,
-    enabled: visible || open,
+    enabled: open,
     staleTime: Infinity,
   });
-
-  // Lazy-load: only mount the iframe for rows the user can actually see, so a
-  // 50-row page doesn't fire 50 HTML fetches + iframes on first paint.
-  useEffect(() => {
-    const el = wrapperRef.current;
-    if (!el || visible) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setVisible(true);
-          io.disconnect();
-        }
-      },
-      { rootMargin: '200px' },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [visible]);
 
   useEffect(() => () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -333,6 +326,7 @@ function ThumbnailWithHover({
 
   const previewHtml = preview.data?.html ?? null;
   const canShowPopup = open && !!previewHtml;
+  const showThumb = !!thumbnail && !thumbBroken;
 
   return (
     <div
@@ -341,27 +335,23 @@ function ThumbnailWithHover({
       onMouseEnter={show}
       onMouseLeave={scheduleHide}
     >
-      <div className="size-[88px] overflow-hidden rounded border bg-white shadow-sm">
-        {previewHtml ? (
-          // Render the email at its native 600px width, then scale the whole
-          // box down to the 88px cell (600 × 0.1467 ≈ 88). transform doesn't
-          // shrink the layout box, so the parent's overflow-hidden crops it.
-          <div
-            className="pointer-events-none absolute left-0 top-0 origin-top-left"
-            style={{ width: 600, height: 600, transform: 'scale(0.14667)' }}
-          >
-            <iframe
-              title={subject}
-              srcDoc={previewHtml}
-              sandbox="allow-same-origin"
-              scrolling="no"
-              className="block border-0"
-              style={{ width: 600, height: 600 }}
-            />
-          </div>
+      <div className="relative size-[88px] overflow-hidden rounded border bg-white shadow-sm">
+        {showThumb ? (
+          <img
+            src={thumbnail!}
+            alt={subject}
+            loading="lazy"
+            className="h-full w-full object-cover object-top"
+            onError={() => setThumbBroken(true)}
+          />
         ) : (
           <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] leading-tight text-muted-foreground">
             <span className="line-clamp-3">{subject || '无内容'}</span>
+          </div>
+        )}
+        {pending && !showThumb && (
+          <div className="absolute inset-x-0 bottom-0 bg-black/40 py-0.5 text-center text-[9px] leading-none text-white">
+            生成中…
           </div>
         )}
       </div>

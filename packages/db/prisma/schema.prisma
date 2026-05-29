@@ -675,11 +675,14 @@ model Campaign {
   /// we never end up with stale Easy Email state polluting a hand-written
   /// HTML campaign or vice versa.
   editorMode       String         @default("visual") @map("editor_mode")
-  // Pre-rendered preview thumbnail (PNG) shipped to the campaign list so the
+  // Pre-rendered preview thumbnail (WebP) shipped to the campaign list so the
   // page doesn't have to ferry the full HTML body and render 50 iframes —
-  // see CampaignListPage. Generated client-side at content-save time and
-  // stored as a public-bucket URL (or path-relative URL in dev).
+  // see CampaignListPage. Rendered server-side (headless Chromium) by
+  // worker-thumbnail and stored as a public-bucket URL. `thumbnailPending`
+  // is set true whenever the HTML changes and cleared once the render lands,
+  // so the list can show a placeholder + poll until it's ready.
   thumbnail        String?
+  thumbnailPending Boolean        @default(false) @map("thumbnail_pending")
   status           CampaignStatus @default(draft)
   scheduledAt      DateTime?      @map("scheduled_at")
   sendingStartedAt DateTime?      @map("sending_started_at")

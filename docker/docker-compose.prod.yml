@@ -142,6 +142,26 @@ services:
       minio:
         condition: service_started
 
+  worker-thumbnail:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: worker-thumbnail
+    image: sendmast/worker-thumbnail:latest
+    container_name: sendmast-worker-thumbnail
+    restart: unless-stopped
+    env_file: ../.env.production
+    # Chromium can balloon shared memory on big pages; we pass
+    # --disable-dev-shm-usage in the worker, but a modest bump is still safer.
+    shm_size: 256mb
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
   # ─── Data services ───────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine

@@ -51,6 +51,7 @@ COPY apps/web/package.json apps/web/
 COPY apps/worker-sender/package.json apps/worker-sender/
 COPY apps/worker-events/package.json apps/worker-events/
 COPY apps/worker-import/package.json apps/worker-import/
+COPY apps/worker-thumbnail/package.json apps/worker-thumbnail/
 COPY packages/db/package.json packages/db/
 COPY packages/shared/package.json packages/shared/
 COPY packages/clickhouse/package.json packages/clickhouse/
@@ -127,6 +128,27 @@ WORKDIR /app/apps/worker-import
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/packages /app/packages
 COPY --from=build /app/apps/worker-import /app/apps/worker-import
+COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml /app/
+USER node
+CMD ["node", "dist/main.js"]
+
+# ─── Runtime: worker-thumbnail (headless Chromium → campaign list previews) ──
+# This is the ONLY image that carries Chromium. We install Debian's `chromium`
+# package (pulls its own runtime libs) plus base + CJK fonts so Chinese emails
+# render real glyphs instead of tofu. puppeteer-core drives this system binary
+# via PUPPETEER_EXECUTABLE_PATH — no bundled-Chromium download bloating the
+# shared node_modules layer.
+FROM base AS worker-thumbnail
+ENV NODE_ENV=production
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+     chromium fonts-liberation fonts-noto-color-emoji fonts-noto-cjk \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app/apps/worker-thumbnail
+COPY --from=build /app/node_modules /app/node_modules
+COPY --from=build /app/packages /app/packages
+COPY --from=build /app/apps/worker-thumbnail /app/apps/worker-thumbnail
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml /app/
 USER node
 CMD ["node", "dist/main.js"]

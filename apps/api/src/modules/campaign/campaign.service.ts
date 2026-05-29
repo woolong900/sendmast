@@ -219,6 +219,7 @@ export class CampaignService {
           // `thumbnail` URL; the hover preview (and detail page) lazy-fetch
           // the full HTML through GET /api/campaigns/:id.
           thumbnail: true,
+          thumbnailPending: true,
           totalRecipients: true,
           scheduledAt: true,
           sentAt: true,
@@ -703,7 +704,7 @@ export class CampaignService {
 
     const status = input.scheduledAt ? 'scheduled' : 'draft';
 
-    return this.prisma.campaign.create({
+    const created = await this.prisma.campaign.create({
       data: {
         accountId,
         name: input.name,
@@ -716,6 +717,7 @@ export class CampaignService {
         mjml,
         html,
         thumbnail: input.thumbnail,
+        thumbnailPending: !!html,
         designJson: designJson as Prisma.InputJsonValue | undefined,
         editorMode: input.editorMode,
         status,
@@ -729,6 +731,23 @@ export class CampaignService {
         segments: { create: input.segmentIds.map((segmentId) => ({ segmentId })) },
       },
     });
+    if (html) await this.enqueueThumbnail(created.id);
+    return created;
+  }
+
+  /**
+   * Queue a server-side thumbnail render (worker-thumbnail → headless Chromium).
+   * Best-effort: a queue hiccup must not fail the campaign save, so we swallow
+   * errors — the next save (or a manual retry) re-enqueues.
+   */
+  private async enqueueThumbnail(campaignId: string): Promise<void> {
+    try {
+      await this.queue.add(QueueService.names.RENDER_THUMBNAIL, 'render', {
+        campaignId,
+      });
+    } catch (err) {
+      console.warn('enqueueThumbnail failed', campaignId, err);
+    }
   }
 
   /**
@@ -796,7 +815,7 @@ export class CampaignService {
       input.segmentIds ?? [],
     );
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       if (input.listIds) {
         await tx.campaignList.deleteMany({ where: { campaignId: id } });
         await tx.campaignList.createMany({
@@ -823,6 +842,10 @@ export class CampaignService {
           mjml,
           html,
           thumbnail: input.thumbnail,
+          // HTML changed → mark stale so the list shows a placeholder until the
+          // worker re-renders. `undefined` leaves the flag untouched on
+          // metadata-only edits.
+          thumbnailPending: html != null ? true : undefined,
           designJson: designJson as Prisma.InputJsonValue | undefined,
           editorMode: input.editorMode,
           scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined,
@@ -838,6 +861,8 @@ export class CampaignService {
         },
       });
     });
+    if (html != null) await this.enqueueThumbnail(id);
+    return updated;
   }
 
   /**
@@ -1184,7 +1209,7 @@ export class CampaignService {
       include: { lists: true },
     });
     if (!c) throw new NotFoundException();
-    return this.prisma.campaign.create({
+    const copy = await this.prisma.campaign.create({
       data: {
         accountId,
         name: `${c.name} (副本)`,
@@ -1197,7 +1222,10 @@ export class CampaignService {
         editorMode: c.editorMode,
         mjml: c.mjml,
         html: c.html,
+        // Carry the source thumbnail (identical content) as a placeholder, but
+        // mark pending so the worker renders the copy its own fresh image.
         thumbnail: c.thumbnail,
+        thumbnailPending: !!c.html,
         designJson: c.designJson as Prisma.InputJsonValue | undefined,
         status: 'draft',
         utmEnabled: c.utmEnabled,
@@ -1208,5 +1236,7 @@ export class CampaignService {
         lists: { create: c.lists.map((l) => ({ listId: l.listId })) },
       },
     });
+    if (c.html) await this.enqueueThumbnail(copy.id);
+    return copy;
   }
 }

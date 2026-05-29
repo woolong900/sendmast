@@ -7,6 +7,8 @@ export const QUEUE_NAMES = {
   SHOP_SYNC: 'shop-sync',
   /** Daily cron — archives terminal campaigns >= 90d old to ClickHouse. */
   ARCHIVE_RECIPIENTS: 'archive-recipients',
+  /** Server-side render of a campaign's HTML into a list thumbnail (WebP). */
+  RENDER_THUMBNAIL: 'render-thumbnail',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
