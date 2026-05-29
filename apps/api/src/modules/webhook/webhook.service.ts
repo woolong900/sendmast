@@ -114,6 +114,10 @@ const HARD_BOUNCE_SIGNALS = [
   'recipient unknown',
   'recipient address rejected',
   'recipient rejected',
+  'not a valid user', // e.g. "x@y is not a valid user"
+  'mailbox is disabled', // Yahoo 554.30 — account deactivated
+  'account is disabled',
+  'is inactive', // Gmail 5.2.1 — "account that you tried to reach is inactive"
 ];
 
 /**
