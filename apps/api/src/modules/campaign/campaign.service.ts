@@ -265,22 +265,26 @@ export class CampaignService {
     // Best-effort; if CH is down we still return PG-derived sent counts.
     try {
       const rows = await this.ch.query<{
-        campaign_id: string;
+        cid: string;
         event_type: string;
         uniques: string;
       }>(
-        `SELECT toString(campaign_id) AS campaign_id,
+        // NB: alias must NOT be `campaign_id` — ClickHouse resolves aliases in
+        // WHERE, so `... AS campaign_id` would shadow the UUID column with the
+        // String alias and the `campaign_id IN ...` filter silently matches
+        // nothing (no error). Use a distinct alias.
+        `SELECT toString(campaign_id) AS cid,
                 event_type,
                 toString(uniqExact(recipient_id)) AS uniques
          FROM sendmast.email_events
          WHERE account_id = {acc:UUID}
            AND campaign_id IN {ids:Array(UUID)}
            AND event_type IN ('open','click')
-         GROUP BY campaign_id, event_type`,
+         GROUP BY cid, event_type`,
         { acc: accountId, ids },
       );
       for (const r of rows) {
-        const target = out[r.campaign_id];
+        const target = out[r.cid];
         if (!target) continue;
         const n = Number(r.uniques);
         if (r.event_type === 'open') target.opened = n;
