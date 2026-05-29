@@ -117,12 +117,25 @@ const HARD_BOUNCE_SIGNALS = [
 ];
 
 /**
+ * Phrases that mean the failure is about OUR sending side (the sender domain /
+ * MAIL FROM / reputation), NOT the recipient mailbox. These take priority over
+ * HARD_BOUNCE_SIGNALS because some sender-side rejections reuse mailbox wording,
+ * e.g. "Domain of sender address postal@… does not exist" or "Sender verify
+ * failed" — there "does not exist" refers to our domain, not the recipient.
+ */
+const SENDER_SIDE_SIGNALS = ['sender', 'mail from', 'reputation'];
+
+/**
  * Classify a bounce as a permanent recipient failure ('hard') vs. anything else
- * ('soft'). Only the message phrasings/codes in HARD_BOUNCE_SIGNALS — which
- * point at the recipient mailbox — yield 'hard'. Everything else (sender-side
- * policy/reputation/DNS blocks, transient 4xx, code-less rejections) is 'soft'
- * so we never over-suppress a good recipient. Only 'hard' drives suppression
- * downstream (worker-events).
+ * ('soft').
+ *
+ *   1. Any sender-side signal (it's our domain/reputation problem) → 'soft'.
+ *   2. Otherwise a HARD_BOUNCE_SIGNAL (recipient mailbox unusable) → 'hard'.
+ *   3. Otherwise (transient 4xx, code-less, policy blocks) → 'soft'.
+ *
+ * We default to soft so we never over-suppress a good recipient over our own
+ * deliverability problem. Only 'hard' drives suppression downstream
+ * (worker-events).
  *
  * Source: data.deliveryStatusDetails.statusMessage — free-form, often
  * "550 5.1.1 user unknown" or "550 5.7.1 ... message blocked".
@@ -132,6 +145,7 @@ function classifyBounce(data: Record<string, unknown>): 'hard' | 'soft' {
     (data as { deliveryStatusDetails?: { statusMessage?: string } })
       .deliveryStatusDetails?.statusMessage ?? '',
   ).toLowerCase();
+  if (SENDER_SIDE_SIGNALS.some((s) => msg.includes(s))) return 'soft';
   return HARD_BOUNCE_SIGNALS.some((s) => msg.includes(s)) ? 'hard' : 'soft';
 }
 
