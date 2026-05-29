@@ -87,35 +87,52 @@ export class WebhookService {
 }
 
 /**
- * Classify a bounce strictly by the SMTP status code in the failure message —
- * the only signal that reliably distinguishes a permanent failure from a
- * transient/sender-side one:
+ * Phrases (and enhanced status codes) that confidently mean "the RECIPIENT
+ * mailbox itself is unusable" — i.e. a real 无效邮箱 we should suppress. Matched
+ * case-insensitively as plain substrings against the failure message.
  *
- *   - 5xx code        → 'hard'    (permanent; address unusable → suppress)
- *   - anything else   → 'soft'    (4xx transient, OR no parseable code such as
- *                         sender-side policy / reputation / DNS like AUP#DNS —
- *                         the address is probably fine, so don't suppress and
- *                         don't count as 无效邮箱)
- *
- * We only ever emit 'hard' or 'soft' — there is no 'unknown' bucket. Code-less
- * rejections default to soft (the safe choice) rather than hard, so we never
- * over-suppress good recipients when our own IP/DNS/reputation is the problem.
- * We deliberately do NOT fall back on ACS's `status` (Bounced/Suppressed/…):
- * those don't reliably mean "bad mailbox". Only hard (5xx) drives suppression
+ * Deliberately narrow. A bare 5xx is NOT enough: most of our 5xx bounces are
+ * sender-side policy / reputation / DNS blocks (e.g. Gmail 550-5.7.1 "low
+ * reputation of the sending domain", "Sender verify failed", "no A/AAAA/MX
+ * records"), where the recipient address is perfectly fine. Treating those as
+ * hard would suppress good contacts over OUR deliverability problem.
+ */
+const HARD_BOUNCE_SIGNALS = [
+  '5.1.1', // enhanced status: bad destination mailbox (no such user)
+  '5.1.10', // null MX / recipient does not exist (Office365)
+  'does not exist',
+  'user unknown',
+  'unknown user',
+  'no such user',
+  'no such recipient',
+  'no such mailbox',
+  'user not found',
+  'mailbox not found',
+  'address not found',
+  'invalid recipient',
+  'unknown recipient',
+  'recipient unknown',
+  'recipient address rejected',
+  'recipient rejected',
+];
+
+/**
+ * Classify a bounce as a permanent recipient failure ('hard') vs. anything else
+ * ('soft'). Only the message phrasings/codes in HARD_BOUNCE_SIGNALS — which
+ * point at the recipient mailbox — yield 'hard'. Everything else (sender-side
+ * policy/reputation/DNS blocks, transient 4xx, code-less rejections) is 'soft'
+ * so we never over-suppress a good recipient. Only 'hard' drives suppression
  * downstream (worker-events).
  *
  * Source: data.deliveryStatusDetails.statusMessage — free-form, often
- * "550 5.1.1 user unknown" or "452 4.2.2 mailbox full".
+ * "550 5.1.1 user unknown" or "550 5.7.1 ... message blocked".
  */
 function classifyBounce(data: Record<string, unknown>): 'hard' | 'soft' {
   const msg = String(
     (data as { deliveryStatusDetails?: { statusMessage?: string } })
       .deliveryStatusDetails?.statusMessage ?? '',
-  );
-  // Match the basic 3-digit SMTP reply code (4xx/5xx), e.g. "452", "550".
-  const m = /\b([45])\d{2}\b/.exec(msg);
-  // Only a parseable 5xx is permanent; everything else (4xx or no code) is soft.
-  return m && m[1] === '5' ? 'hard' : 'soft';
+  ).toLowerCase();
+  return HARD_BOUNCE_SIGNALS.some((s) => msg.includes(s)) ? 'hard' : 'soft';
 }
 
 function mapAcsEvent(ev: EventGridEvent): 'delivered' | 'bounce' | 'complaint' | 'failed' | null {
