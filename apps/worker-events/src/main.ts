@@ -122,10 +122,11 @@ async function runEventJob(job: Job<EventJobData>) {
   // the recipient address is probably fine, so we keep it mailable rather than
   // permanently blacklisting a good contact over our own deliverability issue.
   if (eventType === 'bounce' && data.bounceKind === 'hard') {
-    await prisma.campaignRecipient.updateMany({
-      where: { id: recipient.id },
-      data: { status: 'failed', errorMessage: 'bounced' },
-    });
+    // We deliberately do NOT flip campaignRecipient.status to 'failed': the
+    // address WAS transmitted to (status stays 'sent'), and the bounce already
+    // lives in ClickHouse where it surfaces under 弹回/无效邮箱. Counting it as
+    // 发送失败 too would double-count it against 总投放. The suppression below is
+    // what actually stops future sends.
     // Exclude the contact from ALL future sends. resolveAudience filters on
     // contact.subscriptionStatus, so flipping it to `bounced` is what actually
     // stops mailing a dead address — the suppression_entries row (keyed by the

@@ -43,17 +43,22 @@ export class AnalyticsService {
     });
     if (!c) throw new NotFoundException('活动不存在');
 
-    // Counts from PG
-    const recipientStatusCounts = await this.prisma.campaignRecipient.groupBy({
-      by: ['status'],
-      where: { campaignId },
-      _count: { _all: true },
-    });
+    // "发送/总投放" = the full audience we attempted (totalRecipients). Used as
+    // the denominator for delivery/open/bounce rates so the funnel stays
+    // consistent: 送达 + 弹回 + 失败 are all subsets of it and can never exceed it.
+    const sent = c.totalRecipients;
 
-    const sent =
-      recipientStatusCounts.find((r) => r.status === 'sent')?._count._all ?? 0;
-    const failed =
-      recipientStatusCounts.find((r) => r.status === 'failed')?._count._all ?? 0;
+    // "发送失败" counts ONLY send-time failures (quota exhausted / ACS-rejected).
+    // Hard bounces were historically stored as `status='failed',
+    // errorMessage='bounced'` but belong under 弹回 — exclude them here so they
+    // are not double-counted against 总投放.
+    const failed = await this.prisma.campaignRecipient.count({
+      where: {
+        campaignId,
+        status: 'failed',
+        OR: [{ errorMessage: null }, { errorMessage: { not: 'bounced' } }],
+      },
+    });
 
     // Unique events from ClickHouse. We split bounces by `bounce_kind` so the
     // UI can show 无效邮箱率 (hard only) separate from 弹回邮箱率 (all).

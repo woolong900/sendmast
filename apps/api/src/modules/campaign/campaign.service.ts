@@ -148,7 +148,8 @@ async function fetchContactNames(
 const PG_STATUS_BY_DIMENSION: Partial<
   Record<import('@sendmast/shared').RecipientDimension, 'sent' | 'failed'>
 > = {
-  sent: 'sent',
+  // `sent` is intentionally absent: 发送 means 总投放 (the whole audience), so
+  // its list/count uses no status filter — see listRecipients().
   failed: 'failed',
 };
 
@@ -236,7 +237,11 @@ export class CampaignService {
       ...r,
       lists: r.lists.map((cl) => cl.list),
       segments: r.segments.map((cs) => cs.segment),
-      stats: stats[r.id] ?? { sent: 0, opened: 0, clicked: 0 },
+      // 发送 = 总投放(totalRecipients),与活动详情口径一致;opened/clicked 来自 CH。
+      stats: {
+        ...(stats[r.id] ?? { sent: 0, opened: 0, clicked: 0 }),
+        sent: r.totalRecipients,
+      },
     }));
 
     return { items, total, page: query.page, pageSize: query.pageSize };
@@ -252,14 +257,8 @@ export class CampaignService {
     const out: Record<string, { sent: number; opened: number; clicked: number }> = {};
     for (const id of ids) out[id] = { sent: 0, opened: 0, clicked: 0 };
 
-    // Sent count from Postgres — one grouped query for all campaigns.
-    const sentRows = await this.prisma.campaignRecipient.groupBy({
-      by: ['campaignId'],
-      where: { accountId, campaignId: { in: ids }, status: 'sent' },
-      _count: { _all: true },
-    });
-    for (const r of sentRows) out[r.campaignId].sent = r._count._all;
-
+    // NB: `sent` (= 总投放) is filled by the caller from each campaign's
+    // totalRecipients, not derived here — see list(). We only fetch CH engagement.
     // Unique opens / clicks from ClickHouse — one grouped query for all campaigns.
     // account_id is the leading sort key; filtering on it first lets CH skip
     // unrelated tenant data AND enforces tenant isolation defence-in-depth.
@@ -369,21 +368,42 @@ export class CampaignService {
       where: { campaignId },
       select: { campaignId: true },
     });
-    const status = PG_STATUS_BY_DIMENSION[query.dimension] ?? query.status;
+    // PG dimensions:
+    //   - `sent` = 总投放 → no status filter, list the whole audience so the
+    //     count matches totalRecipients (送达/弹回/失败 are all subsets of it).
+    //   - `failed` = 发送失败 → status='failed' but EXCLUDE bounce-induced rows
+    //     (errorMessage='bounced'); those belong under 弹回, not 发送失败.
+    const status =
+      query.dimension === 'sent'
+        ? undefined
+        : (PG_STATUS_BY_DIMENSION[query.dimension] ?? query.status);
+    const excludeBounced = query.dimension === 'failed';
 
     return archived
-      ? this.listRecipientsFromArchive(accountId, campaignId, query, status)
-      : this.listRecipientsFromHot(campaignId, query, status);
+      ? this.listRecipientsFromArchive(
+          accountId,
+          campaignId,
+          query,
+          status,
+          excludeBounced,
+        )
+      : this.listRecipientsFromHot(campaignId, query, status, excludeBounced);
   }
 
   private async listRecipientsFromHot(
     campaignId: string,
     q: ListRecipientsQuery,
     status: 'sent' | 'failed' | 'pending' | 'queued' | 'skipped' | undefined,
+    excludeBounced = false,
   ): Promise<ListRecipientsResponse> {
     const where: Prisma.CampaignRecipientWhereInput = {
       campaignId,
       ...(status ? { status } : {}),
+      // 退信被历史地记为 status='failed', errorMessage='bounced'。发送失败 tab
+      // 要排除它们(归入弹回)。OR 兼容 errorMessage 为 null 的真实发送时失败。
+      ...(excludeBounced
+        ? { OR: [{ errorMessage: null }, { errorMessage: { not: 'bounced' } }] }
+        : {}),
     };
     // We do a small COUNT here so the UI can show a total. Cheap because
     // (campaign_id, status) is well-indexed and per-campaign cardinality is
@@ -417,6 +437,7 @@ export class CampaignService {
     campaignId: string,
     q: ListRecipientsQuery,
     status: 'sent' | 'failed' | 'pending' | 'queued' | 'skipped' | undefined,
+    excludeBounced = false,
   ): Promise<ListRecipientsResponse> {
     // FINAL forces a sort-merge of any not-yet-merged duplicate rows from
     // partial archive runs (see worker-sender/src/archive.ts). Adds latency
@@ -437,6 +458,9 @@ export class CampaignService {
     if (status) {
       where += ' AND status = {status:String}';
       params.status = status;
+    }
+    if (excludeBounced) {
+      where += " AND error_message != 'bounced'";
     }
     const rows = await this.ch.query<{
       id: string;
