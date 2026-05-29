@@ -54,12 +54,15 @@ export type EmailEventType =
  *   - 'hard'  : permanent failure (invalid address, suppressed, quarantined,
  *               5xx SMTP). These addresses should be added to the suppression
  *               list and never retried.
- *   - 'soft'  : transient failure (4xx SMTP, mailbox full, server temporary
- *               unavailable). These may eventually succeed if retried.
- *   - ''      : non-bounce events (we use empty string instead of NULL to
- *               keep the LowCardinality column dense).
+ *   - 'soft'    : transient failure (4xx SMTP). May eventually succeed if retried.
+ *   - 'unknown' : bounce without a parseable 4xx/5xx code — sender-side policy /
+ *                 reputation / DNS rejections (e.g. AUP#DNS) land here. NOT
+ *                 suppressed and NOT counted as 无效邮箱: the recipient address
+ *                 is probably fine; the fault is on our sending side.
+ *   - ''        : non-bounce events (we use empty string instead of NULL to
+ *                 keep the LowCardinality column dense).
  */
-export type BounceKind = '' | 'hard' | 'soft';
+export type BounceKind = '' | 'hard' | 'soft' | 'unknown';
 
 export interface EmailEventRow {
   account_id: string;

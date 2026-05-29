@@ -112,15 +112,16 @@ async function runEventJob(job: Job<EventJobData>) {
     return;
   }
 
-  // Update PG recipient row for hard outcomes. Wrapped in updateMany to
-  // tolerate the case where the recipient row has been moved to the CH
-  // archive (resolveRecipient's fallback path) — updateMany is a no-op
-  // instead of throwing P2025 when no rows match.
+  // Suppress ONLY on hard (5xx) bounces. Wrapped in updateMany to tolerate the
+  // case where the recipient row has been moved to the CH archive
+  // (resolveRecipient's fallback path) — updateMany is a no-op instead of
+  // throwing P2025 when no rows match.
   //
-  // Soft bounces are NOT marked as failed: the address is potentially still
-  // good and the user may retry the campaign. Only hard bounces flip status
-  // and add a suppression entry.
-  if (eventType === 'bounce' && data.bounceKind !== 'soft') {
+  // soft (4xx, transient) and unknown (no SMTP code — sender-side policy /
+  // reputation / DNS rejections like AUP#DNS) are deliberately NOT suppressed:
+  // the recipient address is probably fine, so we keep it mailable rather than
+  // permanently blacklisting a good contact over our own deliverability issue.
+  if (eventType === 'bounce' && data.bounceKind === 'hard') {
     await prisma.campaignRecipient.updateMany({
       where: { id: recipient.id },
       data: { status: 'failed', errorMessage: 'bounced' },

@@ -87,36 +87,34 @@ export class WebhookService {
 }
 
 /**
- * Decide whether an ACS bounce event should be classified as a permanent
- * (hard) or transient (soft) bounce. Inputs we have:
+ * Classify a bounce strictly by the SMTP status code in the failure message —
+ * the only signal that reliably distinguishes a permanent failure from a
+ * transient/sender-side one:
  *
- *   data.status                                 → 'Bounced' | 'Failed' | 'Suppressed' | 'Quarantined' | ...
- *   data.deliveryStatusDetails.statusMessage    → free-form, often "550 5.1.1 user unknown" or "452 4.2.2 mailbox full"
+ *   - 4xx code        → 'soft'    (transient; address may still be good)
+ *   - 5xx code        → 'hard'    (permanent; address unusable → suppress)
+ *   - no parseable code → 'unknown' (sender-side policy / reputation / DNS, e.g.
+ *                         AUP#DNS — NOT a bad address; don't suppress, don't
+ *                         count as 无效邮箱)
  *
- * Strategy:
- *   - Suppressed / Quarantined / Bounced  →  hard (ACS gave up; address is unusable for us)
- *   - Failed + 4xx SMTP code              →  soft (transient; could retry)
- *   - Failed + 5xx SMTP code              →  hard
- *   - Failed without parseable code       →  hard (conservative default — better
- *     to over-suppress than to keep hammering bad addresses)
+ * We deliberately do NOT fall back on ACS's `status` (Bounced/Suppressed/…):
+ * those don't reliably mean "bad mailbox", and defaulting code-less rejections
+ * to hard over-suppresses good recipients whenever our own IP/DNS/reputation
+ * is the actual problem. Only hard (5xx) drives suppression downstream
+ * (worker-events).
  *
- * NOTE: ACS doesn't itself emit a "soft bounce" status. The 4xx vs 5xx split
- * is the industry-standard heuristic; if you see misclassifications in
- * production, capture a sample raw_meta and refine the regex here.
+ * Source: data.deliveryStatusDetails.statusMessage — free-form, often
+ * "550 5.1.1 user unknown" or "452 4.2.2 mailbox full".
  */
-function classifyBounce(data: Record<string, unknown>): 'hard' | 'soft' {
-  const status = String((data as { status?: string }).status ?? '');
-  if (['Bounced', 'Suppressed', 'Quarantined'].includes(status)) return 'hard';
-
+function classifyBounce(data: Record<string, unknown>): 'hard' | 'soft' | 'unknown' {
   const msg = String(
     (data as { deliveryStatusDetails?: { statusMessage?: string } })
       .deliveryStatusDetails?.statusMessage ?? '',
   );
-  // SMTP enhanced status codes look like "X.Y.Z" with X being 2/4/5; the
-  // basic 3-digit code (4xx/5xx) is what we match — picks up "452", "550" etc.
+  // Match the basic 3-digit SMTP reply code (4xx/5xx), e.g. "452", "550".
   const m = /\b([45])\d{2}\b/.exec(msg);
-  if (m && m[1] === '4') return 'soft';
-  return 'hard';
+  if (!m) return 'unknown';
+  return m[1] === '4' ? 'soft' : 'hard';
 }
 
 function mapAcsEvent(ev: EventGridEvent): 'delivered' | 'bounce' | 'complaint' | 'failed' | null {
