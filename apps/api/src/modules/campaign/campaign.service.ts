@@ -524,7 +524,7 @@ export class CampaignService {
       user_agent: string | null;
       link_url: string | null;
       raw_meta: string | null;
-      bounce_kind: string;
+      last_bounce_kind: string;
     }
 
     let rows: EventGroupRow[] = [];
@@ -541,7 +541,10 @@ export class CampaignService {
              argMax(user_agent, event_time) AS user_agent,
              argMax(link_url, event_time) AS link_url,
              argMax(raw_meta, event_time) AS raw_meta,
-             argMax(bounce_kind, event_time) AS bounce_kind
+             -- Alias must NOT be bounce_kind: it would shadow the real column
+             -- in the WHERE bounceClause below, and ClickHouse would resolve
+             -- that filter to this aggregate (error: aggregate in WHERE).
+             argMax(bounce_kind, event_time) AS last_bounce_kind
            FROM sendmast.email_events
            WHERE account_id = {acc:UUID}
              AND campaign_id = {cid:UUID}
@@ -655,9 +658,9 @@ export class CampaignService {
       // webhook layer); fall back to the raw status string for older rows
       // ingested before the column existed. Localised for the UI.
       const bounceType =
-        r.bounce_kind === 'hard'
+        r.last_bounce_kind === 'hard'
           ? '硬退'
-          : r.bounce_kind === 'soft'
+          : r.last_bounce_kind === 'soft'
             ? '软退'
             : parsed.bounceType;
       return {
