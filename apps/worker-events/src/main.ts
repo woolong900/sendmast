@@ -126,17 +126,33 @@ async function runEventJob(job: Job<EventJobData>) {
       where: { id: recipient.id },
       data: { status: 'failed', errorMessage: 'bounced' },
     });
-    await prisma.suppressionEntry
-      .upsert({
-        where: { accountId_email: { accountId: recipient.accountId, email: '' } },
-        update: {},
-        create: {
-          accountId: recipient.accountId,
-          email: '',
-          reason: 'hard_bounce',
-        },
-      })
-      .catch(() => undefined);
+    // Exclude the contact from ALL future sends. resolveAudience filters on
+    // contact.subscriptionStatus, so flipping it to `bounced` is what actually
+    // stops mailing a dead address — the suppression_entries row (keyed by the
+    // real email) is just the durable record. Don't clobber an explicit
+    // unsubscribe/complaint, which are stronger opt-outs.
+    const contact = await prisma.contact.findUnique({
+      where: { id: recipient.contactId },
+      select: { email: true },
+    });
+    if (contact) {
+      await prisma.contact
+        .updateMany({
+          where: {
+            id: recipient.contactId,
+            subscriptionStatus: { notIn: ['unsubscribed', 'complained'] },
+          },
+          data: { subscriptionStatus: 'bounced' },
+        })
+        .catch(() => undefined);
+      await prisma.suppressionEntry
+        .upsert({
+          where: { accountId_email: { accountId: recipient.accountId, email: contact.email } },
+          update: { reason: 'hard_bounce' },
+          create: { accountId: recipient.accountId, email: contact.email, reason: 'hard_bounce' },
+        })
+        .catch(() => undefined);
+    }
   }
   if (eventType === 'complaint') {
     const contact = await prisma.contact.findUnique({
@@ -144,6 +160,17 @@ async function runEventJob(job: Job<EventJobData>) {
       select: { email: true },
     });
     if (contact) {
+      // A complaint is the strongest negative signal — opt the contact out of
+      // future sends too (don't override a prior explicit unsubscribe).
+      await prisma.contact
+        .updateMany({
+          where: {
+            id: recipient.contactId,
+            subscriptionStatus: { not: 'unsubscribed' },
+          },
+          data: { subscriptionStatus: 'complained' },
+        })
+        .catch(() => undefined);
       await prisma.suppressionEntry.upsert({
         where: { accountId_email: { accountId: recipient.accountId, email: contact.email } },
         update: { reason: 'complaint' },
