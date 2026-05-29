@@ -225,7 +225,12 @@ const COLUMNS_BY_DIM: Record<Dimension, Column[]> = {
     COL_ERROR_MESSAGE('失败原因'),
     COL_TIME('失败时间', 'eventTime'),
   ],
-  invalid: [COL_NAME, COL_EMAIL, COL_TIME('失效时间', 'eventTime')],
+  invalid: [
+    COL_NAME,
+    COL_EMAIL,
+    COL_REASON('原因'),
+    COL_TIME('失效时间', 'eventTime'),
+  ],
   unsubscribed: [
     COL_NAME,
     COL_EMAIL,
