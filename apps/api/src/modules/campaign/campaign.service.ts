@@ -274,7 +274,7 @@ export class CampaignService {
                 toString(uniqExact(recipient_id)) AS uniques
          FROM sendmast.email_events
          WHERE account_id = {acc:UUID}
-           AND campaign_id IN ({ids:Array(UUID)})
+           AND campaign_id IN {ids:Array(UUID)}
            AND event_type IN ('open','click')
          GROUP BY campaign_id, event_type`,
         { acc: accountId, ids },
@@ -586,7 +586,7 @@ export class CampaignService {
          FROM sendmast.campaign_recipients_archive FINAL
          WHERE account_id = {acc:UUID}
            AND campaign_id = {cid:UUID}
-           AND id IN ({ids:Array(UUID)})`,
+           AND id IN {ids:Array(UUID)}`,
         { acc: accountId, cid: campaignId, ids: missing },
       );
       for (const c of cold) {
@@ -612,7 +612,7 @@ export class CampaignService {
            WHERE account_id = {acc:UUID}
              AND campaign_id = {cid:UUID}
              AND event_type = 'delivered'
-             AND recipient_id IN ({ids:Array(UUID)})
+             AND recipient_id IN {ids:Array(UUID)}
            GROUP BY recipient_id`,
           { acc: accountId, cid: campaignId, ids },
         );
