@@ -481,8 +481,18 @@ export function CampaignWizardPage() {
     // Accepts an optional body override so callers (e.g. the editor's
     // "save & exit" flow) can pass freshly-exported html/mjml/designJson
     // without waiting for state to flush.
-    mutationFn: (override?: { html?: string; mjml?: string; designJson?: IEmailTemplate }) => {
-      const body = { ...payload(), ...override };
+    mutationFn: async (override?: { html?: string; mjml?: string; designJson?: IEmailTemplate }) => {
+      const body: Record<string, unknown> = { ...payload(), ...override };
+      // Refresh the preview thumbnail off the current body so a draft save —
+      // including the common "duplicate, then tweak & save" path that never
+      // re-enters the editor — keeps the list thumbnail in sync with the HTML.
+      // Without this, only the in-editor save (saveContentMut) regenerated it,
+      // so duplicated/edited campaigns kept the source's stale thumbnail.
+      const html = (override?.html ?? editorHtml) || undefined;
+      if (html) {
+        const thumbnail = await captureAndUploadThumbnail(html);
+        if (thumbnail) body.thumbnail = thumbnail;
+      }
       const existingId = isEdit ? editingId : createdId;
       return existingId
         ? api.patch(`/api/campaigns/${existingId}`, body)
