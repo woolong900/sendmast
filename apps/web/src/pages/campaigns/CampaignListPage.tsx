@@ -178,7 +178,7 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
       }}
     >
       <td className="py-4 pl-4 pr-2 align-middle">
-        <ThumbnailWithHover campaignId={c.id} thumbnail={c.thumbnail} subject={c.subject || c.name} />
+        <ThumbnailWithHover campaignId={c.id} subject={c.subject || c.name} />
       </td>
       <td className="py-4 pl-2 pr-4 align-middle">
         <Link
@@ -241,43 +241,58 @@ function StatItem({ value, label }: { value: number; label: string }) {
 const PREVIEW_HEIGHT = 480;
 
 /**
- * Two-tier preview:
- *   - Small thumbnail = pre-rendered PNG (cheap <img>; populated at content
- *     save by apps/web/src/lib/thumbnail.ts). Falls back to a subject-line
- *     placeholder when the campaign has no thumbnail (old data, or thumbnail
- *     generation soft-failed).
- *   - Hover preview = iframe over the campaign's full HTML, fetched
- *     on-demand the first time the user hovers. react-query caches the
- *     fetch so subsequent hovers are instant. This is the entire point of
- *     not shipping html in the list response — only one campaign's HTML
- *     ever loads at a time, instead of all 50.
+ * Two-tier preview, both rendered from the campaign's real HTML in an iframe:
+ *   - Small thumbnail = the HTML scaled down to fit the 88×88 cell. We render
+ *     the live document (not a pre-baked PNG) because client-side canvas
+ *     snapshots (html-to-image) cannot capture emails that reference remote
+ *     images — cross-origin pixels taint the canvas and the export fails, so
+ *     the saved PNG would silently stay on its initial/placeholder content. An
+ *     iframe just *displays* the document, so remote images load normally.
+ *   - Hover preview = the same HTML at full preview size.
+ * HTML is fetched lazily (only when the row scrolls into view, or on hover) and
+ * cached by react-query keyed on campaign id, so we never load all 50 at once.
  */
 function ThumbnailWithHover({
   campaignId,
-  thumbnail,
   subject,
 }: {
   campaignId: string;
-  thumbnail: string | null;
   subject: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [visible, setVisible] = useState(false);
   const [flipUp, setFlipUp] = useState(false);
-  const [thumbBroken, setThumbBroken] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // `enabled: open` keeps the fetch off until the user actually hovers; once
-  // fired, react-query caches the result keyed by campaign id so re-hovering
-  // is free. `staleTime: Infinity` because campaign HTML doesn't change
-  // unless the user re-edits the campaign (which invalidates ['campaigns']).
+  // Fetch once the thumbnail scrolls near the viewport (or on hover). Keyed by
+  // campaign id and cached forever — campaign HTML only changes on re-edit,
+  // which invalidates ['campaigns'] and remounts these rows.
   const preview = useQuery<{ html: string | null }>({
     queryKey: ['campaign-html', campaignId],
     queryFn: async () =>
       (await api.get(`/api/campaigns/${campaignId}`)).data,
-    enabled: open,
+    enabled: visible || open,
     staleTime: Infinity,
   });
+
+  // Lazy-load: only mount the iframe for rows the user can actually see, so a
+  // 50-row page doesn't fire 50 HTML fetches + iframes on first paint.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el || visible) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: '200px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
 
   useEffect(() => () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -316,9 +331,8 @@ function ThumbnailWithHover({
     closeTimer.current = setTimeout(() => setOpen(false), 180);
   };
 
-  const showThumb = !!thumbnail && !thumbBroken;
   const previewHtml = preview.data?.html ?? null;
-  const canShowPopup = open && (showThumb || !!previewHtml);
+  const canShowPopup = open && !!previewHtml;
 
   return (
     <div
@@ -328,14 +342,23 @@ function ThumbnailWithHover({
       onMouseLeave={scheduleHide}
     >
       <div className="size-[88px] overflow-hidden rounded border bg-white shadow-sm">
-        {showThumb ? (
-          <img
-            src={thumbnail!}
-            alt={subject}
-            loading="lazy"
-            className="h-full w-full object-cover object-top"
-            onError={() => setThumbBroken(true)}
-          />
+        {previewHtml ? (
+          // Render the email at its native 600px width, then scale the whole
+          // box down to the 88px cell (600 × 0.1467 ≈ 88). transform doesn't
+          // shrink the layout box, so the parent's overflow-hidden crops it.
+          <div
+            className="pointer-events-none absolute left-0 top-0 origin-top-left"
+            style={{ width: 600, height: 600, transform: 'scale(0.14667)' }}
+          >
+            <iframe
+              title={subject}
+              srcDoc={previewHtml}
+              sandbox="allow-same-origin"
+              scrolling="no"
+              className="block border-0"
+              style={{ width: 600, height: 600 }}
+            />
+          </div>
         ) : (
           <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] leading-tight text-muted-foreground">
             <span className="line-clamp-3">{subject || '无内容'}</span>

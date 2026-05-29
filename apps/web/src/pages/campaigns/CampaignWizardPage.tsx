@@ -59,7 +59,6 @@ import { Badge } from '@/components/ui/badge';
 import { api, apiErrMessage } from '@/lib/api';
 import { easyEmailZhCN } from '@/lib/easy-email-locale';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
-import { captureAndUploadThumbnail } from '@/lib/thumbnail';
 import { formatNumber } from '@/lib/utils';
 import { VariablesHelper } from '@/components/VariablesHelper';
 import {
@@ -481,18 +480,8 @@ export function CampaignWizardPage() {
     // Accepts an optional body override so callers (e.g. the editor's
     // "save & exit" flow) can pass freshly-exported html/mjml/designJson
     // without waiting for state to flush.
-    mutationFn: async (override?: { html?: string; mjml?: string; designJson?: IEmailTemplate }) => {
-      const body: Record<string, unknown> = { ...payload(), ...override };
-      // Refresh the preview thumbnail off the current body so a draft save —
-      // including the common "duplicate, then tweak & save" path that never
-      // re-enters the editor — keeps the list thumbnail in sync with the HTML.
-      // Without this, only the in-editor save (saveContentMut) regenerated it,
-      // so duplicated/edited campaigns kept the source's stale thumbnail.
-      const html = (override?.html ?? editorHtml) || undefined;
-      if (html) {
-        const thumbnail = await captureAndUploadThumbnail(html);
-        if (thumbnail) body.thumbnail = thumbnail;
-      }
+    mutationFn: (override?: { html?: string; mjml?: string; designJson?: IEmailTemplate }) => {
+      const body = { ...payload(), ...override };
       const existingId = isEdit ? editingId : createdId;
       return existingId
         ? api.patch(`/api/campaigns/${existingId}`, body)
@@ -507,26 +496,20 @@ export function CampaignWizardPage() {
   // Persists the editor's content as a draft when advancing from step 2 to
   // step 3. Without this, the user could exit later (from preview ↩ editor)
   // believing they had saved, but only React state held the changes.
-  //
-  // Thumbnail generation + upload runs inside the mutationFn (not in `persist`)
-  // so `isPending` covers the whole pipeline — without this the "保存中..."
-  // label would only flip during the API call, leaving the UI looking idle
-  // for the ~500-1000ms html-to-image work.
   const saveContentMut = useMutation({
     // mjml / designJson are optional — visual mode passes both, html mode
     // passes neither (their state vars are null in that branch and payload()
     // already strips them via `?? undefined`).
-    mutationFn: async (override: {
+    mutationFn: (override: {
       html: string;
       mjml?: string;
       designJson?: IEmailTemplate;
     }) => {
-      const thumbnail = await captureAndUploadThumbnail(override.html);
-      const body = {
-        ...payload(),
-        ...override,
-        ...(thumbnail ? { thumbnail } : {}),
-      };
+      // No client-side thumbnail here: the campaign list renders previews from
+      // the live HTML in an iframe, so a baked PNG is unnecessary — and the old
+      // html-to-image capture silently failed on emails with remote images
+      // (CORS-tainted canvas), leaving stale/placeholder thumbnails.
+      const body = { ...payload(), ...override };
       const existingId = isEdit ? editingId : createdId;
       return existingId
         ? api.patch(`/api/campaigns/${existingId}`, body)
