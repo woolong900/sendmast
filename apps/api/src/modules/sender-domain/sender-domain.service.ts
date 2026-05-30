@@ -7,7 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AzureAcsService } from './azure-acs.service';
-import { ensureDmarcRecord } from './dmarc-record';
+import { ensureDmarcRecord, applyDmarcDnsVerification } from './dmarc-record';
 import type {
   SenderDomainDnsRecord,
   SenderDomainRecordKind,
@@ -168,9 +168,11 @@ export class SenderDomainService {
     // First refresh — see what's currently in flight.
     const states = await this.azure.getStates(row.acsAccount, row.domain);
 
-    // Kick off verification for any record still in NotStarted / Unknown.
-    // Verifications take a while on Azure's side, so this is fire-and-forget.
+    // Kick off Azure verification for Domain/SPF/DKIM/DKIM2 only. DMARC is
+    // customer-managed in public DNS — Azure's API never flips it to
+    // Verified even when the record is correct, so we check DNS ourselves.
     const toInitiate = recordKinds.filter((k) => {
+      if (k === 'DMARC') return false;
       const s = states[k]?.status;
       return !s || s === 'NotStarted' || s === 'Unknown' || s === 'VerificationFailed';
     });
@@ -178,11 +180,13 @@ export class SenderDomainService {
       toInitiate.map((k) => this.azure.initiateVerification(row.acsAccount, row.domain, k)),
     );
 
-    // Re-read states after kicking things off so the response reflects
-    // requests that just transitioned to VerificationRequested.
-    const refreshed = toInitiate.length > 0
-      ? await this.azure.getStates(row.acsAccount, row.domain)
-      : states;
+    // Re-read Azure states after kicking things off.
+    let refreshed: SenderDomainVerificationStates =
+      toInitiate.length > 0
+        ? await this.azure.getStates(row.acsAccount, row.domain)
+        : states;
+
+    refreshed = await applyDmarcDnsVerification(row.domain, refreshed);
 
     // "All verified" means every DNS record we showed the user is verified.
     // Using `recordKinds` (not RECORD_KINDS) keeps this aligned with the UI:
