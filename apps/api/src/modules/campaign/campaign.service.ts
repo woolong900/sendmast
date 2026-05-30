@@ -314,6 +314,7 @@ export class CampaignService {
       include: {
         lists: { include: { list: true } },
         segments: { include: { segment: true } },
+        senders: { orderBy: { position: 'asc' } },
       },
     });
     if (!c) throw new NotFoundException('活动不存在');
@@ -730,6 +731,7 @@ export class CampaignService {
     await this.assertTargetsExist(accountId, input.listIds, input.segmentIds);
 
     const status = input.scheduledAt ? 'scheduled' : 'draft';
+    const senders = this.senderRoster(input);
 
     const created = await this.prisma.campaign.create({
       data: {
@@ -737,8 +739,8 @@ export class CampaignService {
         name: input.name,
         subject: input.subject,
         preheader: input.preheader,
-        fromName: input.fromName,
-        fromEmail: input.fromEmail,
+        fromName: senders[0].fromName,
+        fromEmail: senders[0].fromEmail,
         replyTo: input.replyTo,
         templateId: input.templateId,
         mjml,
@@ -756,10 +758,37 @@ export class CampaignService {
         trackClicks: input.trackClicks,
         lists: { create: input.listIds.map((listId) => ({ listId })) },
         segments: { create: input.segmentIds.map((segmentId) => ({ segmentId })) },
+        senders: { create: senders },
       },
     });
     if (html) await this.enqueueThumbnail(created.id);
     return created;
+  }
+
+  /**
+   * Normalise the campaign payload into an ordered, de-duplicated sender
+   * roster. Position 0 is the primary (mirrored onto Campaign.fromEmail).
+   * Falls back to the single { fromEmail, fromName } pair when no `senders`
+   * array is supplied — keeps pre-feature clients working unchanged.
+   */
+  private senderRoster(input: {
+    fromEmail: string;
+    fromName: string;
+    senders?: Array<{ fromEmail: string; fromName: string }>;
+  }): Array<{ fromEmail: string; fromName: string; position: number }> {
+    const raw =
+      input.senders && input.senders.length > 0
+        ? input.senders
+        : [{ fromEmail: input.fromEmail, fromName: input.fromName }];
+    const seen = new Set<string>();
+    const out: Array<{ fromEmail: string; fromName: string; position: number }> = [];
+    for (const s of raw) {
+      const key = s.fromEmail.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ fromEmail: s.fromEmail.trim(), fromName: s.fromName.trim(), position: out.length });
+    }
+    return out;
   }
 
   /**
@@ -842,6 +871,20 @@ export class CampaignService {
       input.segmentIds ?? [],
     );
 
+    // Recompute the sender roster only when the caller touched sender fields.
+    // A metadata-only PATCH (e.g. renaming the campaign) leaves senders alone.
+    const touchedSenders =
+      input.senders !== undefined ||
+      input.fromEmail !== undefined ||
+      input.fromName !== undefined;
+    const senders = touchedSenders
+      ? this.senderRoster({
+          fromEmail: input.fromEmail ?? c.fromEmail,
+          fromName: input.fromName ?? c.fromName,
+          senders: input.senders,
+        })
+      : null;
+
     const updated = await this.prisma.$transaction(async (tx) => {
       if (input.listIds) {
         await tx.campaignList.deleteMany({ where: { campaignId: id } });
@@ -855,6 +898,12 @@ export class CampaignService {
           data: input.segmentIds.map((segmentId) => ({ campaignId: id, segmentId })),
         });
       }
+      if (senders) {
+        await tx.campaignSender.deleteMany({ where: { campaignId: id } });
+        await tx.campaignSender.createMany({
+          data: senders.map((s) => ({ campaignId: id, ...s })),
+        });
+      }
 
       return tx.campaign.update({
         where: { id },
@@ -862,8 +911,8 @@ export class CampaignService {
           name: input.name,
           subject: input.subject,
           preheader: input.preheader,
-          fromName: input.fromName,
-          fromEmail: input.fromEmail,
+          fromName: senders ? senders[0].fromName : undefined,
+          fromEmail: senders ? senders[0].fromEmail : undefined,
           replyTo: input.replyTo,
           templateId: input.templateId,
           mjml,
@@ -885,6 +934,7 @@ export class CampaignService {
         include: {
           lists: { include: { list: true } },
           segments: { include: { segment: true } },
+          senders: { orderBy: { position: 'asc' } },
         },
       });
     });
@@ -958,28 +1008,53 @@ export class CampaignService {
     // status race (html body, verified sender domain, non-empty audience).
     const c = await this.prisma.campaign.findFirst({
       where: { id, accountId },
-      include: { lists: true, segments: true },
+      include: {
+        lists: true,
+        segments: true,
+        senders: { orderBy: { position: 'asc' } },
+      },
     });
     if (!c) throw new NotFoundException();
     if (!c.html) throw new BadRequestException('活动尚未设置邮件正文');
 
-    const senderDomain = c.fromEmail.split('@')[1];
-    const verified = await this.prisma.senderDomain.findFirst({
-      where: { accountId, domain: senderDomain, status: 'verified' },
-      include: { acsAccount: true },
-    });
-    if (!verified) {
-      throw new BadRequestException(`寄件域名 ${senderDomain} 尚未验证`);
-    }
-    if (!verified.acsAccount) {
-      throw new BadRequestException(
-        `Sender domain ${senderDomain} has no ACS account assigned`,
-      );
-    }
-    if (verified.acsAccount.status !== 'active') {
-      throw new BadRequestException(
-        `ACS account ${verified.acsAccount.name} is ${verified.acsAccount.status}`,
-      );
+    // Resolve the campaign's full sender roster (falls back to the primary
+    // for pre-feature campaigns with no campaign_senders rows) and validate
+    // every address: domain must be verified, and all of them must live under
+    // the SAME active ACS account — the tick scheduler routes a whole
+    // campaign to one ACS account via its primary fromEmail, so a sender on a
+    // different ACS account would be rejected by the wrong transport.
+    const senders =
+      c.senders.length > 0
+        ? c.senders.map((s) => ({ fromEmail: s.fromEmail, fromName: s.fromName }))
+        : [{ fromEmail: c.fromEmail, fromName: c.fromName }];
+
+    let acsAccountId: string | null = null;
+    for (const s of senders) {
+      const domain = s.fromEmail.split('@')[1];
+      const verified = await this.prisma.senderDomain.findFirst({
+        where: { accountId, domain, status: 'verified' },
+        include: { acsAccount: true },
+      });
+      if (!verified) {
+        throw new BadRequestException(`寄件域名 ${domain} 尚未验证`);
+      }
+      if (!verified.acsAccount) {
+        throw new BadRequestException(
+          `Sender domain ${domain} has no ACS account assigned`,
+        );
+      }
+      if (verified.acsAccount.status !== 'active') {
+        throw new BadRequestException(
+          `ACS account ${verified.acsAccount.name} is ${verified.acsAccount.status}`,
+        );
+      }
+      if (acsAccountId === null) {
+        acsAccountId = verified.acsAccount.id;
+      } else if (acsAccountId !== verified.acsAccount.id) {
+        throw new BadRequestException(
+          `所有发件人必须属于同一个 ACS 账号，${domain} 与其它发件人不在同一账号下`,
+        );
+      }
     }
 
     // Audience resolution & recipient materialisation strategy:
@@ -1031,7 +1106,7 @@ export class CampaignService {
       });
       if (swap.count === 0) throw new ConflictException('当前活动状态不允许发送');
 
-      await this.materialiseRecipients(c.id, accountId, audience);
+      await this.materialiseRecipients(c.id, accountId, audience, senders);
     } else {
       // Fast path: cheap pre-flight only. A single LIMIT-1 query on the
       // (accountId, listId, subscriptionStatus) index — sub-ms even on huge
@@ -1139,18 +1214,27 @@ export class CampaignService {
     campaignId: string,
     accountId: string,
     contacts: Array<{ id: string; email: string }>,
+    senders: Array<{ fromEmail: string; fromName: string }>,
   ): Promise<void> {
+    // Single-sender campaigns leave the per-recipient columns NULL so the
+    // worker falls back to Campaign.fromEmail/fromName — no behaviour change.
+    const rotate = senders.length > 1;
     const BATCH = 5000;
     for (let i = 0; i < contacts.length; i += BATCH) {
       const slice = contacts.slice(i, i + BATCH);
       await this.prisma.campaignRecipient.createMany({
-        data: slice.map((c) => ({
-          accountId,
-          campaignId,
-          contactId: c.id,
-          email: c.email,
-          status: 'pending' as const,
-        })),
+        data: slice.map((c, j) => {
+          const s = rotate ? senders[(i + j) % senders.length] : null;
+          return {
+            accountId,
+            campaignId,
+            contactId: c.id,
+            email: c.email,
+            status: 'pending' as const,
+            fromEmail: s?.fromEmail ?? null,
+            fromName: s?.fromName ?? null,
+          };
+        }),
         skipDuplicates: true,
       });
     }
@@ -1233,7 +1317,7 @@ export class CampaignService {
   async duplicate(accountId: string, id: string) {
     const c = await this.prisma.campaign.findFirst({
       where: { id, accountId },
-      include: { lists: true },
+      include: { lists: true, senders: { orderBy: { position: 'asc' } } },
     });
     if (!c) throw new NotFoundException();
     const copy = await this.prisma.campaign.create({
@@ -1261,6 +1345,13 @@ export class CampaignService {
         utmCampaign: c.utmCampaign,
         trackClicks: c.trackClicks,
         lists: { create: c.lists.map((l) => ({ listId: l.listId })) },
+        senders: {
+          create: c.senders.map((s) => ({
+            fromEmail: s.fromEmail,
+            fromName: s.fromName,
+            position: s.position,
+          })),
+        },
       },
     });
     if (c.html) await this.enqueueThumbnail(copy.id);

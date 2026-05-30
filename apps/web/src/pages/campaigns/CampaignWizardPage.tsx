@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -84,6 +84,8 @@ interface CampaignDetail {
   preheader: string | null;
   fromName: string;
   fromEmail: string;
+  /** Full sender roster (position-ordered). Absent on pre-feature responses. */
+  senders?: Array<{ fromEmail: string; fromName: string; position: number }>;
   replyTo: string | null;
   templateId: string | null;
   html: string | null;
@@ -237,7 +239,11 @@ export function CampaignWizardPage() {
   const [preheader, setPreheader] = useState('');
   // fromName is derived from the picked sender username's displayName.
   // Removed as a standalone input — see derivedFromName below.
-  const [fromEmail, setFromEmail] = useState('');
+  // Multi-sender: the campaign can rotate through several from-addresses.
+  // fromEmails[0] is the primary (mirrored onto Campaign.fromEmail and used
+  // for previews); the rest are extra rotation slots.
+  const [fromEmails, setFromEmails] = useState<string[]>([]);
+  const fromEmail = fromEmails[0] ?? '';
   const [replyTo, setReplyTo] = useState('');
   const [selectedListIds, setSelectedListIds] = useState<string[]>([]);
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<string[]>([]);
@@ -295,7 +301,13 @@ export function CampaignWizardPage() {
     setName(d.name);
     setSubject(d.subject);
     setPreheader(d.preheader ?? '');
-    setFromEmail(d.fromEmail);
+    setFromEmails(
+      d.senders && d.senders.length > 0
+        ? d.senders.map((s) => s.fromEmail)
+        : d.fromEmail
+          ? [d.fromEmail]
+          : [],
+    );
     setReplyTo(d.replyTo ?? '');
     setSelectedListIds(d.lists.map((l) => l.listId));
     // segments may be undefined on older API responses; default to []
@@ -388,12 +400,27 @@ export function CampaignWizardPage() {
   // local-part if the address isn't (yet) in the verified options list — this
   // keeps the preview and the API payload non-empty during edit-mode prefill
   // before the domains query has settled.
-  const derivedFromName = useMemo(() => {
-    if (!fromEmail) return '';
-    const opt = senderOptions.find((o) => o.value === fromEmail);
-    const name = opt?.displayName?.trim() || opt?.username || fromEmail.split('@')[0] || '';
-    return name.trim();
-  }, [fromEmail, senderOptions]);
+  const nameForEmail = useCallback(
+    (email: string) => {
+      if (!email) return '';
+      const opt = senderOptions.find((o) => o.value === email);
+      const name = opt?.displayName?.trim() || opt?.username || email.split('@')[0] || '';
+      return name.trim();
+    },
+    [senderOptions],
+  );
+
+  const derivedFromName = useMemo(
+    () => nameForEmail(fromEmail),
+    [fromEmail, nameForEmail],
+  );
+
+  // Full roster sent to the API: every selected address paired with its
+  // derived from-name, in selection order (index 0 = primary).
+  const senders = useMemo(
+    () => fromEmails.map((e) => ({ fromEmail: e, fromName: nameForEmail(e) })),
+    [fromEmails, nameForEmail],
+  );
 
   const domainsMissingUsernames = useMemo(
     () => verifiedDomains.filter((d) => d.senderUsernames.length === 0),
@@ -445,6 +472,7 @@ export function CampaignWizardPage() {
     preheader: preheader || undefined,
     fromName: derivedFromName,
     fromEmail,
+    senders: senders.length > 0 ? senders : undefined,
     replyTo: replyTo || undefined,
     templateId: selectedTemplateId ?? undefined,
     html: editorHtml ?? undefined,
@@ -755,7 +783,7 @@ export function CampaignWizardPage() {
                   <div className="space-y-1.5">
                     <div className="flex h-5 items-center justify-between">
                       <Label className="text-xs text-muted-foreground">
-                        选择寄件地址
+                        选择寄件地址（可多选，发送时轮流使用）
                       </Label>
                       <Link
                         to="/settings/domains/new"
@@ -783,8 +811,8 @@ export function CampaignWizardPage() {
                       </div>
                     ) : (
                       <SenderEmailSelect
-                        value={fromEmail}
-                        onChange={setFromEmail}
+                        values={fromEmails}
+                        onChange={setFromEmails}
                         options={senderOptions}
                       />
                     )}
@@ -1191,6 +1219,12 @@ export function CampaignWizardPage() {
               <SummarySection title="寄件人">
                 <div>
                   {derivedFromName ? `${derivedFromName} <${fromEmail}>` : fromEmail}
+                  {fromEmails.length > 1 && (
+                    <span className="text-muted-foreground">
+                      {' '}
+                      等 {fromEmails.length} 个发件人（轮流发送）
+                    </span>
+                  )}
                 </div>
               </SummarySection>
               <SummarySection title="高级设置">
@@ -1976,17 +2010,31 @@ function HtmlEditorStep({
   );
 }
 
+// Multi-select for campaign sender addresses. Selection order is preserved
+// (index 0 = primary); clicking an unchecked option appends it, clicking a
+// checked one removes it. The campaign rotates through the picked addresses
+// round-robin at send time.
 function SenderEmailSelect({
-  value,
+  values,
   onChange,
   options,
 }: {
-  value: string;
-  onChange: (v: string) => void;
+  values: string[];
+  onChange: (v: string[]) => void;
   options: Array<{ value: string; label: string }>;
 }) {
   const [open, setOpen] = useState(false);
-  const selected = options.find((o) => o.value === value);
+  const selectedOptions = values
+    .map((v) => options.find((o) => o.value === v))
+    .filter((o): o is { value: string; label: string } => !!o);
+
+  const toggle = (value: string) => {
+    if (values.includes(value)) {
+      onChange(values.filter((v) => v !== value));
+    } else {
+      onChange([...values, value]);
+    }
+  };
 
   return (
     <div className="relative">
@@ -1995,36 +2043,53 @@ function SenderEmailSelect({
         onClick={() => setOpen((v) => !v)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         className={
-          'flex h-9 w-full items-center justify-between rounded-md border bg-background px-3 text-sm transition-colors ' +
+          'flex min-h-9 w-full items-center justify-between gap-2 rounded-md border bg-background px-3 py-1.5 text-sm transition-colors ' +
           (open ? 'border-primary' : 'border-input hover:border-primary/40')
         }
       >
-        <span className={selected ? 'text-foreground' : 'text-muted-foreground'}>
-          {selected?.label ?? '请选择...'}
-        </span>
+        {selectedOptions.length === 0 ? (
+          <span className="text-muted-foreground">请选择...</span>
+        ) : (
+          <span className="flex flex-wrap gap-1 text-left">
+            {selectedOptions.map((o, i) => (
+              <span
+                key={o.value}
+                className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary"
+              >
+                {i === 0 && <span className="text-[10px] text-primary/70">主</span>}
+                {o.label}
+              </span>
+            ))}
+          </span>
+        )}
         <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
       </button>
       {open && (
         <div
-          className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-md border bg-popover py-1 shadow-lg"
+          className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-auto rounded-md border bg-popover py-1 shadow-lg"
           onMouseDown={(e) => e.preventDefault()}
         >
           {options.map((o) => {
-            const isSelected = o.value === value;
+            const isSelected = values.includes(o.value);
             return (
               <div
                 key={o.value}
-                onClick={() => {
-                  onChange(o.value);
-                  setOpen(false);
-                }}
+                onClick={() => toggle(o.value)}
                 className={
-                  'cursor-pointer px-3 py-2 text-sm transition-colors ' +
+                  'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm transition-colors ' +
                   (isSelected
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-foreground hover:bg-muted/40')
                 }
               >
+                <span
+                  className={
+                    'flex size-4 shrink-0 items-center justify-center rounded border ' +
+                    (isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-input')
+                  }
+                >
+                  {isSelected && <Check className="size-3" />}
+                </span>
                 {o.label}
               </div>
             );

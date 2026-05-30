@@ -116,7 +116,7 @@ async function runDispatch(job: Job<DispatchJobData>) {
 
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, accountId },
-    include: { lists: true },
+    include: { lists: true, senders: { orderBy: { position: 'asc' } } },
   });
   if (!campaign) throw new Error('Campaign not found');
   if (
@@ -183,7 +183,12 @@ async function runDispatch(job: Job<DispatchJobData>) {
  * to "sent" on an empty audience.
  */
 async function materialiseRecipients(
-  campaign: { id: string; lists: { listId: string }[]; totalRecipients: number },
+  campaign: {
+    id: string;
+    lists: { listId: string }[];
+    senders: { fromEmail: string; fromName: string }[];
+    totalRecipients: number;
+  },
   accountId: string,
 ): Promise<number> {
   const existing = await prisma.campaignRecipient.count({
@@ -192,6 +197,12 @@ async function materialiseRecipients(
   if (campaign.totalRecipients > 0 && existing >= campaign.totalRecipients) {
     return existing;
   }
+
+  // Multi-sender campaigns round-robin a from address onto each recipient.
+  // We seed the rotation index from `existing` so a mid-stream retry keeps
+  // the distribution roughly even instead of restarting at sender 0.
+  const senders = campaign.senders;
+  const rotate = senders.length > 1;
 
   const listIds = campaign.lists.map((l) => l.listId);
   // No lists means this is the segment-only path; API already materialised
@@ -219,13 +230,18 @@ async function materialiseRecipients(
     if (batch.length === 0) break;
 
     await prisma.campaignRecipient.createMany({
-      data: batch.map((c) => ({
-        accountId,
-        campaignId: campaign.id,
-        contactId: c.id,
-        email: c.email,
-        status: 'pending',
-      })),
+      data: batch.map((c, j) => {
+        const s = rotate ? senders[(inserted + j) % senders.length] : null;
+        return {
+          accountId,
+          campaignId: campaign.id,
+          contactId: c.id,
+          email: c.email,
+          status: 'pending' as const,
+          fromEmail: s?.fromEmail ?? null,
+          fromName: s?.fromName ?? null,
+        };
+      }),
       skipDuplicates: true,
     });
     inserted += batch.length;
@@ -401,6 +417,11 @@ async function runSend(job: Job<SendJobData>) {
   if (r.status === 'sent' || r.status === 'failed' || r.status === 'skipped') return;
 
   const c = r.campaign;
+  // Per-recipient sender assigned at materialisation for multi-sender
+  // campaigns; NULL on single-sender campaigns (and all pre-feature rows),
+  // where we fall back to the campaign's primary from address.
+  const fromEmail = r.fromEmail ?? c.fromEmail;
+  const fromName = r.fromName ?? c.fromName;
 
   if (c.status === 'paused') {
     await prisma.campaignRecipient.update({
@@ -482,7 +503,7 @@ async function runSend(job: Job<SendJobData>) {
       firstName: contact?.firstName ?? null,
       lastName: contact?.lastName ?? null,
     },
-    campaign: { id: c.id, fromEmail: c.fromEmail },
+    campaign: { id: c.id, fromEmail },
     unsubscribeUrl: unsubUrl,
   };
 
@@ -550,12 +571,12 @@ async function runSend(job: Job<SendJobData>) {
   }
 
   const result = await transport.send({
-    from: { name: c.fromName, address: c.fromEmail },
+    from: { name: fromName, address: fromEmail },
     to: r.email,
     subject,
     html,
     headers: {
-      'List-Unsubscribe': `<${unsubUrl}>, <mailto:unsubscribe@${c.fromEmail.split('@')[1]}>`,
+      'List-Unsubscribe': `<${unsubUrl}>, <mailto:unsubscribe@${fromEmail.split('@')[1]}>`,
       'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
       'X-SendMast-Recipient': r.id,
       'X-SendMast-Campaign': c.id,
@@ -571,8 +592,8 @@ async function runSend(job: Job<SendJobData>) {
         acsAccountId: acct.id,
         campaignId: c.id,
         recipientId: r.id,
-        fromAddress: c.fromEmail,
-        fromName: c.fromName,
+        fromAddress: fromEmail,
+        fromName: fromName,
         toAddress: r.email,
         ok: result.ok,
         providerStatus: result.providerStatus,

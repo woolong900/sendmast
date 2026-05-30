@@ -701,12 +701,35 @@ model Campaign {
   lists      CampaignList[]
   segments   CampaignSegment[]
   recipients CampaignRecipient[]
+  senders    CampaignSender[]
   sendLogs   SendLog[]
 
   @@index([accountId, status])
   @@index([accountId, createdAt])
   @@index([status])
   @@map("campaigns")
+}
+
+/// Extra "from" addresses a campaign rotates through. `Campaign.fromEmail`/
+/// `fromName` always equal the position-0 sender (kept for previews, the
+/// list view, and as the tick scheduler's ACS-routing key). When a campaign
+/// has >1 sender, each recipient is assigned one in round-robin at
+/// materialisation time (see CampaignRecipient.fromEmail). All senders must
+/// resolve to verified domains under the SAME ACS account as the primary.
+model CampaignSender {
+  id         String   @id @default(uuid()) @db.Uuid
+  campaignId String   @map("campaign_id") @db.Uuid
+  fromEmail  String   @map("from_email")
+  fromName   String   @map("from_name")
+  /// 0-based slot; position 0 mirrors Campaign.fromEmail. Drives the
+  /// round-robin order (recipient i → sender at position i % senderCount).
+  position   Int
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, fromEmail])
+  @@index([campaignId])
+  @@map("campaign_senders")
 }
 
 model CampaignList {
@@ -787,6 +810,11 @@ model CampaignRecipient {
   messageId    String?         @map("message_id")
   errorMessage String?         @map("error_message")
   sentAt       DateTime?       @map("sent_at")
+  /// Round-robin sender assigned at materialisation when the campaign has
+  /// multiple senders. NULL = use Campaign.fromEmail/fromName (single-sender
+  /// campaigns and all rows created before this feature).
+  fromEmail    String?         @map("from_email")
+  fromName     String?         @map("from_name")
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
 

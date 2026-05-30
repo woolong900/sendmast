@@ -20,12 +20,32 @@ export type CampaignStatusValue = z.infer<typeof CampaignStatusSchema>;
 export const EditorModeSchema = z.enum(['visual', 'html']);
 export type EditorMode = z.infer<typeof EditorModeSchema>;
 
+/**
+ * One "from" identity a campaign can send as. Used by the multi-sender
+ * feature: the wizard sends an array of these; the API rotates through them
+ * per recipient (round-robin) at send time. `fromName` is derived on the
+ * client from the chosen sender username's display name.
+ */
+export const CampaignSenderSchema = z.object({
+  fromEmail: z.string().email(),
+  fromName: z.string().min(1).max(80),
+});
+export type CampaignSenderInput = z.infer<typeof CampaignSenderSchema>;
+
 export const CreateCampaignSchema = z.object({
   name: z.string().min(1).max(120),
   subject: z.string().min(1).max(200),
   preheader: z.string().max(200).optional(),
   fromName: z.string().min(1).max(80),
   fromEmail: z.string().email(),
+  /**
+   * Full sender roster for round-robin sending. When present and non-empty,
+   * position 0 must equal { fromEmail, fromName } above (the primary). When
+   * omitted, the campaign has a single sender (the primary) — backwards
+   * compatible with all pre-feature clients. All senders must resolve to
+   * verified domains under the same ACS account.
+   */
+  senders: z.array(CampaignSenderSchema).min(1).max(50).optional(),
   replyTo: z.string().email().optional(),
   templateId: z.string().uuid().optional(),
   mjml: z.string().optional(),
