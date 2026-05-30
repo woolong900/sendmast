@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AzureAcsService } from './azure-acs.service';
+import { ensureDmarcRecord } from './dmarc-record';
 import type {
   SenderDomainDnsRecord,
   SenderDomainRecordKind,
@@ -109,7 +110,8 @@ export class SenderDomainService {
     domain: string,
   ): Promise<void> {
     try {
-      const { records } = await this.azure.createDomain(acsAccount, domain);
+      const { records: azureRecords } = await this.azure.createDomain(acsAccount, domain);
+      const records = ensureDmarcRecord(azureRecords);
       await this.prisma.senderDomain.update({
         where: { id: rowId },
         data: {
@@ -152,10 +154,15 @@ export class SenderDomainService {
       throw new BadRequestException('域名配置失败，请删除后重新添加。');
     }
 
-    // Only consider the kinds Azure actually generated DNS records for —
-    // some domains don't get every kind (e.g. DMARC may be absent), and
-    // RECORD_KINDS is just the union of all *possible* kinds.
-    const records = (row.verificationRecords as unknown as SenderDomainDnsRecord[]) ?? [];
+    // Always include platform-mandatory DMARC even when Azure didn't return it.
+    const storedRecords = (row.verificationRecords as unknown as SenderDomainDnsRecord[]) ?? [];
+    const records = ensureDmarcRecord(storedRecords);
+    if (records.length !== storedRecords.length) {
+      await this.prisma.senderDomain.update({
+        where: { id: row.id },
+        data: { verificationRecords: records as unknown as Prisma.InputJsonValue },
+      });
+    }
     const recordKinds: SenderDomainRecordKind[] = records.map((r) => r.kind);
 
     // First refresh — see what's currently in flight.
@@ -329,13 +336,23 @@ export class SenderDomainService {
     },
     senderUsernames: SenderUsernameRow[] = [],
   ): SenderDomainView {
+    const records = ensureDmarcRecord(
+      (row.verificationRecords as unknown as SenderDomainDnsRecord[]) ?? [],
+    );
+    const states = (row.verificationStates as unknown as SenderDomainVerificationStates) ?? {};
+    // A domain marked verified before we enforced DMARC must re-verify DMARC
+    // before the UI treats it as fully ready (step 3+ in the add-domain wizard).
+    let status = row.status;
+    if (status === 'verified' && states.DMARC?.status !== 'Verified') {
+      status = 'pending';
+    }
     return {
       id: row.id,
       domain: row.domain,
       acsAccountId: row.acsAccountId,
-      status: row.status,
-      records: (row.verificationRecords as unknown as SenderDomainDnsRecord[]) ?? [],
-      states: (row.verificationStates as unknown as SenderDomainVerificationStates) ?? {},
+      status,
+      records,
+      states,
       lastCheckedAt: row.lastCheckedAt?.toISOString() ?? null,
       verifiedAt: row.verifiedAt?.toISOString() ?? null,
       linkedAt: row.linkedAt?.toISOString() ?? null,

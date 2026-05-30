@@ -10,9 +10,10 @@ export const CreateSenderDomainSchema = z.object({
 export type CreateSenderDomainInput = z.infer<typeof CreateSenderDomainSchema>;
 
 /**
- * One DNS record Azure asks the customer to add. Names match the keys Azure
- * returns under `verificationRecords` (Domain ownership, SPF, DKIM, DKIM2,
- * DMARC). DKIM/DKIM2 are CNAMEs in the Azure flow; the rest are TXTs.
+ * One DNS record the customer must add. Names match Azure's
+ * `verificationRecords` keys where Azure supplies them (Domain, SPF, DKIM,
+ * DKIM2). DMARC is always included — injected by the API with a platform
+ * default (`v=DMARC1; p=none`) when Azure omits it.
  */
 export type SenderDomainRecordKind = 'Domain' | 'SPF' | 'DKIM' | 'DKIM2' | 'DMARC';
 

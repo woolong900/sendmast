@@ -149,7 +149,8 @@ export function SenderDomainAddPage() {
                 </Badge>
               </h2>
               <p className="text-sm text-muted-foreground">
-                请在您的 DNS 服务商处（Cloudflare / 阿里云 / 腾讯云 等）添加以下记录。注意 DKIM 是 CNAME,其它是 TXT。DNS 生效通常需要几分钟到几小时。
+                请在您的 DNS 服务商处（Cloudflare / 阿里云 / 腾讯云 等）添加以下{' '}
+                <b>全部</b> 记录（含 DMARC，均为必填）。DKIM 是 CNAME，其余是 TXT。DNS 生效通常需要几分钟到几小时。
               </p>
 
               {view.records.map((rec) => (
