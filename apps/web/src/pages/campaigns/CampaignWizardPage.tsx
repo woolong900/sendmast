@@ -2031,6 +2031,7 @@ function SenderEmailSelect({
   const selectedOptions = values
     .map((v) => options.find((o) => o.value === v))
     .filter((o): o is { value: string; label: string } => !!o);
+  const allSelected = options.length > 0 && values.length >= options.length;
 
   const toggle = (value: string) => {
     if (values.includes(value)) {
@@ -2040,6 +2041,10 @@ function SenderEmailSelect({
     }
   };
 
+  const toggleAll = () => {
+    onChange(allSelected ? [] : options.map((o) => o.value));
+  };
+
   return (
     <div className="relative">
       <button
@@ -2047,32 +2052,45 @@ function SenderEmailSelect({
         onClick={() => setOpen((v) => !v)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         className={
-          'flex min-h-9 w-full items-center justify-between gap-2 rounded-md border bg-background px-3 py-1.5 text-sm transition-colors ' +
+          'flex h-9 w-full items-center justify-between gap-2 rounded-md border bg-background px-3 text-sm transition-colors ' +
           (open ? 'border-primary' : 'border-input hover:border-primary/40')
         }
       >
         {selectedOptions.length === 0 ? (
           <span className="text-muted-foreground">请选择...</span>
         ) : (
-          <span className="flex flex-wrap gap-1 text-left">
-            {selectedOptions.map((o, i) => (
-              <span
-                key={o.value}
-                className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary"
-              >
-                {i === 0 && <span className="text-[10px] text-primary/70">主</span>}
-                {o.label}
-              </span>
-            ))}
+          <span className="truncate text-left text-foreground">
+            {selectedOptions[0].label}
           </span>
         )}
-        <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        <span className="flex shrink-0 items-center gap-1.5">
+          {selectedOptions.length > 1 && (
+            <span className="text-xs text-muted-foreground">
+              …等 {selectedOptions.length} 人
+            </span>
+          )}
+          <ChevronDown className="size-4 text-muted-foreground" />
+        </span>
       </button>
       {open && (
         <div
           className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-auto rounded-md border bg-popover py-1 shadow-lg"
           onMouseDown={(e) => e.preventDefault()}
         >
+          <div
+            onClick={toggleAll}
+            className="flex cursor-pointer items-center gap-2 border-b px-3 py-2 text-sm font-medium text-foreground hover:bg-muted/40"
+          >
+            <span
+              className={
+                'flex size-4 shrink-0 items-center justify-center rounded border ' +
+                (allSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-input')
+              }
+            >
+              {allSelected && <Check className="size-3" />}
+            </span>
+            {allSelected ? '取消全选' : '全选'}
+          </div>
           {options.map((o) => {
             const isSelected = values.includes(o.value);
             return (
