@@ -469,7 +469,11 @@ export function CampaignWizardPage() {
   const payload = () => ({
     name,
     subject,
-    preheader: preheader || undefined,
+    // Always send the field (even when empty) so clearing it actually
+    // persists. `|| undefined` here used to drop the empty string, which made
+    // PATCH leave the old preheader untouched — clearing it in the UI looked
+    // saved but reverted on reopen.
+    preheader: preheader.trim(),
     fromName: derivedFromName,
     fromEmail,
     senders: senders.length > 0 ? senders : undefined,
