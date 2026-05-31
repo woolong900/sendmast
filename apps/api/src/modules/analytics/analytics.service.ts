@@ -155,11 +155,12 @@ export class AnalyticsService {
     const sentBase = sent || c.totalRecipients;
     const funnel = [
       { step: 'sent', value: sent, pct: sentBase > 0 ? 1 : 0 },
-      // 送达 uses the same denominator as the headline 送达率 card
-      // (送达 /（送达+弹回+失败），不含投递中) so the two stay consistent.
+      // Each step reuses the matching headline card's rate so the funnel and
+      // the cards never disagree: 送达 = 送达/(送达+弹回+失败); 打开/点击 =
+      // 打开(点击)人数/送达数.
       { step: 'delivered', value: delivered, pct: rates.delivery },
-      { step: 'opened', value: uniqueOpens, pct: safe(uniqueOpens, sentBase) },
-      { step: 'clicked', value: uniqueClicks, pct: safe(uniqueClicks, sentBase) },
+      { step: 'opened', value: uniqueOpens, pct: rates.uniqueOpen },
+      { step: 'clicked', value: uniqueClicks, pct: rates.uniqueClick },
     ];
 
     return { campaignId, totals, rates, funnel };
