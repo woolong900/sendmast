@@ -9,6 +9,8 @@ export interface CampaignAnalyticsView {
     sent: number;
     delivered: number;
     failed: number;
+    /** Accepted by ACS but no delivery report (delivered/bounce) received yet. */
+    pending: number;
     uniqueOpens: number;
     uniqueClicks: number;
     /** All bounces (hard + soft). */
@@ -22,6 +24,8 @@ export interface CampaignAnalyticsView {
     delivery: number;
     uniqueOpen: number;
     uniqueClick: number;
+    /** 投递中 / sent. */
+    pending: number;
     /** All bounces / sent. */
     bounce: number;
     /** Hard bounces / sent — drives the "无效邮箱率" card. */
@@ -109,11 +113,19 @@ export class AnalyticsService {
 
     const safe = (a: number, b: number) => (b > 0 ? a / b : 0);
 
+    // 投递中 = accepted by ACS but neither a delivery nor a bounce report has
+    // arrived, and it wasn't a send-time failure. Clamped at 0 because
+    // delivered/bounces are unique-by-recipient from ClickHouse and a single
+    // recipient can appear in both (soft-bounce then delivered), which could
+    // otherwise push the subtraction slightly negative.
+    const pending = Math.max(0, sent - delivered - bounces - failed);
+
     const totals = {
       recipients: c.totalRecipients,
       sent,
       delivered,
       failed,
+      pending,
       uniqueOpens,
       uniqueClicks,
       bounces,
@@ -126,6 +138,7 @@ export class AnalyticsService {
       delivery: safe(delivered, sent),
       uniqueOpen: safe(uniqueOpens, delivered || sent),
       uniqueClick: safe(uniqueClicks, delivered || sent),
+      pending: safe(pending, sent),
       bounce: safe(bounces, sent),
       bounceHard: safe(bouncesHard, sent),
       complaint: safe(complaints, sent),

@@ -13,6 +13,7 @@ interface AnalyticsView {
     sent: number;
     delivered: number;
     failed: number;
+    pending: number;
     uniqueOpens: number;
     uniqueClicks: number;
     bounces: number;
@@ -24,6 +25,7 @@ interface AnalyticsView {
     delivery: number;
     uniqueOpen: number;
     uniqueClick: number;
+    pending: number;
     bounce: number;
     bounceHard: number;
     complaint: number;
@@ -165,6 +167,11 @@ export function CampaignAnalyticsPage() {
                 hint={`(发送失败 ${formatNumber(totals.failed)})`}
               />
               <SmallStat
+                label="投递中"
+                value={formatPercent(rates.pending)}
+                hint={`(投递中 ${formatNumber(totals.pending)})`}
+              />
+              <SmallStat
                 to={recipientLink(id, 'bounced')}
                 label="弹回邮箱率"
                 value={formatPercent(rates.bounce)}
@@ -274,16 +281,25 @@ function SmallStat({
   label: string;
   value: string;
   hint: string;
-  to: string;
+  /** Omitted for stats with no matching recipient tab (e.g. 投递中) → plain text. */
+  to?: string;
 }) {
+  const content = (
+    <>
+      <span className="text-muted-foreground hover:text-primary">{label}</span>
+      <span className="font-semibold tabular-nums">{value}</span>
+      <span className="text-xs text-muted-foreground">{hint}</span>
+    </>
+  );
+  if (!to) {
+    return <div className="flex items-baseline gap-2">{content}</div>;
+  }
   return (
     <Link
       to={to}
       className="flex items-baseline gap-2 rounded transition-colors hover:text-primary"
     >
-      <span className="text-muted-foreground hover:text-primary">{label}</span>
-      <span className="font-semibold tabular-nums">{value}</span>
-      <span className="text-xs text-muted-foreground">{hint}</span>
+      {content}
     </Link>
   );
 }
