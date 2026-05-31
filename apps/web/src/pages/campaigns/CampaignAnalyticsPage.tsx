@@ -25,9 +25,9 @@ interface AnalyticsView {
     delivery: number;
     uniqueOpen: number;
     uniqueClick: number;
-    pending: number;
     bounce: number;
     bounceHard: number;
+    pending: number;
     complaint: number;
     unsubscribe: number;
   };
@@ -281,12 +281,14 @@ function SmallStat({
   label: string;
   value: string;
   hint: string;
-  /** Omitted for stats with no matching recipient tab (e.g. 投递中) → plain text. */
+  /** Omit for stats with no recipients drill-down (e.g. 投递中). */
   to?: string;
 }) {
   const content = (
     <>
-      <span className="text-muted-foreground hover:text-primary">{label}</span>
+      <span className={to ? 'text-muted-foreground hover:text-primary' : 'text-muted-foreground'}>
+        {label}
+      </span>
       <span className="font-semibold tabular-nums">{value}</span>
       <span className="text-xs text-muted-foreground">{hint}</span>
     </>

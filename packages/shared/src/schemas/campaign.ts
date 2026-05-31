@@ -185,6 +185,8 @@ export interface CampaignAnalytics {
     sent: number;
     delivered: number;
     failed: number;
+    /** Accepted by ACS but no delivery report yet (in-transit / deferred). */
+    pending: number;
     uniqueOpens: number;
     uniqueClicks: number;
     bounces: number;
@@ -196,6 +198,7 @@ export interface CampaignAnalytics {
     uniqueOpen: number;
     uniqueClick: number;
     bounce: number;
+    pending: number;
     complaint: number;
     unsubscribe: number;
   };

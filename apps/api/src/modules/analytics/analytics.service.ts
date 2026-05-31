@@ -9,7 +9,11 @@ export interface CampaignAnalyticsView {
     sent: number;
     delivered: number;
     failed: number;
-    /** Accepted by ACS but no delivery report (delivered/bounce) received yet. */
+    /**
+     * Accepted by ACS but no delivery report yet (neither delivered nor
+     * bounced nor send-failed). Mostly deferred/in-transit mail or delivery
+     * reports we haven't received. = sent − delivered − bounces − failed.
+     */
     pending: number;
     uniqueOpens: number;
     uniqueClicks: number;
@@ -24,12 +28,12 @@ export interface CampaignAnalyticsView {
     delivery: number;
     uniqueOpen: number;
     uniqueClick: number;
-    /** 投递中 / sent. */
-    pending: number;
     /** All bounces / sent. */
     bounce: number;
     /** Hard bounces / sent — drives the "无效邮箱率" card. */
     bounceHard: number;
+    /** Pending / sent — drives the "投递中" card. */
+    pending: number;
     complaint: number;
     unsubscribe: number;
   };
@@ -113,11 +117,10 @@ export class AnalyticsService {
 
     const safe = (a: number, b: number) => (b > 0 ? a / b : 0);
 
-    // 投递中 = accepted by ACS but neither a delivery nor a bounce report has
-    // arrived, and it wasn't a send-time failure. Clamped at 0 because
-    // delivered/bounces are unique-by-recipient from ClickHouse and a single
-    // recipient can appear in both (soft-bounce then delivered), which could
-    // otherwise push the subtraction slightly negative.
+    // Whatever's left after delivered/bounced/failed is still in flight (or its
+    // delivery report hasn't reached us). Clamp at 0 — delivered & bounces are
+    // independent uniqExact counts from CH so a soft-bounce-then-delivered
+    // recipient could otherwise push this slightly negative.
     const pending = Math.max(0, sent - delivered - bounces - failed);
 
     const totals = {
@@ -138,9 +141,9 @@ export class AnalyticsService {
       delivery: safe(delivered, sent),
       uniqueOpen: safe(uniqueOpens, delivered || sent),
       uniqueClick: safe(uniqueClicks, delivered || sent),
-      pending: safe(pending, sent),
       bounce: safe(bounces, sent),
       bounceHard: safe(bouncesHard, sent),
+      pending: safe(pending, sent),
       complaint: safe(complaints, sent),
       unsubscribe: safe(unsubscribes, sent),
     };
