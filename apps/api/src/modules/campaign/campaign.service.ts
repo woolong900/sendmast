@@ -349,6 +349,12 @@ export class CampaignService {
       return { source: 'empty', rows: [], nextCursor: null, total: null };
     }
 
+    // 投递中 = accepted (status='sent') but no delivered/bounce event yet.
+    // Needs a CH anti-join so it gets its own path.
+    if (query.dimension === 'pending') {
+      return this.listPendingRecipients(accountId, campaignId, query);
+    }
+
     // Event-based dimensions (delivered/open/click/bounce/...) are answered
     // straight out of ClickHouse email_events regardless of archive status —
     // we want to show "who opened" even after the recipients table is gone.
@@ -516,6 +522,66 @@ export class CampaignService {
    * pages if many events share the same millisecond. Acceptable trade-off
    * for the UI that paginates 50–100 rows at a time.
    */
+  /**
+   * 投递中 list: recipients ACS accepted (status='sent') that have NEITHER a
+   * delivered NOR a bounce event in ClickHouse — i.e. still deferred/in-transit
+   * or their delivery report hasn't reached us. We anti-join PG against the set
+   * of "terminal" recipient ids pulled from CH.
+   *
+   * Scoped to the hot PG table; archived campaigns (rows already moved to CH)
+   * return empty, which is fine because pending is only meaningful while a send
+   * is still settling. If CH is unreachable we can't know who's pending, so we
+   * degrade to empty rather than over-report every sent recipient.
+   */
+  private async listPendingRecipients(
+    accountId: string,
+    campaignId: string,
+    q: ListRecipientsQuery,
+  ): Promise<ListRecipientsResponse> {
+    let terminalIds: string[];
+    try {
+      const rows = await this.ch.query<{ recipient_id: string }>(
+        `SELECT DISTINCT recipient_id
+         FROM sendmast.email_events
+         WHERE account_id = {acc:UUID}
+           AND campaign_id = {cid:UUID}
+           AND event_type IN ('delivered', 'bounce')`,
+        { acc: accountId, cid: campaignId },
+      );
+      terminalIds = rows.map((r) => r.recipient_id);
+    } catch (err) {
+      console.warn('listPendingRecipients: CH query failed', err);
+      return { source: 'events', rows: [], nextCursor: null, total: null };
+    }
+
+    const where: Prisma.CampaignRecipientWhereInput = {
+      campaignId,
+      status: 'sent',
+      ...(terminalIds.length > 0 ? { id: { notIn: terminalIds } } : {}),
+    };
+    const sentCount = await this.prisma.campaignRecipient.count({
+      where: { campaignId, status: 'sent' },
+    });
+    const rows = await this.prisma.campaignRecipient.findMany({
+      where,
+      orderBy: { id: 'asc' },
+      take: q.pageSize + 1,
+      ...(q.cursor ? { skip: 1, cursor: { id: q.cursor } } : {}),
+    });
+    const hasMore = rows.length > q.pageSize;
+    const page = hasMore ? rows.slice(0, q.pageSize) : rows;
+    const names = await fetchContactNames(
+      this.prisma,
+      page.map((r) => r.contactId),
+    );
+    return {
+      source: 'hot',
+      rows: page.map((r) => toRecipientView(r, names.get(r.contactId))),
+      nextCursor: hasMore ? page[page.length - 1].id : null,
+      total: Math.max(0, sentCount - terminalIds.length),
+    };
+  }
+
   private async listRecipientsFromEvents(
     accountId: string,
     campaignId: string,

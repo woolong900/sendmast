@@ -112,6 +112,8 @@ export type RecipientStatusValue = z.infer<typeof RecipientStatusSchema>;
 export const RecipientDimensionSchema = z.enum([
   'sent',
   'delivered',
+  /** Accepted by ACS but no delivery report yet (in-transit / deferred). */
+  'pending',
   'opened',
   'clicked',
   'sales',

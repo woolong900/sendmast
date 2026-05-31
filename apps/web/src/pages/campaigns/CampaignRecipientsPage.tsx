@@ -12,6 +12,7 @@ import { EmptyStateRow } from '@/components/ui/empty-state';
 type Dimension =
   | 'sent'
   | 'delivered'
+  | 'pending'
   | 'opened'
   | 'clicked'
   | 'sales'
@@ -53,6 +54,7 @@ interface CampaignDetail {
 const TABS: Array<{ key: Dimension; label: string }> = [
   { key: 'sent', label: '发送' },
   { key: 'delivered', label: '送达' },
+  { key: 'pending', label: '投递中' },
   { key: 'opened', label: '打开' },
   { key: 'clicked', label: '点击' },
   { key: 'sales', label: '销售额' },
@@ -201,6 +203,7 @@ const COL_TIME = (header: string, key: 'sentAt' | 'deliveredAt' | 'eventTime'): 
 const COLUMNS_BY_DIM: Record<Dimension, Column[]> = {
   sent: [COL_NAME, COL_EMAIL, COL_TIME('发送时间', 'eventTime')],
   delivered: [COL_NAME, COL_EMAIL, COL_TIME('送达时间', 'eventTime')],
+  pending: [COL_NAME, COL_EMAIL, COL_TIME('发送时间', 'eventTime')],
   opened: [
     COL_NAME,
     COL_EMAIL,

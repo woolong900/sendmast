@@ -104,7 +104,7 @@ export function CampaignAnalyticsPage() {
         <CardContent className="space-y-3 p-4">
           {/* Row 1 — engagement headline metrics. Each card drills into the
               matching tab on /recipients. */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
             <MetricCard
               to={recipientLink(id, 'sent')}
               label="发送数"
@@ -115,6 +115,12 @@ export function CampaignAnalyticsPage() {
               label="送达率"
               value={formatPercent(rates.delivery)}
               hint={`(送达数 ${formatNumber(totals.delivered)})`}
+            />
+            <MetricCard
+              to={recipientLink(id, 'pending')}
+              label="投递中"
+              value={formatPercent(rates.pending)}
+              hint={`(投递中 ${formatNumber(totals.pending)})`}
             />
             <MetricCard
               to={recipientLink(id, 'opened')}
@@ -133,14 +139,9 @@ export function CampaignAnalyticsPage() {
           {/* Row 2 — commerce metrics. All four drill to the same `sales`
               tab; the orders/attribution pipeline isn't wired yet so the
               destination shows an "即将推出" placeholder. */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             <MetricCard to={recipientLink(id, 'sales')} label="销售额" value="US$0" />
             <MetricCard to={recipientLink(id, 'sales')} label="订单数" value="0" />
-            <MetricCard
-              to={recipientLink(id, 'sales')}
-              label="平均订单金额"
-              value="US$0"
-            />
             <MetricCard
               to={recipientLink(id, 'sales')}
               label="转化率"
@@ -165,11 +166,6 @@ export function CampaignAnalyticsPage() {
                 label="发送失败率"
                 value={formatPercent(failureRate)}
                 hint={`(发送失败 ${formatNumber(totals.failed)})`}
-              />
-              <SmallStat
-                label="投递中"
-                value={formatPercent(rates.pending)}
-                hint={`(投递中 ${formatNumber(totals.pending)})`}
               />
               <SmallStat
                 to={recipientLink(id, 'bounced')}

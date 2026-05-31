@@ -138,7 +138,11 @@ export class AnalyticsService {
     };
 
     const rates = {
-      delivery: safe(delivered, sent),
+      // 送达率 denominator excludes still-pending mail: of the messages that
+      // reached a final outcome (delivered + bounced + failed), how many
+      // delivered. Pending recipients don't drag the rate down while their
+      // delivery reports are still in flight.
+      delivery: safe(delivered, delivered + bounces + failed),
       uniqueOpen: safe(uniqueOpens, delivered || sent),
       uniqueClick: safe(uniqueClicks, delivered || sent),
       bounce: safe(bounces, sent),
