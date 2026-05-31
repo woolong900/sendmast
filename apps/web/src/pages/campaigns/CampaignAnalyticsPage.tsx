@@ -104,7 +104,7 @@ export function CampaignAnalyticsPage() {
         <CardContent className="space-y-3 p-4">
           {/* Row 1 — engagement headline metrics. Each card drills into the
               matching tab on /recipients. */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               to={recipientLink(id, 'sent')}
               label="发送数"
@@ -128,18 +128,23 @@ export function CampaignAnalyticsPage() {
               value={formatPercent(rates.uniqueOpen)}
               hint={`(打开人数 ${formatNumber(totals.uniqueOpens)})`}
             />
+          </div>
+
+          {/* 送达率与投递中口径不同,不可直接相加 —— 见用户反馈"加起来110%"。 */}
+          <p className="px-1 text-xs text-muted-foreground">
+            送达率 = 送达 /（送达 + 弹回 + 失败），分母不含投递中；投递中 = 投递中 / 总投放。两者分母不同，不能直接相加。
+          </p>
+
+          {/* Row 2 — commerce metrics. All four drill to the same `sales`
+              tab; the orders/attribution pipeline isn't wired yet so the
+              destination shows an "即将推出" placeholder. */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               to={recipientLink(id, 'clicked')}
               label="不重复点击率"
               value={formatPercent(rates.uniqueClick)}
               hint={`(点击人数 ${formatNumber(totals.uniqueClicks)})`}
             />
-          </div>
-
-          {/* Row 2 — commerce metrics. All four drill to the same `sales`
-              tab; the orders/attribution pipeline isn't wired yet so the
-              destination shows an "即将推出" placeholder. */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             <MetricCard to={recipientLink(id, 'sales')} label="销售额" value="US$0" />
             <MetricCard to={recipientLink(id, 'sales')} label="订单数" value="0" />
             <MetricCard
