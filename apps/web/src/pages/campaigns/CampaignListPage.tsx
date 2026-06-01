@@ -57,8 +57,12 @@ const STATUS_VARIANT: Record<
   canceled: 'muted',
 };
 
+const MAX_THUMB_POLLS = 15;
+
 export function CampaignListPage() {
   const [search, setSearch] = useState('');
+  // Counts consecutive thumbnail-poll cycles so a stuck render can't poll forever.
+  const thumbPollRef = useRef(0);
   // Debounced copy used in the query key — typing updates `search` (the input)
   // instantly but only fires a request 350ms after the user stops, instead of
   // one request per keystroke.
@@ -98,10 +102,25 @@ export function CampaignListPage() {
         total: number;
       };
     },
-    // While any campaign's thumbnail is still rendering server-side, poll so the
-    // preview swaps in automatically once worker-thumbnail finishes.
-    refetchInterval: (query) =>
-      query.state.data?.items.some((c) => c.thumbnailPending) ? 4000 : false,
+    // Polling policy:
+    //  - any 发送中 campaign → 5s so its stats update live;
+    //  - else any thumbnail still rendering → 4s, capped at MAX_THUMB_POLLS
+    //    (~1min) so a stuck worker can't poll forever;
+    //  - otherwise stop.
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? [];
+      if (items.some((c) => c.status === 'sending')) {
+        thumbPollRef.current = 0;
+        return 5000;
+      }
+      if (!items.some((c) => c.thumbnailPending)) {
+        thumbPollRef.current = 0;
+        return false;
+      }
+      if (thumbPollRef.current >= MAX_THUMB_POLLS) return false;
+      thumbPollRef.current += 1;
+      return 4000;
+    },
   });
 
   return (
@@ -427,6 +446,8 @@ function StatusFilter({
     <div className="relative">
       <button
         type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         onBlur={() => setTimeout(close, 120)}
         className={
@@ -553,6 +574,8 @@ function ActionMenu({ c }: { c: CampaignListItem }) {
     <div className="relative">
       <button
         type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         onBlur={() => setTimeout(close, 120)}
         disabled={anyPending}

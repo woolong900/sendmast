@@ -457,37 +457,50 @@ export class CampaignService {
       cid: campaignId,
       lim: q.pageSize + 1,
     };
-    let where = 'account_id = {acc:UUID} AND campaign_id = {cid:UUID}';
-    if (q.cursor) {
-      where += ' AND id > {cursor:UUID}';
-      params.cursor = q.cursor;
-    }
+    // `filter` is the full result-set predicate (no cursor) — used for the
+    // total count. `where` adds the cursor for the page query only.
+    let filter = 'account_id = {acc:UUID} AND campaign_id = {cid:UUID}';
     if (status) {
-      where += ' AND status = {status:String}';
+      filter += ' AND status = {status:String}';
       params.status = status;
     }
     if (excludeBounced) {
       // Genuine send-time failures may have NULL error_message; only exclude
       // the bounce-induced ones. (`x != 'bounced'` alone drops NULLs in CH,
       // which would hide real failures — mirror the hot PG path's OR-null.)
-      where += " AND (error_message IS NULL OR error_message != 'bounced')";
+      filter += " AND (error_message IS NULL OR error_message != 'bounced')";
     }
-    const rows = await this.ch.query<{
-      id: string;
-      email: string;
-      status: string;
-      message_id: string | null;
-      error_message: string | null;
-      sent_at: string | null;
-      created_at: string;
-    }>(
-      `SELECT id, email, status, message_id, error_message, sent_at, created_at
-       FROM sendmast.campaign_recipients_archive FINAL
-       WHERE ${where}
-       ORDER BY id ASC
-       LIMIT {lim:UInt32}`,
-      params,
-    );
+    let where = filter;
+    if (q.cursor) {
+      where += ' AND id > {cursor:UUID}';
+      params.cursor = q.cursor;
+    }
+    const [rows, totalRows] = await Promise.all([
+      this.ch.query<{
+        id: string;
+        email: string;
+        status: string;
+        message_id: string | null;
+        error_message: string | null;
+        sent_at: string | null;
+        created_at: string;
+      }>(
+        `SELECT id, email, status, message_id, error_message, sent_at, created_at
+         FROM sendmast.campaign_recipients_archive FINAL
+         WHERE ${where}
+         ORDER BY id ASC
+         LIMIT {lim:UInt32}`,
+        params,
+      ),
+      // Total over the full filter (sans cursor) so the footer "共 N 条" matches
+      // the hot PG path, which also returns a total.
+      this.ch.query<{ n: string }>(
+        `SELECT toString(count()) AS n
+         FROM sendmast.campaign_recipients_archive FINAL
+         WHERE ${filter}`,
+        params,
+      ),
+    ]);
     const hasMore = rows.length > q.pageSize;
     const page = hasMore ? rows.slice(0, q.pageSize) : rows;
     return {
@@ -510,7 +523,7 @@ export class CampaignService {
         bounceType: null,
       })),
       nextCursor: hasMore ? page[page.length - 1].id : null,
-      total: null,
+      total: Number(totalRows[0]?.n ?? 0),
     };
   }
 

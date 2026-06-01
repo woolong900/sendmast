@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -128,12 +128,23 @@ export class ContactService {
       },
     });
     if (listIds?.length) {
+      await this.assertListsOwned(accountId, listIds);
       await this.prisma.contactListMembership.createMany({
         data: listIds.map((listId) => ({ listId, contactId: contact.id })),
         skipDuplicates: true,
       });
     }
     return contact;
+  }
+
+  /** Reject if any listId doesn't belong to this account — without this the
+   *  membership FK would happily link a contact into another tenant's list. */
+  private async assertListsOwned(accountId: string, listIds: string[]): Promise<void> {
+    const ids = [...new Set(listIds)];
+    const owned = await this.prisma.contactList.count({
+      where: { accountId, id: { in: ids } },
+    });
+    if (owned !== ids.length) throw new BadRequestException('包含无效的联系人列表');
   }
 
   async deleteContact(accountId: string, id: string) {
@@ -170,8 +181,13 @@ export class ContactService {
   async addToList(accountId: string, listId: string, contactIds: string[]) {
     const list = await this.prisma.contactList.findFirst({ where: { id: listId, accountId } });
     if (!list) throw new NotFoundException('联系人列表不存在');
+    // Verify every contact belongs to this account too, otherwise a forged
+    // contactId would pull another tenant's contact into this list.
+    const ids = [...new Set(contactIds)];
+    const owned = await this.prisma.contact.count({ where: { accountId, id: { in: ids } } });
+    if (owned !== ids.length) throw new BadRequestException('包含无效的联系人');
     await this.prisma.contactListMembership.createMany({
-      data: contactIds.map((contactId) => ({ listId, contactId })),
+      data: ids.map((contactId) => ({ listId, contactId })),
       skipDuplicates: true,
     });
   }
@@ -228,7 +244,7 @@ export class ContactService {
     // semantics are simplest on the PK.
     for (;;) {
       const rows = await this.prisma.contact.findMany({
-        where: { memberships: { some: { listId } } },
+        where: { accountId, memberships: { some: { listId } } },
         select: {
           id: true,
           email: true,

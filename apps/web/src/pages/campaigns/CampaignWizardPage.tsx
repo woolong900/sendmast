@@ -551,7 +551,10 @@ export function CampaignWizardPage() {
     onSuccess: (r) => {
       if (isEdit) setSavedEdit(true);
       else if (!createdId) setCreatedId(r.data.id);
-      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      void qc.invalidateQueries({ queryKey: ['campaigns'] });
+      // The list's hover preview caches HTML under ['campaign-html', id] with
+      // staleTime: Infinity — invalidate so an edit shows the new content.
+      void qc.invalidateQueries({ queryKey: ['campaign-html'] });
     },
   });
 

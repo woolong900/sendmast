@@ -21,6 +21,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = '服务器内部错误';
     let code: string | undefined;
+    const isProd = process.env.NODE_ENV === 'production';
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -43,12 +44,18 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         code = 'not_found';
       } else {
         status = HttpStatus.BAD_REQUEST;
-        message = exception.message.split('\n').pop() ?? '数据库操作失败';
         code = exception.code;
+        // Prisma error text can leak schema/column internals — keep it in the
+        // logs, return a generic message to clients in production.
+        this.logger.error(`Prisma ${exception.code}: ${exception.message}`);
+        message = isProd
+          ? '数据库操作失败'
+          : (exception.message.split('\n').pop() ?? '数据库操作失败');
       }
     } else if (exception instanceof Error) {
-      message = exception.message;
       this.logger.error(`Unhandled error: ${exception.message}`, exception.stack);
+      // Never surface raw internal error messages to clients in production.
+      message = isProd ? '服务器内部错误' : exception.message;
     }
 
     res.status(status).json({

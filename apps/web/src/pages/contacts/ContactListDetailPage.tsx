@@ -82,7 +82,13 @@ export function ContactListDetailPage() {
       };
     },
     enabled: !!listId,
-    placeholderData: (prev) => prev,
+    // Keep prior rows visible only while paginating within the SAME
+    // search+status filter — otherwise switching filter would briefly show
+    // stale rows from the previous filter. A filter change shows a fresh load.
+    placeholderData: (prev, prevQuery) => {
+      const k = prevQuery?.queryKey as unknown[] | undefined;
+      return k && k[2] === search && k[3] === status ? prev : undefined;
+    },
   });
 
   const deleteMut = useMutation({

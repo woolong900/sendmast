@@ -23,7 +23,7 @@ export class DashboardService {
     // archive window (90d default) so PG holds all the rows we need.
     const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
 
-    const [contactsTotal, contactsSubscribed, campaignGroups, sent30d, uniqueOpens30d] =
+    const [contactsTotal, contactsSubscribed, campaignGroups, sentCampaigns] =
       await Promise.all([
         this.prisma.contact.count({ where: { accountId } }),
         this.prisma.contact.count({
@@ -34,13 +34,29 @@ export class DashboardService {
           where: { accountId },
           _count: { _all: true },
         }),
-        // Authoritative "封数发出" count — sent state is the source of truth
-        // in PG (CH only sees `delivered`, which won't fire in mailhog dev).
-        this.prisma.campaignRecipient.count({
-          where: { accountId, status: 'sent', sentAt: { gte: since } },
+        // The cohort for the open-rate card: campaigns SENT in the window.
+        // Anchoring both numerator and denominator to the same campaign set
+        // keeps openRate ≤ 100% — previously opens were counted by open-time,
+        // so an open of a campaign sent before the window inflated the rate
+        // above 100% against an in-window send denominator.
+        this.prisma.campaign.findMany({
+          where: { accountId, sentAt: { gte: since } },
+          select: { id: true },
         }),
-        this.queryUniqueOpens30d(accountId, since),
       ]);
+
+    const cohortIds = sentCampaigns.map((c) => c.id);
+    const [sent30d, uniqueOpens30d] = await Promise.all([
+      // Authoritative "封数发出" count — sent state is the source of truth in
+      // PG (CH only sees `delivered`, which won't fire in mailhog dev). 30d is
+      // inside the 90d archive window so rows are still in PG.
+      cohortIds.length
+        ? this.prisma.campaignRecipient.count({
+            where: { accountId, status: 'sent', campaignId: { in: cohortIds } },
+          })
+        : Promise.resolve(0),
+      cohortIds.length ? this.queryUniqueOpens30d(accountId, cohortIds) : Promise.resolve(0),
+    ]);
 
     const campaigns = { draft: 0, scheduled: 0, sending: 0, sent: 0 };
     for (const g of campaignGroups) {
@@ -61,23 +77,21 @@ export class DashboardService {
   }
 
   /**
-   * Unique opens (distinct recipient_id with an `open` event) in the last
-   * 30 days for this tenant. Returns 0 on CH outage so the dashboard still
-   * renders — cards will just show 0% open rate, which is honest.
+   * Unique openers (distinct recipient_id with an `open` event) across the
+   * given campaign cohort for this tenant. Returns 0 on CH outage so the
+   * dashboard still renders — cards will just show 0% open rate, which is
+   * honest. Anchored to campaign_id (not open-time) so the count aligns with
+   * the same campaigns used in the send denominator.
    */
-  private async queryUniqueOpens30d(accountId: string, since: Date): Promise<number> {
+  private async queryUniqueOpens30d(accountId: string, campaignIds: string[]): Promise<number> {
     try {
-      // CH typed DateTime64 params don't accept the trailing `Z` from
-      // Date#toISOString (parser expects `YYYY-MM-DDTHH:MM:SS.sss` and
-      // chokes at byte 24). Pass as String and let parseDateTime64BestEffort
-      // do the lenient parse — same pattern used in campaign.service.ts.
       const rows = await this.ch.query<{ uniques: string }>(
         `SELECT toString(uniqExact(recipient_id)) AS uniques
          FROM sendmast.email_events
          WHERE account_id = {aid:UUID}
            AND event_type = 'open'
-           AND event_time >= parseDateTime64BestEffort({ts:String}, 3)`,
-        { aid: accountId, ts: since.toISOString() },
+           AND campaign_id IN ({cids:Array(UUID)})`,
+        { aid: accountId, cids: campaignIds },
       );
       return Number(rows[0]?.uniques ?? 0);
     } catch (err) {

@@ -143,8 +143,10 @@ export async function findArchivedRecipientById(
     // primary key prefix, so this still triggers a partial scan. Good enough
     // for low-rate webhook fallbacks; if it ever becomes hot we can add a
     // skipping index on id.
+    // FINAL collapses unmerged ReplacingMergeTree duplicates from partial
+    // archive runs so a stale pre-merge row isn't picked for enrichment.
     query: `SELECT id, account_id, campaign_id, contact_id
-            FROM sendmast.campaign_recipients_archive
+            FROM sendmast.campaign_recipients_archive FINAL
             WHERE id = {id:UUID}
             LIMIT 1`,
     query_params: { id },

@@ -39,6 +39,12 @@ export function CampaignDetailPage() {
     queryKey: ['campaigns', id],
     queryFn: async () => (await api.get(`/api/campaigns/${id}`)).data,
     enabled: !!id,
+    // Refresh while the campaign is mid-flight so status/counts update without
+    // a manual reload; stop once it reaches a terminal state.
+    refetchInterval: (query) => {
+      const s = query.state.data?.status;
+      return s === 'sending' || s === 'scheduled' ? 5000 : false;
+    },
   });
 
   const invalidate = () =>

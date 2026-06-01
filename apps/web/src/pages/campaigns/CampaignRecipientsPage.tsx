@@ -86,8 +86,14 @@ function displayName(r: RecipientRow): string {
  * (common for events ingested before tracking was wired or from servers
  * that don't forward UA, like Apple Mail Privacy Protection prefetches).
  */
+// UA strings repeat heavily across rows and each row parses twice (device +
+// os column). Cache by string so UAParser runs at most once per distinct UA.
+const uaCache = new Map<string, { device: string; os: string }>();
+
 function parseUA(ua: string | null): { device: string; os: string } {
   if (!ua) return { device: '-', os: '-' };
+  const cached = uaCache.get(ua);
+  if (cached) return cached;
   try {
     const r = new UAParser(ua).getResult();
     // Prefer device.model when it exists (mobile); otherwise fall back to
@@ -97,7 +103,9 @@ function parseUA(ua: string | null): { device: string; os: string } {
       r.browser.name ||
       '桌面端';
     const os = [r.os.name, r.os.version].filter(Boolean).join(' ').trim() || '-';
-    return { device, os };
+    const result = { device, os };
+    uaCache.set(ua, result);
+    return result;
   } catch {
     return { device: '-', os: '-' };
   }
@@ -342,13 +350,15 @@ export function CampaignRecipientsPage() {
       <Card>
         <CardContent className="p-0">
           <div className="border-b">
-            <div className="flex flex-wrap gap-x-1 px-2">
+            <div role="tablist" className="flex flex-wrap gap-x-1 px-2">
               {TABS.map((t) => {
                 const active = t.key === dim;
                 return (
                   <button
                     key={t.key}
                     type="button"
+                    role="tab"
+                    aria-selected={active}
                     onClick={() => setTab(t.key)}
                     className={cn(
                       'relative px-4 py-3 text-sm transition-colors',

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -54,6 +55,7 @@ export class SegmentService {
   }
 
   async create(accountId: string, input: CreateSegmentInput): Promise<SegmentView> {
+    await this.assertListRulesOwned(accountId, input.definition);
     try {
       const row = await this.prisma.segment.create({
         data: {
@@ -84,6 +86,7 @@ export class SegmentService {
     if (input.name !== undefined) data.name = input.name;
     if (input.description !== undefined) data.description = input.description;
     if (input.definition !== undefined) {
+      await this.assertListRulesOwned(accountId, input.definition);
       data.definition = input.definition as unknown as Prisma.InputJsonValue;
       // Definition changed → cached count is meaningless. Wipe it so the UI
       // shows "—" until next preview/refresh; the alternative (silently
@@ -100,6 +103,28 @@ export class SegmentService {
         throw new ConflictException('同名分群已存在');
       }
       throw err;
+    }
+  }
+
+  /** A `list` rule references contactList UUIDs. Reject any that don't belong
+   *  to this account so a definition can't target another tenant's lists. */
+  private async assertListRulesOwned(
+    accountId: string,
+    definition: SegmentDefinition,
+  ): Promise<void> {
+    const listIds = [
+      ...new Set(
+        definition.rules
+          .filter((r): r is Extract<typeof r, { type: 'list' }> => r.type === 'list')
+          .flatMap((r) => r.values),
+      ),
+    ];
+    if (listIds.length === 0) return;
+    const owned = await this.prisma.contactList.count({
+      where: { accountId, id: { in: listIds } },
+    });
+    if (owned !== listIds.length) {
+      throw new BadRequestException('分群规则引用了无效的联系人列表');
     }
   }
 
