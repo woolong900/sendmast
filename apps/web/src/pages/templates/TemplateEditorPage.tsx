@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save } from 'lucide-react';
 import { ConfigProvider } from '@arco-design/web-react';
 import zhCN from '@arco-design/web-react/es/locale/zh-CN';
@@ -130,6 +130,7 @@ function emptyEmailTemplate(): IEmailTemplate {
 export function TemplateEditorPage() {
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [name, setName] = useState('未命名模板');
   const [category, setCategory] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -184,6 +185,8 @@ export function TemplateEditorPage() {
     },
     onSuccess: (r) => {
       setError(null);
+      void qc.invalidateQueries({ queryKey: ['templates'] });
+      if (id) void qc.invalidateQueries({ queryKey: ['templates', id] });
       if (!id) navigate(`/templates/${r.data.id}/edit`, { replace: true });
     },
     onError: (e) => setError(apiErrMessage(e)),

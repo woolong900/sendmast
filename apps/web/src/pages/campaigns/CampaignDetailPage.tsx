@@ -35,7 +35,7 @@ export function CampaignDetailPage() {
   const confirm = useConfirm();
   const toast = useToast();
 
-  const { data, isLoading } = useQuery<CampaignDetail>({
+  const { data, isLoading, isError, refetch } = useQuery<CampaignDetail>({
     queryKey: ['campaigns', id],
     queryFn: async () => (await api.get(`/api/campaigns/${id}`)).data,
     enabled: !!id,
@@ -98,6 +98,15 @@ export function CampaignDetailPage() {
           </Card>
         </div>
       </PageSkeleton>
+    );
+  if (isError)
+    return (
+      <div className="flex flex-col items-center gap-3 py-16 text-sm text-muted-foreground">
+        <p>活动加载失败</p>
+        <Button variant="outline" onClick={() => void refetch()}>
+          重试
+        </Button>
+      </div>
     );
   if (!data) return null;
 

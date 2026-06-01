@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
@@ -288,11 +288,18 @@ export function CampaignRecipientsPage() {
       prevQuery?.queryKey?.[2] === dim ? prev : undefined,
   });
 
+  // Cursor-based pagination is forward-only (the API returns nextCursor), so
+  // "上一页" needs a remembered stack of the cursors we came from rather than
+  // window.history.back() (which broke after a tab switch — back went to the
+  // previous tab, not the previous page).
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+
   const setTab = (next: Dimension) => {
     const sp = new URLSearchParams(params);
     sp.set('tab', next);
     sp.delete('cursor');
     setParams(sp, { replace: true });
+    setCursorStack([]);
   };
 
   const goToCursor = (next: string | null) => {
@@ -300,6 +307,20 @@ export function CampaignRecipientsPage() {
     if (next) sp.set('cursor', next);
     else sp.delete('cursor');
     setParams(sp);
+  };
+
+  const goNext = () => {
+    const next = list.data?.nextCursor;
+    if (!next) return;
+    setCursorStack((s) => [...s, cursor ?? '']);
+    goToCursor(next);
+  };
+
+  const goPrev = () => {
+    if (cursorStack.length === 0) return;
+    const prev = cursorStack[cursorStack.length - 1];
+    setCursorStack((s) => s.slice(0, -1));
+    goToCursor(prev || null);
   };
 
   return (
@@ -403,8 +424,8 @@ export function CampaignRecipientsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={!cursor}
-                onClick={() => window.history.back()}
+                disabled={cursorStack.length === 0}
+                onClick={goPrev}
               >
                 上一页
               </Button>
@@ -412,7 +433,7 @@ export function CampaignRecipientsPage() {
                 variant="outline"
                 size="sm"
                 disabled={!list.data?.nextCursor}
-                onClick={() => goToCursor(list.data?.nextCursor ?? null)}
+                onClick={goNext}
               >
                 下一页
               </Button>

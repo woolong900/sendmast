@@ -133,7 +133,12 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+      onClick={() => {
+        // Ignore accidental backdrop clicks while a QR is shown and unpaid —
+        // the order is still pending server-side; closing here loses the QR.
+        if (step === 'qr' && !paid) return;
+        onClose();
+      }}
     >
       <div
         role="dialog"

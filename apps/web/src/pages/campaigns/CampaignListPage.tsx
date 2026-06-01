@@ -83,7 +83,7 @@ export function CampaignListPage() {
         ? '账号已被封禁,无法创建活动。'
         : '';
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['campaigns', debouncedSearch, status, dateRange?.from ?? '', dateRange?.to ?? ''],
     queryFn: async () => {
       const params = new URLSearchParams({ page: '1', pageSize: '50' });
@@ -160,6 +160,20 @@ export function CampaignListPage() {
                 <tr>
                   <td colSpan={2} className="px-4 py-8 text-center text-muted-foreground">
                     加载中...
+                  </td>
+                </tr>
+              )}
+              {isError && !isLoading && (
+                <tr>
+                  <td colSpan={2} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    加载失败,请
+                    <button
+                      type="button"
+                      className="ml-1 font-medium text-primary hover:underline"
+                      onClick={() => void refetch()}
+                    >
+                      重试
+                    </button>
                   </td>
                 </tr>
               )}

@@ -467,7 +467,10 @@ export class CampaignService {
       params.status = status;
     }
     if (excludeBounced) {
-      where += " AND error_message != 'bounced'";
+      // Genuine send-time failures may have NULL error_message; only exclude
+      // the bounce-induced ones. (`x != 'bounced'` alone drops NULLs in CH,
+      // which would hide real failures — mirror the hot PG path's OR-null.)
+      where += " AND (error_message IS NULL OR error_message != 'bounced')";
     }
     const rows = await this.ch.query<{
       id: string;
@@ -1158,6 +1161,15 @@ export class CampaignService {
         throw new BadRequestException('所选列表/分群中没有可发送的联系人');
       }
 
+      // Materialise recipients BEFORE flipping status. Previously the status
+      // was set to `sending` first and materialisation ran after — a failure
+      // (or crash) in between left the campaign stranded in `sending` with
+      // partial/zero recipients. Inserting first means any failure here throws
+      // with the campaign still in its prior (non-sending) state; createMany's
+      // skipDuplicates keeps a retry idempotent. The status CAS below is the
+      // single point that actually commits the send.
+      await this.materialiseRecipients(c.id, accountId, audience, senders);
+
       const swap = await this.prisma.campaign.updateMany({
         where: {
           id: c.id,
@@ -1171,8 +1183,6 @@ export class CampaignService {
         },
       });
       if (swap.count === 0) throw new ConflictException('当前活动状态不允许发送');
-
-      await this.materialiseRecipients(c.id, accountId, audience, senders);
     } else {
       // Fast path: cheap pre-flight only. A single LIMIT-1 query on the
       // (accountId, listId, subscriptionStatus) index — sub-ms even on huge

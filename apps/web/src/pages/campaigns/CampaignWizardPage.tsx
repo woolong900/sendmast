@@ -558,7 +558,10 @@ export function CampaignWizardPage() {
   const sendableId = isEdit ? (savedEdit ? editingId! : null) : createdId;
   const sendMut = useMutation({
     mutationFn: (id: string) => api.post(`/api/campaigns/${id}/send`),
-    onSuccess: (_data, id) => navigate(`/campaigns/${id}`),
+    onSuccess: (_data, id) => {
+      void qc.invalidateQueries({ queryKey: ['campaigns'] });
+      navigate(`/campaigns/${id}`);
+    },
   });
 
   // Finalize send: persist scheduledAt (if scheduling) then send. Wrapping

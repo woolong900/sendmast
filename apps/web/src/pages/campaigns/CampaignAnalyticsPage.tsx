@@ -81,6 +81,22 @@ export function CampaignAnalyticsPage() {
     refetchInterval: (query) => ((query.state.data?.totals.pending ?? 0) > 0 ? 5000 : false),
   });
 
+  if (analytics.isError || detail.isError) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-16 text-sm text-muted-foreground">
+        <p>数据加载失败</p>
+        <Button
+          variant="outline"
+          onClick={() => {
+            void analytics.refetch();
+            void detail.refetch();
+          }}
+        >
+          重试
+        </Button>
+      </div>
+    );
+  }
   if (analytics.isLoading || detail.isLoading) {
     return (
       <PageSkeleton withBack>

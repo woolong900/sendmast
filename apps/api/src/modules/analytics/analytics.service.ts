@@ -86,36 +86,53 @@ export class AnalyticsService {
     let bouncesHard = 0;
     let complaints = 0;
     let unsubscribes = 0;
+    // Recipients with ANY terminal delivery outcome (delivered OR bounced),
+    // deduplicated. Used for `pending` so a recipient who soft-bounced then
+    // delivered (or hard+soft bounced) is counted once, not subtracted twice.
+    let terminalRecipients = 0;
     let chOk = false;
 
     try {
-      // Group by (event_type, bounce_kind) so a single round-trip yields
-      // both totals — for non-bounce rows bounce_kind defaults to '' and we
-      // ignore the second key.
+      // One row of recipient-level uniques via uniqExactIf — each metric counts
+      // DISTINCT recipients in that state. `bounces` dedups hard+soft (a single
+      // recipient with both is one bounce), and `terminal` dedups the union of
+      // delivered+bounce for the pending math below.
       // account_id is the leading sort key on email_events; filtering by it
       // first lets CH prune partitions/granules before scanning, AND keeps
       // tenant data strictly isolated as a defence-in-depth.
       const rows = await this.ch.query<{
-        event_type: string;
-        bounce_kind: string;
-        uniques: string;
+        opens: string;
+        clicks: string;
+        delivered: string;
+        bounces: string;
+        bounces_hard: string;
+        complaints: string;
+        unsubscribes: string;
+        terminal: string;
       }>(
-        `SELECT event_type, bounce_kind, toString(uniqExact(recipient_id)) AS uniques
+        `SELECT
+           toString(uniqExactIf(recipient_id, event_type = 'open')) AS opens,
+           toString(uniqExactIf(recipient_id, event_type = 'click')) AS clicks,
+           toString(uniqExactIf(recipient_id, event_type = 'delivered')) AS delivered,
+           toString(uniqExactIf(recipient_id, event_type = 'bounce')) AS bounces,
+           toString(uniqExactIf(recipient_id, event_type = 'bounce' AND bounce_kind = 'hard')) AS bounces_hard,
+           toString(uniqExactIf(recipient_id, event_type = 'complaint')) AS complaints,
+           toString(uniqExactIf(recipient_id, event_type = 'unsubscribe')) AS unsubscribes,
+           toString(uniqExactIf(recipient_id, event_type IN ('delivered', 'bounce'))) AS terminal
          FROM sendmast.email_events
-         WHERE account_id = {acc:UUID} AND campaign_id = {cid:UUID}
-         GROUP BY event_type, bounce_kind`,
+         WHERE account_id = {acc:UUID} AND campaign_id = {cid:UUID}`,
         { acc: accountId, cid: campaignId },
       );
-      for (const r of rows) {
-        const n = Number(r.uniques);
-        if (r.event_type === 'open') uniqueOpens += n;
-        else if (r.event_type === 'click') uniqueClicks += n;
-        else if (r.event_type === 'delivered') delivered += n;
-        else if (r.event_type === 'bounce') {
-          bounces += n;
-          if (r.bounce_kind === 'hard') bouncesHard += n;
-        } else if (r.event_type === 'complaint') complaints += n;
-        else if (r.event_type === 'unsubscribe') unsubscribes += n;
+      const r = rows[0];
+      if (r) {
+        uniqueOpens = Number(r.opens);
+        uniqueClicks = Number(r.clicks);
+        delivered = Number(r.delivered);
+        bounces = Number(r.bounces);
+        bouncesHard = Number(r.bounces_hard);
+        complaints = Number(r.complaints);
+        unsubscribes = Number(r.unsubscribes);
+        terminalRecipients = Number(r.terminal);
       }
       chOk = true;
     } catch (err) {
@@ -129,15 +146,16 @@ export class AnalyticsService {
     // in-flight mail right after a real send before reports arrive.
     if (chOk && delivered === 0 && sent > 0 && process.env.NODE_ENV !== 'production') {
       delivered = sent;
+      terminalRecipients = sent;
     }
 
     const safe = (a: number, b: number) => (b > 0 ? a / b : 0);
 
-    // Whatever's left after delivered/bounced/failed is still in flight (or its
-    // delivery report hasn't reached us). Clamp at 0 — delivered & bounces are
-    // independent uniqExact counts from CH so a soft-bounce-then-delivered
-    // recipient could otherwise push this slightly negative.
-    const pending = Math.max(0, sent - delivered - bounces - failed);
+    // Whatever's left after a terminal outcome (delivered/bounced) or send-time
+    // failure is still in flight (or its delivery report hasn't reached us).
+    // `terminalRecipients` is the deduped delivered∪bounce set, so overlapping
+    // states aren't subtracted twice. Clamp at 0 for safety.
+    const pending = Math.max(0, sent - terminalRecipients - failed);
 
     const totals = {
       recipients: c.totalRecipients,
