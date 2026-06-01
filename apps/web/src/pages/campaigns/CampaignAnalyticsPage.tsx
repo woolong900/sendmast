@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton, PageSkeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
 import { formatNumber, formatPercent } from '@/lib/utils';
 
@@ -79,7 +80,19 @@ export function CampaignAnalyticsPage() {
   });
 
   if (analytics.isLoading || detail.isLoading) {
-    return <div className="text-sm text-muted-foreground">加载中...</div>;
+    return (
+      <PageSkeleton withBack>
+        <Card>
+          <CardContent className="space-y-3 p-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton key={i} className="h-20 w-full" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </PageSkeleton>
+    );
   }
   if (!analytics.data || !detail.data) return null;
 

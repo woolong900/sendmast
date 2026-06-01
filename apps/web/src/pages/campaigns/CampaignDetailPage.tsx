@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BarChart3, Pause, Play, Send, Trash2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton, PageSkeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
@@ -73,7 +74,28 @@ export function CampaignDetailPage() {
     onSuccess: () => navigate('/campaigns'),
   });
 
-  if (isLoading) return <div className="text-sm text-muted-foreground">加载中...</div>;
+  if (isLoading)
+    return (
+      <PageSkeleton withBack>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <Card>
+            <CardContent className="space-y-4 p-6">
+              {Array.from({ length: 7 }).map((_, i) => (
+                <div key={i} className="space-y-2">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-4 w-3/4" />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-0">
+              <Skeleton className="h-[calc(100vh-220px)] min-h-[600px] w-full rounded-none" />
+            </CardContent>
+          </Card>
+        </div>
+      </PageSkeleton>
+    );
   if (!data) return null;
 
   const editable = data.status === 'draft' || data.status === 'scheduled';

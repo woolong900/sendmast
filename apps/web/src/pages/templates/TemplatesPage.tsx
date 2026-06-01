@@ -4,6 +4,7 @@ import { Plus, Trash2, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
@@ -93,7 +94,20 @@ function TemplateGrid({
   deleting?: boolean;
 }) {
   const confirm = useConfirm();
-  if (loading) return <div className="text-sm text-muted-foreground">加载中...</div>;
+  if (loading)
+    return (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Card key={i} className="overflow-hidden">
+            <Skeleton className="aspect-[4/3] w-full rounded-none" />
+            <CardContent className="space-y-2 p-3">
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-1/3" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
   if (templates.length === 0) return <Card><CardContent className="p-8">{empty}</CardContent></Card>;
 
   return (

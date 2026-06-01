@@ -53,6 +53,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { html as cmHtmlLang } from '@codemirror/lang-html';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { PageSkeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -681,7 +682,7 @@ export function CampaignWizardPage() {
   }
 
   if (isEdit && detail.isLoading) {
-    return <div className="text-sm text-muted-foreground">加载中...</div>;
+    return <PageSkeleton withBack />;
   }
 
   if (step === 0) {
