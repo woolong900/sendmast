@@ -9,11 +9,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { timingSafeEqual } from 'node:crypto';
 import { WebhookService, type EventGridEvent } from './webhook.service';
 
 @ApiTags('webhooks')
 @Controller('webhooks')
+// Azure Event Grid delivers delivery/bounce reports in high-volume bursts from
+// a pool of Azure IPs; the global 240/min per-IP throttle would 429 (and drop)
+// legitimate reports during a large send. This endpoint is authenticated by the
+// shared ?key= secret, so it's safe to exempt from IP rate limiting.
+@SkipThrottle()
 export class WebhookController {
   constructor(
     private readonly svc: WebhookService,
