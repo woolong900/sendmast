@@ -265,12 +265,16 @@ function SenderValue({
       <span className="shrink-0 cursor-default text-xs text-muted-foreground">
         …等 {list.length} 人
       </span>
-      <div className="invisible absolute left-0 top-full z-20 mt-1 max-h-64 w-max max-w-md overflow-auto rounded-md border bg-popover p-2 text-xs opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100">
-        {list.map((s) => (
-          <div key={s.id} className="whitespace-nowrap py-0.5 text-foreground">
-            {s.fromName} &lt;{s.fromEmail}&gt;
-          </div>
-        ))}
+      {/* 外层从 top-full 紧贴触发区,用 pt-1 做透明桥接:间隙也属于可 hover
+          元素,鼠标移向浮层时不会脱离 group:hover 导致浮层闪退。 */}
+      <div className="invisible absolute left-0 top-full z-20 pt-1 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100">
+        <div className="max-h-64 w-max max-w-md overflow-auto rounded-md border bg-popover p-2 text-xs shadow-lg">
+          {list.map((s) => (
+            <div key={s.id} className="whitespace-nowrap py-0.5 text-foreground">
+              {s.fromName} &lt;{s.fromEmail}&gt;
+            </div>
+          ))}
+        </div>
       </div>
     </span>
   );
