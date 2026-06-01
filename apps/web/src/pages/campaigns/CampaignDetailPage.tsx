@@ -205,19 +205,13 @@ export function CampaignDetailPage() {
               <Field label="主题" value={data.subject} />
               <Field label="预览文本" value={data.preheader} />
               <Field
-                label={data.senders.length > 1 ? `发件人(${data.senders.length} 个,轮询发送)` : '发件人'}
+                label="发件人"
                 value={
-                  data.senders.length > 1 ? (
-                    <div className="max-h-44 space-y-0.5 overflow-auto rounded border bg-muted/30 p-2">
-                      {data.senders.map((s) => (
-                        <div key={s.id} className="break-all">
-                          {s.fromName} &lt;{s.fromEmail}&gt;
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    `${data.fromName} <${data.fromEmail}>`
-                  )
+                  <SenderValue
+                    senders={data.senders}
+                    fromName={data.fromName}
+                    fromEmail={data.fromEmail}
+                  />
                 }
               />
               <Field label="回复地址" value={data.replyTo} />
@@ -242,6 +236,43 @@ export function CampaignDetailPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+/**
+ * 发件人展示:多发件人时只显示主发件人 + "…等 N 人"(与创建页输入框一致),
+ * 鼠标悬浮弹出全部。senders 含 position 0(=主发件人);为空则是老活动,回退到
+ * campaign.fromName/fromEmail 单发件人。
+ */
+function SenderValue({
+  senders,
+  fromName,
+  fromEmail,
+}: {
+  senders: Array<{ id: string; fromName: string; fromEmail: string; position: number }>;
+  fromName: string;
+  fromEmail: string;
+}) {
+  const list = senders.length > 0 ? senders : [{ id: 'primary', fromName, fromEmail, position: 0 }];
+  const primary = list[0];
+  const primaryText = `${primary.fromName} <${primary.fromEmail}>`;
+
+  if (list.length <= 1) return <span className="break-all">{primaryText}</span>;
+
+  return (
+    <span className="group relative inline-flex max-w-full items-center gap-1.5 align-bottom">
+      <span className="truncate">{primaryText}</span>
+      <span className="shrink-0 cursor-default text-xs text-muted-foreground">
+        …等 {list.length} 人
+      </span>
+      <div className="invisible absolute left-0 top-full z-20 mt-1 max-h-64 w-max max-w-md overflow-auto rounded-md border bg-popover p-2 text-xs opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100">
+        {list.map((s) => (
+          <div key={s.id} className="whitespace-nowrap py-0.5 text-foreground">
+            {s.fromName} &lt;{s.fromEmail}&gt;
+          </div>
+        ))}
+      </div>
+    </span>
   );
 }
 
