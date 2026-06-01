@@ -24,6 +24,7 @@ interface CampaignDetail {
   createdAt: string;
   html: string | null;
   lists: Array<{ list: { id: string; name: string } }>;
+  senders: Array<{ id: string; fromName: string; fromEmail: string; position: number }>;
 }
 
 export function CampaignDetailPage() {
@@ -181,7 +182,22 @@ export function CampaignDetailPage() {
             <div className="space-y-4 text-sm">
               <Field label="主题" value={data.subject} />
               <Field label="预览文本" value={data.preheader} />
-              <Field label="发件人" value={`${data.fromName} <${data.fromEmail}>`} />
+              <Field
+                label={data.senders.length > 1 ? `发件人(${data.senders.length} 个,轮询发送)` : '发件人'}
+                value={
+                  data.senders.length > 1 ? (
+                    <div className="max-h-44 space-y-0.5 overflow-auto rounded border bg-muted/30 p-2">
+                      {data.senders.map((s) => (
+                        <div key={s.id} className="break-all">
+                          {s.fromName} &lt;{s.fromEmail}&gt;
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    `${data.fromName} <${data.fromEmail}>`
+                  )
+                }
+              />
               <Field label="回复地址" value={data.replyTo} />
               <Field label="收件人数量" value={formatNumber(data.totalRecipients)} />
               <Field label="收件列表" value={data.lists.map((l) => l.list.name).join(', ')} />
