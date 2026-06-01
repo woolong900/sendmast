@@ -32,6 +32,13 @@ const ConfigSchema = z.object({
 
   TRACKING_TOKEN_SECRET: z.string().min(32),
 
+  // Shared secret guarding the Azure Event Grid webhook. When set, callers
+  // must include it as `?key=<value>` on the endpoint URL (configure the same
+  // value in the Event Grid subscription endpoint). Optional so dev/boot
+  // without it still works; STRONGLY recommended in production to stop
+  // forged delivery/bounce/complaint events.
+  EVENTGRID_WEBHOOK_KEY: z.string().optional(),
+
   // Shouqianba (收钱吧) for self-service quota top-up via 当面付/扫码支付.
   // ALL fields are optional at boot — QuotaBilling checks `isConfigured()`
   // before letting users place orders, so a fresh dev box without merchant

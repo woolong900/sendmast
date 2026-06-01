@@ -59,8 +59,17 @@ const STATUS_VARIANT: Record<
 
 export function CampaignListPage() {
   const [search, setSearch] = useState('');
+  // Debounced copy used in the query key — typing updates `search` (the input)
+  // instantly but only fires a request 350ms after the user stops, instead of
+  // one request per keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [status, setStatus] = useState<string>('');
   const [dateRange, setDateRange] = useState<DateRange | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search), 350);
+    return () => window.clearTimeout(t);
+  }, [search]);
   // Server enforces this in CampaignService.create / send too — UI just
   // disables the entry point so users don't get a 403 surprise after
   // filling out the wizard.
@@ -75,10 +84,10 @@ export function CampaignListPage() {
         : '';
 
   const { data, isLoading } = useQuery({
-    queryKey: ['campaigns', search, status, dateRange?.from ?? '', dateRange?.to ?? ''],
+    queryKey: ['campaigns', debouncedSearch, status, dateRange?.from ?? '', dateRange?.to ?? ''],
     queryFn: async () => {
       const params = new URLSearchParams({ page: '1', pageSize: '50' });
-      if (search) params.set('search', search);
+      if (debouncedSearch) params.set('search', debouncedSearch);
       if (status) params.set('status', status);
       if (dateRange) {
         params.set('createdFrom', dateRange.from);

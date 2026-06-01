@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { api } from '@/lib/api';
 import { cn, formatDateTime, formatNumber } from '@/lib/utils';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
 
 type Dimension =
   | 'sent'
@@ -279,7 +280,12 @@ export function CampaignRecipientsPage() {
         })
       ).data,
     enabled: !!id,
-    placeholderData: (prev) => prev,
+    // Keep previous rows visible ONLY while paginating within the SAME tab (so
+    // 上/下一页 doesn't flash). On a tab switch the dimension changes, so drop
+    // the placeholder and show the loading skeleton instead of the old tab's
+    // rows (which would briefly look like wrong data).
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.queryKey?.[2] === dim ? prev : undefined,
   });
 
   const setTab = (next: Dimension) => {
@@ -358,16 +364,16 @@ export function CampaignRecipientsPage() {
                 </tr>
               </thead>
               <tbody>
-                {list.isLoading && (
-                  <tr>
-                    <td
-                      colSpan={columns.length}
-                      className="px-6 py-10 text-center text-sm text-muted-foreground"
-                    >
-                      加载中...
-                    </td>
-                  </tr>
-                )}
+                {list.isLoading &&
+                  Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={`sk-${i}`} className="border-t">
+                      {columns.map((c) => (
+                        <td key={c.header} className="px-3 py-4 sm:px-6">
+                          <Skeleton className="h-4 w-24" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
                 {!list.isLoading && (list.data?.rows.length ?? 0) === 0 && (
                   <EmptyStateRow
                     colSpan={columns.length}

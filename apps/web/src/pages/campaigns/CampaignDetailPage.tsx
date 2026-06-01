@@ -71,7 +71,10 @@ export function CampaignDetailPage() {
   const deleteMut = useMutation({
     mutationFn: () => api.delete(`/api/campaigns/${id}`),
     onError: (err) => toast(`删除失败:${apiErrMessage(err)}`, 'error'),
-    onSuccess: () => navigate('/campaigns'),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['campaigns'] });
+      navigate('/campaigns');
+    },
   });
 
   if (isLoading)

@@ -76,7 +76,9 @@ export function CampaignAnalyticsPage() {
     queryKey: ['analytics', id],
     queryFn: async () => (await api.get(`/api/analytics/campaigns/${id}`)).data,
     enabled: !!id,
-    refetchInterval: 5000,
+    // Only poll while mail is still in flight (有投递中). Once everything has a
+    // terminal outcome, stop — a fully-sent campaign's stats won't change.
+    refetchInterval: (query) => ((query.state.data?.totals.pending ?? 0) > 0 ? 5000 : false),
   });
 
   if (analytics.isLoading || detail.isLoading) {

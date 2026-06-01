@@ -60,13 +60,22 @@ export class AnalyticsService {
     // Hard bounces were historically stored as `status='failed',
     // errorMessage='bounced'` but belong under 弹回 — exclude them here so they
     // are not double-counted against 总投放.
-    const failed = await this.prisma.campaignRecipient.count({
-      where: {
-        campaignId,
-        status: 'failed',
-        OR: [{ errorMessage: null }, { errorMessage: { not: 'bounced' } }],
-      },
+    // Once a campaign is archived its hot PG rows are purged, so the PG count
+    // would read 0 — count from the cold archive (ClickHouse) instead, mirroring
+    // the same "exclude bounce-induced failures" rule.
+    const archived = await this.prisma.campaignArchiveState.findUnique({
+      where: { campaignId },
+      select: { campaignId: true },
     });
+    const failed = archived
+      ? await this.countArchivedFailed(accountId, campaignId)
+      : await this.prisma.campaignRecipient.count({
+          where: {
+            campaignId,
+            status: 'failed',
+            OR: [{ errorMessage: null }, { errorMessage: { not: 'bounced' } }],
+          },
+        });
 
     // Unique events from ClickHouse. We split bounces by `bounce_kind` so the
     // UI can show 无效邮箱率 (hard only) separate from 弹回邮箱率 (all).
@@ -77,6 +86,7 @@ export class AnalyticsService {
     let bouncesHard = 0;
     let complaints = 0;
     let unsubscribes = 0;
+    let chOk = false;
 
     try {
       // Group by (event_type, bounce_kind) so a single round-trip yields
@@ -107,13 +117,19 @@ export class AnalyticsService {
         } else if (r.event_type === 'complaint') complaints += n;
         else if (r.event_type === 'unsubscribe') unsubscribes += n;
       }
+      chOk = true;
     } catch (err) {
       // ClickHouse unavailable -> degrade gracefully
       console.warn('ClickHouse aggregation failed:', err);
     }
 
-    // For mailhog dev mode we won't get delivery webhooks; treat sent as delivered.
-    if (delivered === 0 && sent > 0) delivered = sent;
+    // Dev (mailhog) gets no delivery webhooks, so CH never records `delivered`.
+    // Only then do we treat sent as delivered. We must NOT do this in prod or on
+    // a CH outage (chOk === false) — that would fake 100% delivery and also hide
+    // in-flight mail right after a real send before reports arrive.
+    if (chOk && delivered === 0 && sent > 0 && process.env.NODE_ENV !== 'production') {
+      delivered = sent;
+    }
 
     const safe = (a: number, b: number) => (b > 0 ? a / b : 0);
 
@@ -164,5 +180,29 @@ export class AnalyticsService {
     ];
 
     return { campaignId, totals, rates, funnel };
+  }
+
+  /**
+   * Count send-time failures for an archived campaign from the cold archive in
+   * ClickHouse. Mirrors the hot-path rule: status='failed' EXCLUDING rows that
+   * are really hard bounces (error_message='bounced'). NULL error_message is
+   * kept (genuine send-time failures). FINAL merges any unmerged archive parts.
+   * Degrades to 0 if ClickHouse is unavailable.
+   */
+  private async countArchivedFailed(accountId: string, campaignId: string): Promise<number> {
+    try {
+      const rows = await this.ch.query<{ n: string }>(
+        `SELECT toString(count()) AS n
+         FROM sendmast.campaign_recipients_archive FINAL
+         WHERE account_id = {acc:UUID} AND campaign_id = {cid:UUID}
+           AND status = 'failed'
+           AND (error_message IS NULL OR error_message != 'bounced')`,
+        { acc: accountId, cid: campaignId },
+      );
+      return Number(rows[0]?.n ?? 0);
+    } catch (err) {
+      console.warn('ClickHouse archived-failed count failed:', err);
+      return 0;
+    }
   }
 }
