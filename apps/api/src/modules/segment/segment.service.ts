@@ -325,11 +325,20 @@ export class SegmentService {
     // source of this mapping; archived/cold rows are NOT included here
     // (those recipients had their CampaignRecipient row purged ≥90d ago,
     // which is acceptable for "last N days" event lookups since N << 90).
-    const links = await this.prisma.campaignRecipient.findMany({
-      where: { accountId, id: { in: recipientIds } },
-      select: { contactId: true },
-    });
-    return new Set(links.map((l) => l.contactId));
+    //
+    // Chunk the IN-list: with EVENT_CONSTRAINT_HARD_CAP this set can hold up
+    // to 1M ids, and a single `id IN (…)` would exceed PG's 65535 bind-param
+    // limit (and bloat memory). 10k per query stays well under the ceiling.
+    const contactIds = new Set<string>();
+    const CHUNK = 10_000;
+    for (let i = 0; i < recipientIds.length; i += CHUNK) {
+      const links = await this.prisma.campaignRecipient.findMany({
+        where: { accountId, id: { in: recipientIds.slice(i, i + CHUNK) } },
+        select: { contactId: true },
+      });
+      for (const l of links) contactIds.add(l.contactId);
+    }
+    return contactIds;
   }
 
   // ---------------------------------------------------------------------------

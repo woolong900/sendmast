@@ -1165,15 +1165,7 @@ export class CampaignService {
     if (hasSegments) {
       // Slow path: resolve & materialise here so the worker can dispatch
       // immediately without needing segment evaluation logic.
-      const audience = await this.resolveAudience(
-        accountId,
-        c.lists.map((l) => l.listId),
-        c.segments.map((s) => s.segmentId),
-      );
-      if (audience.length === 0) {
-        throw new BadRequestException('所选列表/分群中没有可发送的联系人');
-      }
-
+      //
       // Materialise recipients BEFORE flipping status. Previously the status
       // was set to `sending` first and materialisation ran after — a failure
       // (or crash) in between left the campaign stranded in `sending` with
@@ -1181,7 +1173,16 @@ export class CampaignService {
       // with the campaign still in its prior (non-sending) state; createMany's
       // skipDuplicates keeps a retry idempotent. The status CAS below is the
       // single point that actually commits the send.
-      await this.materialiseRecipients(c.id, accountId, audience, senders);
+      const inserted = await this.materialiseSegmentAudience(
+        c.id,
+        accountId,
+        c.lists.map((l) => l.listId),
+        c.segments.map((s) => s.segmentId),
+        senders,
+      );
+      if (inserted === 0) {
+        throw new BadRequestException('所选列表/分群中没有可发送的联系人');
+      }
 
       const swap = await this.prisma.campaign.updateMany({
         where: {
@@ -1191,7 +1192,7 @@ export class CampaignService {
         },
         data: {
           status: nextStatus,
-          totalRecipients: audience.length,
+          totalRecipients: inserted,
           sendingStartedAt: isFuture ? null : new Date(),
         },
       });
@@ -1242,78 +1243,47 @@ export class CampaignService {
   }
 
   /**
-   * Audience = ∪(contacts in any of the campaign's lists) ∪ ∪(contacts
-   * matching any of the campaign's segments). Filtered to subscribed only
-   * — bounced/unsubscribed/complained recipients are excluded from sends.
+   * Stream a segment-enabled campaign's audience into campaign_recipients in
+   * bounded batches. Audience = ∪(subscribed contacts in any list) ∪
+   * ∪(subscribed contacts matching any segment).
+   *
+   * Memory and PG bind-params are both bounded: lists are streamed by id
+   * cursor (same as the worker's list-only path) and each segment is resolved
+   * to an id set then chunk-fetched — every `id IN (…)` query is ≤ BATCH, so
+   * we never approach PG's 65535 param limit and never hold the full audience
+   * in memory. A 342k-contact list used to blow up here on both counts.
+   *
+   * `skipDuplicates` deduplicates contacts shared across lists/segments and
+   * keeps the whole thing idempotent under retry. Returns the number of
+   * recipient rows actually inserted (= the subscribed audience size), which
+   * the caller persists as `totalRecipients` and uses for the empty check.
+   *
+   * Note: segment evaluation stays in the API (the dispatch worker is
+   * list-only by design and doesn't compile SegmentDefinition); only the
+   * materialisation is streamed.
    */
-  private async resolveAudience(
+  private async materialiseSegmentAudience(
+    campaignId: string,
     accountId: string,
     listIds: string[],
     segmentIds: string[],
-  ): Promise<Array<{ id: string; email: string }>> {
-    const byId = new Map<string, { id: string; email: string }>();
-
-    if (listIds.length > 0) {
-      const fromLists = await this.prisma.contact.findMany({
-        where: {
-          accountId,
-          subscriptionStatus: 'subscribed',
-          memberships: { some: { listId: { in: listIds } } },
-        },
-        select: { id: true, email: true },
-      });
-      for (const c of fromLists) byId.set(c.id, c);
-    }
-
-    if (segmentIds.length > 0) {
-      const segs = await this.prisma.segment.findMany({
-        where: { accountId, id: { in: segmentIds } },
-        select: { definition: true },
-      });
-      for (const s of segs) {
-        const ids = await this.segments.resolveContactIds(
-          accountId,
-          s.definition as never,
-        );
-        if (ids.size === 0) continue;
-        // Pull subscribed contacts only — segments don't apply the
-        // subscription filter implicitly, so we enforce it here at the
-        // audience-merge boundary.
-        const rows = await this.prisma.contact.findMany({
-          where: {
-            accountId,
-            subscriptionStatus: 'subscribed',
-            id: { in: [...ids] },
-          },
-          select: { id: true, email: true },
-        });
-        for (const c of rows) if (!byId.has(c.id)) byId.set(c.id, c);
-      }
-    }
-
-    return [...byId.values()];
-  }
-
-  /**
-   * Insert CampaignRecipient rows in chunks. `skipDuplicates` makes this
-   * idempotent under retry (e.g. send() was called twice or the worker's
-   * legacy materialiser also ran for a list-only campaign).
-   */
-  private async materialiseRecipients(
-    campaignId: string,
-    accountId: string,
-    contacts: Array<{ id: string; email: string }>,
     senders: Array<{ fromEmail: string; fromName: string }>,
-  ): Promise<void> {
+  ): Promise<number> {
     // Single-sender campaigns leave the per-recipient columns NULL so the
     // worker falls back to Campaign.fromEmail/fromName — no behaviour change.
     const rotate = senders.length > 1;
     const BATCH = 5000;
-    for (let i = 0; i < contacts.length; i += BATCH) {
-      const slice = contacts.slice(i, i + BATCH);
-      await this.prisma.campaignRecipient.createMany({
-        data: slice.map((c, j) => {
-          const s = rotate ? senders[(i + j) % senders.length] : null;
+    let inserted = 0;
+    // Rotation is positioned over rows *processed* (not just inserted) so the
+    // round-robin stays even across batches even when skipDuplicates drops a
+    // few — mirrors the worker's `(inserted + j)` convention.
+    let positioned = 0;
+
+    const insertBatch = async (rows: Array<{ id: string; email: string }>) => {
+      if (rows.length === 0) return;
+      const res = await this.prisma.campaignRecipient.createMany({
+        data: rows.map((c, j) => {
+          const s = rotate ? senders[(positioned + j) % senders.length] : null;
           return {
             accountId,
             campaignId,
@@ -1326,7 +1296,62 @@ export class CampaignService {
         }),
         skipDuplicates: true,
       });
+      positioned += rows.length;
+      inserted += res.count;
+    };
+
+    // 1. Lists — cursor-stream subscribed contacts so memory stays at one
+    //    batch regardless of list size.
+    if (listIds.length > 0) {
+      let cursor: string | undefined;
+      for (;;) {
+        const rows = await this.prisma.contact.findMany({
+          where: {
+            accountId,
+            subscriptionStatus: 'subscribed',
+            memberships: { some: { listId: { in: listIds } } },
+          },
+          select: { id: true, email: true },
+          take: BATCH,
+          ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+          orderBy: { id: 'asc' },
+        });
+        if (rows.length === 0) break;
+        await insertBatch(rows);
+        if (rows.length < BATCH) break;
+        cursor = rows[rows.length - 1].id;
+      }
     }
+
+    // 2. Segments — resolve each to an id set, then chunk-fetch subscribed
+    //    contacts (segments don't apply the subscription filter implicitly).
+    //    skipDuplicates dedupes against lists / other segments.
+    for (const segmentId of segmentIds) {
+      const seg = await this.prisma.segment.findFirst({
+        where: { accountId, id: segmentId },
+        select: { definition: true },
+      });
+      if (!seg) continue;
+      const ids = await this.segments.resolveContactIds(
+        accountId,
+        seg.definition as never,
+      );
+      if (ids.size === 0) continue;
+      const arr = [...ids];
+      for (let i = 0; i < arr.length; i += BATCH) {
+        const rows = await this.prisma.contact.findMany({
+          where: {
+            accountId,
+            subscriptionStatus: 'subscribed',
+            id: { in: arr.slice(i, i + BATCH) },
+          },
+          select: { id: true, email: true },
+        });
+        await insertBatch(rows);
+      }
+    }
+
+    return inserted;
   }
 
   async pause(accountId: string, id: string) {
