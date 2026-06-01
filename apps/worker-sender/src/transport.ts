@@ -9,6 +9,14 @@ export interface MailMessage {
   subject: string;
   html: string;
   headers?: Record<string, string>;
+  /**
+   * Client-supplied ACS operation id. ACS echoes it back as `result.id` AND as
+   * the `messageId` in delivery reports, so we pre-assign it (and persist it on
+   * the recipient before sending) to close the race where a fast bounce report
+   * arrives before we'd otherwise have written messageId. Reusing the same id
+   * on a retried send also makes the send idempotent (no duplicate email).
+   */
+  operationId?: string;
 }
 
 /**
@@ -99,12 +107,15 @@ async function buildTransport(acct: AcsAccount): Promise<MailTransport> {
     async send(msg) {
       const startedAt = Date.now();
       try {
-        const poller = await client.beginSend({
-          senderAddress: msg.from.address,
-          recipients: { to: [{ address: msg.to }] },
-          content: { subject: msg.subject, html: msg.html },
-          headers: msg.headers,
-        });
+        const poller = await client.beginSend(
+          {
+            senderAddress: msg.from.address,
+            recipients: { to: [{ address: msg.to }] },
+            content: { subject: msg.subject, html: msg.html },
+            headers: msg.headers,
+          },
+          msg.operationId ? { operationId: msg.operationId } : undefined,
+        );
         const result = await poller.pollUntilDone();
         const latencyMs = Date.now() - startedAt;
         const status = result.status ?? 'Unknown';

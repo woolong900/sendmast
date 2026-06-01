@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { Prisma, PrismaClient, type AcsAccount } from '@prisma/client';
@@ -570,11 +571,25 @@ async function runSend(job: Job<SendJobData>) {
     return;
   }
 
+  // Pre-assign the ACS operation id and persist it BEFORE the send. ACS echoes
+  // this id back as the `messageId` in delivery reports, so writing it first
+  // guarantees worker-events can resolve even a bounce report that races back
+  // within milliseconds. Reuse the existing id on a retried send so ACS treats
+  // it as the same operation (idempotent — no duplicate email).
+  const operationId = r.messageId ?? randomUUID();
+  if (!r.messageId) {
+    await prisma.campaignRecipient.update({
+      where: { id: r.id },
+      data: { messageId: operationId },
+    });
+  }
+
   const result = await transport.send({
     from: { name: fromName, address: fromEmail },
     to: r.email,
     subject,
     html,
+    operationId,
     headers: {
       'List-Unsubscribe': `<${unsubUrl}>, <mailto:unsubscribe@${fromEmail.split('@')[1]}>`,
       'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
@@ -611,7 +626,7 @@ async function runSend(job: Job<SendJobData>) {
   if (result.ok) {
     await prisma.campaignRecipient.update({
       where: { id: r.id },
-      data: { status: 'sent', messageId: result.messageId, sentAt: new Date() },
+      data: { status: 'sent', messageId: operationId, sentAt: new Date() },
     });
     // Quota is consumed only when ACS accepted the message. Failed/skipped
     // sends do not count, which is what the user wants. Best-effort: if a

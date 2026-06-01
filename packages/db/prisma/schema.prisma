@@ -825,6 +825,7 @@ model CampaignRecipient {
   @@unique([campaignId, contactId])
   @@index([campaignId, status])
   @@index([accountId, status])
+  @@index([messageId])
   @@map("campaign_recipients")
 }
 
