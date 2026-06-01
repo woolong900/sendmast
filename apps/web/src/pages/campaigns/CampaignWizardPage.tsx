@@ -62,11 +62,8 @@ import { easyEmailZhCN } from '@/lib/easy-email-locale';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
 import { formatNumber } from '@/lib/utils';
 import { VariablesHelper } from '@/components/VariablesHelper';
-import {
-  type SegmentView,
-  type SenderDomainView,
-  type TenantQuotaView,
-} from '@sendmast/shared';
+import { type SegmentView, type SenderDomainView } from '@sendmast/shared';
+import { useQuota } from '@/hooks/useQuota';
 
 interface ContactList {
   id: string;
@@ -362,15 +359,10 @@ export function CampaignWizardPage() {
     queryKey: ['templates'],
     queryFn: async () => (await api.get('/api/templates')).data,
   });
-  // Reuses the same query key/endpoint as TopBar / DashboardPage / QuotaPage
-  // so all four read from one cache. `refetchInterval` matches QuotaPage so
-  // the wizard's send-button gate can re-enable within ~30s of a top-up,
-  // even if the user doesn't reload the page.
-  const quota = useQuery<TenantQuotaView>({
-    queryKey: ['me', 'quota'],
-    queryFn: async () => (await api.get('/api/accounts/me/quota')).data,
-    refetchInterval: 30_000,
-  });
+  // Shared quota query (TopBar / DashboardPage / QuotaPage use the same hook +
+  // cache key) so the wizard's send-button gate re-enables within ~30s of a
+  // top-up without a page reload.
+  const quota = useQuota();
   const quotaRemaining = quota.data?.remaining ?? 0;
   const quotaExhausted = quota.data !== undefined && quotaRemaining <= 0;
 

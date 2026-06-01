@@ -1,28 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, KeyRound, LogOut, Mail, Menu } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { api } from '@/lib/api';
 import { formatNumber, cn } from '@/lib/utils';
 import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
-import type { TenantQuotaView } from '@sendmast/shared';
+import { useQuota } from '@/hooks/useQuota';
 
 export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {}) {
-  const { user, token, refreshToken, logout } = useAuth();
+  const { user, refreshToken, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Polling so admin top-ups appear without a refresh, and so users see
-  // their balance burning down during a campaign send.
-  const { data: quota } = useQuery<TenantQuotaView>({
-    queryKey: ['me', 'quota'],
-    queryFn: async () => (await api.get('/api/accounts/me/quota')).data,
-    enabled: !!token,
-    refetchInterval: 30_000,
-  });
+  const { data: quota } = useQuota();
 
   // Close on outside click / ESC.
   useEffect(() => {

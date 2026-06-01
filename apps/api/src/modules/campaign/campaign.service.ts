@@ -692,17 +692,18 @@ export class CampaignService {
     // from the cold archive table.
     const hot = await this.prisma.campaignRecipient.findMany({
       where: { id: { in: ids } },
-      select: { id: true, email: true, contactId: true, sentAt: true },
+      select: { id: true, email: true, contactId: true, sentAt: true, status: true },
     });
     interface HotMeta {
       email: string;
       contactId: string | null;
       sentAt: Date | string | null;
+      status: string;
     }
     const byId = new Map<string, HotMeta>(
       hot.map((r) => [
         r.id,
-        { email: r.email, contactId: r.contactId, sentAt: r.sentAt },
+        { email: r.email, contactId: r.contactId, sentAt: r.sentAt, status: r.status },
       ]),
     );
 
@@ -712,8 +713,9 @@ export class CampaignService {
         id: string;
         email: string;
         sent_at: string | null;
+        status: string;
       }>(
-        `SELECT id, email, sent_at
+        `SELECT id, email, sent_at, status
          FROM sendmast.campaign_recipients_archive FINAL
          WHERE account_id = {acc:UUID}
            AND campaign_id = {cid:UUID}
@@ -722,7 +724,12 @@ export class CampaignService {
       );
       for (const c of cold) {
         // Archive table doesn't carry contact_id — name will fall back to null.
-        byId.set(c.id, { email: c.email, contactId: null, sentAt: c.sent_at });
+        byId.set(c.id, {
+          email: c.email,
+          contactId: null,
+          sentAt: c.sent_at,
+          status: c.status,
+        });
       }
     }
 
@@ -775,7 +782,11 @@ export class CampaignService {
         email: meta?.email ?? '(unknown)',
         firstName: name?.firstName ?? null,
         lastName: name?.lastName ?? null,
-        status: 'sent',
+        // Source the real send-pipeline status from the recipient row (PG hot
+        // or archive cold) rather than a literal; for event-derived rows this
+        // is virtually always 'sent' (an event presupposes a successful send),
+        // but reading it keeps the field honest if that ever diverges.
+        status: meta?.status ?? 'sent',
         messageId: null,
         errorMessage: null,
         sentAt: sentAtIso,

@@ -1,23 +1,17 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { Wallet, Plus, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { UpgradeQuotaModal } from '@/components/UpgradeQuotaModal';
-import { api } from '@/lib/api';
 import { formatNumber } from '@/lib/utils';
 import { useAuth } from '@/store/auth';
-import type { TenantQuotaView } from '@sendmast/shared';
+import { useQuota } from '@/hooks/useQuota';
 
 export function QuotaPage() {
   const { account } = useAuth();
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  const { data, isLoading } = useQuery<TenantQuotaView>({
-    queryKey: ['me', 'quota'],
-    queryFn: async () => (await api.get('/api/accounts/me/quota')).data,
-    refetchInterval: 30_000,
-  });
+  const { data, isLoading } = useQuota();
 
   const remaining = data?.remaining ?? 0;
   const tone =

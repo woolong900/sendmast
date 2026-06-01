@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { formatNumber } from '@/lib/utils';
 import { useAuth } from '@/store/auth';
-import type { TenantQuotaView } from '@sendmast/shared';
+import { useQuota } from '@/hooks/useQuota';
 
 interface DashboardSummary {
   contacts: { total: number; subscribed: number };
@@ -32,11 +32,7 @@ export function DashboardPage() {
     queryKey: ['dashboard'],
     queryFn: async () => (await api.get('/api/dashboard/summary')).data,
   });
-  const { data: quota } = useQuery<TenantQuotaView>({
-    queryKey: ['me', 'quota'],
-    queryFn: async () => (await api.get('/api/accounts/me/quota')).data,
-    refetchInterval: 30_000,
-  });
+  const { data: quota } = useQuota();
 
   return (
     <div className="space-y-6">
