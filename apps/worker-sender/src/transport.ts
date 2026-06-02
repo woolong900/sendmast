@@ -107,7 +107,16 @@ async function buildTransport(acct: AcsAccount): Promise<MailTransport> {
     async send(msg) {
       const startedAt = Date.now();
       try {
-        const poller = await client.beginSend(
+        // ACS email send is async: `beginSend` resolving means ACS ACCEPTED
+        // the request (HTTP 202). We deliberately do NOT `pollUntilDone()` —
+        // waiting for the LRO to reach "Succeeded" costs ~6s per send and caps
+        // throughput at concurrency÷latency (~1.3/s with 8 workers). The
+        // terminal delivery/bounce result arrives out-of-band via Event Grid,
+        // keyed by the operationId we pre-assign, so polling yields no
+        // information we don't already receive asynchronously — it is pure
+        // latency. Submission-time failures (auth, 429, invalid recipient)
+        // still throw from beginSend and are handled in the catch below.
+        await client.beginSend(
           {
             senderAddress: msg.from.address,
             recipients: { to: [{ address: msg.to }] },
@@ -116,27 +125,16 @@ async function buildTransport(acct: AcsAccount): Promise<MailTransport> {
           },
           msg.operationId ? { operationId: msg.operationId } : undefined,
         );
-        const result = await poller.pollUntilDone();
         const latencyMs = Date.now() - startedAt;
-        const status = result.status ?? 'Unknown';
-        if (status === 'Succeeded') {
-          return {
-            ok: true,
-            messageId: result.id ?? '',
-            providerStatus: status,
-            latencyMs,
-            providerResponse: { id: result.id, status },
-          };
-        }
-        // LRO terminated with non-Succeeded (Failed / Canceled).
+        // operationId is the id ACS echoes back as the delivery-report
+        // messageId; the caller (worker-sender) always supplies it.
+        const messageId = msg.operationId ?? '';
         return {
-          ok: false,
-          messageId: result.id ?? '',
-          providerStatus: status,
+          ok: true,
+          messageId,
+          providerStatus: 'Accepted',
           latencyMs,
-          errorCode: result.error?.code,
-          errorMessage: result.error?.message ?? `ACS LRO 异常结束，status=${status}`,
-          providerResponse: { id: result.id, status, error: result.error },
+          providerResponse: { operationId: messageId, accepted: true },
         };
       } catch (err) {
         const latencyMs = Date.now() - startedAt;
