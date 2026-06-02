@@ -623,7 +623,25 @@ async function runSend(job: Job<SendJobData>) {
     console.error(`[send ${r.id}] failed to write send_log:`, logErr);
   }
 
-  if (result.ok) {
+  // ACS rejects a repeated beginSend with the same operationId
+  // ("This request is invalid since the given operationId already exists.").
+  // That only happens when a PRIOR attempt for this recipient already submitted
+  // the message to ACS — idempotency working as intended — but our status
+  // update didn't land (worker restart/stall → BullMQ retry). The email was
+  // accepted, so this is a success, not a failure. Treat it as sent rather than
+  // recording a spurious "发送失败".
+  const duplicateOperation =
+    !result.ok &&
+    /operation ?id already exists/i.test(
+      `${result.errorMessage ?? ''} ${result.errorCode ?? ''}`,
+    );
+  if (duplicateOperation) {
+    console.log(
+      `[send ${r.id}] operationId ${operationId} already exists at ACS — prior attempt already submitted; marking sent`,
+    );
+  }
+
+  if (result.ok || duplicateOperation) {
     await prisma.campaignRecipient.update({
       where: { id: r.id },
       data: { status: 'sent', messageId: operationId, sentAt: new Date() },
