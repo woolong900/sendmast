@@ -92,8 +92,12 @@ const HARD_BOUNCE_SIGNALS = [
   'invalid recipient',
   'unknown recipient',
   'recipient unknown',
-  'recipient address rejected',
-  'recipient rejected',
+  'recipient address rejected', // Exchange/O365 550 5.1.1 RecipNotFound (real bad address)
+  // NOTE: bare "recipient rejected" is intentionally NOT here. Charter/Spectrum
+  // (*.rr.com, charter.net, roadrunner.com, twc.com, bresnan.net) emit
+  // "<addr> recipient rejected};{MSG=};{FQDN=...charter.net};{IP=...}" with NO
+  // SMTP/enhanced code as an IP/reputation block, not a bad-mailbox signal.
+  // Treating it as hard would suppress good contacts over our deliverability.
   'not a valid user', // e.g. "x@y is not a valid user"
   'mailbox is disabled', // Yahoo 554.30 — account deactivated
   'account is disabled',
