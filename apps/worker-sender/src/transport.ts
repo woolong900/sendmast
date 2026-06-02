@@ -42,6 +42,27 @@ export interface MailTransport {
 }
 
 /**
+ * Hard ceiling on a single ACS `beginSend` call. ACS's send endpoint can hang
+ * indefinitely during a service-side incident; without a timeout one stuck
+ * call permanently occupies a worker slot and, at concurrency N, N hangs
+ * freeze the entire send pipeline. We bound it so a hang becomes a fast failure
+ * instead of a freeze.
+ */
+const SEND_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`${label} timed out after ${ms}ms`) as Error & { code?: string };
+      err.code = 'ETIMEDOUT';
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+/**
  * Cache key includes fields whose change must invalidate a cached transport
  * (credentials, target Communication Service). The endpoint hostName itself is
  * an immutable Azure resource property, so we discover it once via ARM and
@@ -116,14 +137,18 @@ async function buildTransport(acct: AcsAccount): Promise<MailTransport> {
         // information we don't already receive asynchronously — it is pure
         // latency. Submission-time failures (auth, 429, invalid recipient)
         // still throw from beginSend and are handled in the catch below.
-        await client.beginSend(
-          {
-            senderAddress: msg.from.address,
-            recipients: { to: [{ address: msg.to }] },
-            content: { subject: msg.subject, html: msg.html },
-            headers: msg.headers,
-          },
-          msg.operationId ? { operationId: msg.operationId } : undefined,
+        await withTimeout(
+          client.beginSend(
+            {
+              senderAddress: msg.from.address,
+              recipients: { to: [{ address: msg.to }] },
+              content: { subject: msg.subject, html: msg.html },
+              headers: msg.headers,
+            },
+            msg.operationId ? { operationId: msg.operationId } : undefined,
+          ),
+          SEND_TIMEOUT_MS,
+          'ACS beginSend',
         );
         const latencyMs = Date.now() - startedAt;
         // operationId is the id ACS echoes back as the delivery-report
