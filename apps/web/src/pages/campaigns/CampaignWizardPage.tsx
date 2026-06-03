@@ -17,6 +17,7 @@ import {
   LayoutTemplate,
   LogOut,
   Monitor,
+  Search,
   Send,
   X,
 } from 'lucide-react';
@@ -1556,8 +1557,27 @@ function RecipientSelect({
   onChangeSegments: (next: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
   const pickedLists = lists.filter((l) => selectedLists.includes(l.id));
   const pickedSegments = segments.filter((s) => selectedSegments.includes(s.id));
+
+  const q = query.trim().toLowerCase();
+  const filteredLists = q ? lists.filter((l) => l.name.toLowerCase().includes(q)) : lists;
+  const filteredSegments = q
+    ? segments.filter((s) => s.name.toLowerCase().includes(q))
+    : segments;
+
+  // Close on outside click rather than the trigger's onBlur — an onBlur-based
+  // close would fire the instant the in-dropdown search input takes focus.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
 
   const toggleList = (id: string) => {
     onChangeLists(
@@ -1575,11 +1595,10 @@ function RecipientSelect({
   };
 
   return (
-    <div className="relative">
+    <div className="relative" ref={ref}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
         className={
           'flex min-h-9 w-full items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-left text-sm transition-colors ' +
           (open ? 'border-primary' : 'border-input hover:border-primary/40')
@@ -1610,17 +1629,28 @@ function RecipientSelect({
         <ChevronDown className="ml-auto size-4 shrink-0 text-muted-foreground" />
       </button>
       {open && (
-        <div
-          className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-auto rounded-md border bg-popover py-1 shadow-lg"
-          onMouseDown={(e) => e.preventDefault()}
-        >
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-72 overflow-auto rounded-md border bg-popover py-1 shadow-lg">
+          <div className="sticky top-0 z-10 border-b bg-popover p-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜索列表 / 分群"
+                className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-3 text-sm outline-none transition-colors focus:border-primary"
+              />
+            </div>
+          </div>
           <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             联系人列表
           </div>
-          {lists.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">无列表</div>
+          {filteredLists.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-muted-foreground">
+              {q ? '无匹配列表' : '无列表'}
+            </div>
           ) : (
-            lists.map((l) => {
+            filteredLists.map((l) => {
               const checked = selectedLists.includes(l.id);
               return (
                 <div
@@ -1643,12 +1673,12 @@ function RecipientSelect({
           <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             动态分群
           </div>
-          {segments.length === 0 ? (
+          {filteredSegments.length === 0 ? (
             <div className="px-3 py-2 text-xs text-muted-foreground">
-              尚无分群。可前往"动态分群"页面创建。
+              {q ? '无匹配分群' : '尚无分群。可前往"动态分群"页面创建。'}
             </div>
           ) : (
-            segments.map((s) => {
+            filteredSegments.map((s) => {
               const checked = selectedSegments.includes(s.id);
               return (
                 <div
