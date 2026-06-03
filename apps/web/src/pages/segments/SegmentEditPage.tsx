@@ -123,8 +123,8 @@ export function SegmentEditPage() {
 
   // Reference data for rule editors.
   const listsQuery = useQuery<ListOption[]>({
-    queryKey: ['contact-lists'],
-    queryFn: async () => (await api.get('/api/contact-lists')).data,
+    queryKey: ['contact-lists', 'all'],
+    queryFn: async () => (await api.get('/api/contact-lists?pageSize=1000')).data.items,
   });
   const campaignsQuery = useQuery<{ items: CampaignOption[] }>({
     queryKey: ['campaigns-for-segment'],

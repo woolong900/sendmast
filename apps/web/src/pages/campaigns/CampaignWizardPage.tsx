@@ -344,8 +344,8 @@ export function CampaignWizardPage() {
   }, [detail.data, detail.isFetching]);
 
   const lists = useQuery<ContactList[]>({
-    queryKey: ['contact-lists'],
-    queryFn: async () => (await api.get('/api/contact-lists')).data,
+    queryKey: ['contact-lists', 'all'],
+    queryFn: async () => (await api.get('/api/contact-lists?pageSize=1000')).data.items,
   });
   const segments = useQuery<SegmentView[]>({
     queryKey: ['segments'],

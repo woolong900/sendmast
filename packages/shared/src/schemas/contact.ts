@@ -62,6 +62,8 @@ export type ListContactsQuery = z.infer<typeof ListContactsQuerySchema>;
 export const ListContactListsQuerySchema = z.object({
   search: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  // Cap is generous so selector dropdowns (campaign wizard, segment editor)
+  // can fetch every list in one page; the overview UI uses small sizes.
+  pageSize: z.coerce.number().int().min(1).max(1000).default(20),
 });
 export type ListContactListsQuery = z.infer<typeof ListContactListsQuerySchema>;
