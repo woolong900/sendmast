@@ -44,11 +44,10 @@ CREATE INDEX "campaign_recipients_acs_account_id_status_idx"
 --    from-address domain. NULLs that remain are handled by the dispatcher.
 UPDATE "campaign_recipients" cr
 SET "acs_account_id" = sd."acs_account_id"
-FROM "campaigns" c
-JOIN "sender_domains" sd
-  ON sd."account_id" = c."account_id"
- AND sd."domain" = lower(split_part(COALESCE(cr."from_email", c."from_email"), '@', 2))
+FROM "campaigns" c, "sender_domains" sd
 WHERE cr."campaign_id" = c."id"
+  AND sd."account_id" = c."account_id"
+  AND sd."domain" = lower(split_part(COALESCE(cr."from_email", c."from_email"), '@', 2))
   AND c."status" = 'sending'
   AND cr."status" IN ('pending', 'queued')
   AND cr."acs_account_id" IS NULL;
