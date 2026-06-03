@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -17,7 +18,11 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { ContactService } from './contact.service';
-import { CreateContactListSchema, UpdateContactListSchema } from '@sendmast/shared';
+import {
+  CreateContactListSchema,
+  ListContactListsQuerySchema,
+  UpdateContactListSchema,
+} from '@sendmast/shared';
 import { firstZodError } from '../../common/zod-error';
 
 @ApiTags('contact-lists')
@@ -28,8 +33,10 @@ export class ContactListController {
   constructor(private readonly svc: ContactService) {}
 
   @Get()
-  list(@CurrentUser() user: AuthenticatedUser) {
-    return this.svc.listLists(user.accountId);
+  list(@CurrentUser() user: AuthenticatedUser, @Query() query: unknown) {
+    const r = ListContactListsQuerySchema.safeParse(query);
+    if (!r.success) throw new BadRequestException(firstZodError(r.error));
+    return this.svc.listLists(user.accountId, r.data);
   }
 
   @Get(':id')

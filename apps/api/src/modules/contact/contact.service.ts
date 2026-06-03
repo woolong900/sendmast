@@ -6,6 +6,7 @@ import type {
   BatchContactActionInput,
   CreateContactInput,
   CreateContactListInput,
+  ListContactListsQuery,
   ListContactsQuery,
   UpdateContactListInput,
 } from '@sendmast/shared';
@@ -39,20 +40,37 @@ export class ContactService {
 
   // ---------- Lists ----------
 
-  async listLists(accountId: string) {
-    const lists = await this.prisma.contactList.findMany({
-      where: { accountId },
-      orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { memberships: true } } },
-    });
-    return lists.map((l) => ({
-      id: l.id,
-      name: l.name,
-      description: l.description,
-      contactsCount: l._count.memberships,
-      createdAt: l.createdAt,
-      updatedAt: l.updatedAt,
-    }));
+  async listLists(accountId: string, query: ListContactListsQuery) {
+    const where: Prisma.ContactListWhereInput = { accountId };
+    if (query.search) {
+      where.name = { contains: query.search.trim(), mode: 'insensitive' };
+    }
+    const skip = (query.page - 1) * query.pageSize;
+
+    const [lists, total] = await Promise.all([
+      this.prisma.contactList.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: query.pageSize,
+        include: { _count: { select: { memberships: true } } },
+      }),
+      this.prisma.contactList.count({ where }),
+    ]);
+
+    return {
+      items: lists.map((l) => ({
+        id: l.id,
+        name: l.name,
+        description: l.description,
+        contactsCount: l._count.memberships,
+        createdAt: l.createdAt,
+        updatedAt: l.updatedAt,
+      })),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
   }
 
   async getList(accountId: string, id: string) {
