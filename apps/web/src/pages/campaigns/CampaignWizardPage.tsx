@@ -2025,6 +2025,8 @@ function HtmlEditorStep({
 // (index 0 = primary); clicking an unchecked option appends it, clicking a
 // checked one removes it. The campaign rotates through the picked addresses
 // round-robin at send time.
+type SenderOpt = { value: string; label: string; acsName?: string | null };
+
 function SenderEmailSelect({
   values,
   onChange,
@@ -2032,13 +2034,28 @@ function SenderEmailSelect({
 }: {
   values: string[];
   onChange: (v: string[]) => void;
-  options: Array<{ value: string; label: string; acsName?: string | null }>;
+  options: SenderOpt[];
 }) {
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const selectedOptions = values
     .map((v) => options.find((o) => o.value === v))
-    .filter((o): o is { value: string; label: string; acsName?: string | null } => !!o);
+    .filter((o): o is SenderOpt => !!o);
   const allSelected = options.length > 0 && values.length >= options.length;
+
+  // Group by ACS account only when the options carry an acsName (i.e. the
+  // tenant spans multiple ACS accounts). Single-ACS tenants keep the flat list.
+  const grouped = options.some((o) => o.acsName);
+  const groups = useMemo(() => {
+    const map = new Map<string, { name: string; items: SenderOpt[] }>();
+    for (const o of options) {
+      const key = o.acsName ?? '其他';
+      const g = map.get(key) ?? { name: key, items: [] };
+      g.items.push(o);
+      map.set(key, g);
+    }
+    return Array.from(map.values());
+  }, [options]);
 
   const toggle = (value: string) => {
     if (values.includes(value)) {
@@ -2050,6 +2067,53 @@ function SenderEmailSelect({
 
   const toggleAll = () => {
     onChange(allSelected ? [] : options.map((o) => o.value));
+  };
+
+  const toggleGroup = (items: SenderOpt[]) => {
+    const gv = items.map((i) => i.value);
+    const allSel = gv.every((v) => values.includes(v));
+    if (allSel) onChange(values.filter((v) => !gv.includes(v)));
+    else onChange(Array.from(new Set([...values, ...gv])));
+  };
+
+  const toggleCollapse = (name: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  const renderItem = (o: SenderOpt, inGroup: boolean) => {
+    const isSelected = values.includes(o.value);
+    return (
+      <div
+        key={o.value}
+        onClick={() => toggle(o.value)}
+        className={
+          'flex cursor-pointer items-center gap-2 py-2 pr-3 text-sm transition-colors ' +
+          (inGroup ? 'pl-8 ' : 'pl-3 ') +
+          (isSelected
+            ? 'bg-primary/10 font-medium text-primary'
+            : 'text-foreground hover:bg-muted/40')
+        }
+      >
+        <span
+          className={
+            'flex size-4 shrink-0 items-center justify-center rounded border ' +
+            (isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-input')
+          }
+        >
+          {isSelected && <Check className="size-3" />}
+        </span>
+        <span className="flex-1 truncate">{o.label}</span>
+        {!grouped && o.acsName && (
+          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+            {o.acsName}
+          </span>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -2098,36 +2162,61 @@ function SenderEmailSelect({
             </span>
             {allSelected ? '取消全选' : '全选'}
           </div>
-          {options.map((o) => {
-            const isSelected = values.includes(o.value);
-            return (
-              <div
-                key={o.value}
-                onClick={() => toggle(o.value)}
-                className={
-                  'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm transition-colors ' +
-                  (isSelected
-                    ? 'bg-primary/10 font-medium text-primary'
-                    : 'text-foreground hover:bg-muted/40')
-                }
-              >
-                <span
-                  className={
-                    'flex size-4 shrink-0 items-center justify-center rounded border ' +
-                    (isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-input')
-                  }
-                >
-                  {isSelected && <Check className="size-3" />}
-                </span>
-                <span className="flex-1 truncate">{o.label}</span>
-                {o.acsName && (
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                    {o.acsName}
-                  </span>
-                )}
-              </div>
-            );
-          })}
+          {grouped
+            ? groups.map((g) => {
+                const gv = g.items.map((i) => i.value);
+                const selCount = gv.filter((v) => values.includes(v)).length;
+                const allSel = selCount === gv.length && gv.length > 0;
+                const someSel = selCount > 0 && !allSel;
+                const isCollapsed = collapsed.has(g.name);
+                return (
+                  <div key={g.name} className="border-b last:border-0">
+                    <div className="flex items-center gap-2 bg-muted/30 py-2 pl-3 pr-2 text-sm">
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleGroup(g.items);
+                        }}
+                        title={allSel ? '取消全选该分组' : '全选该分组'}
+                        className={
+                          'flex size-4 shrink-0 cursor-pointer items-center justify-center rounded border ' +
+                          (allSel
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : someSel
+                              ? 'border-primary bg-primary/40'
+                              : 'border-input')
+                        }
+                      >
+                        {allSel ? (
+                          <Check className="size-3" />
+                        ) : someSel ? (
+                          <span className="h-0.5 w-2 rounded bg-primary" />
+                        ) : null}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleCollapse(g.name)}
+                        className="flex flex-1 items-center justify-between gap-2 text-left"
+                      >
+                        <span className="truncate font-medium text-foreground">
+                          {g.name}
+                          <span className="ml-1 text-xs font-normal text-muted-foreground">
+                            ({selCount}/{g.items.length})
+                          </span>
+                        </span>
+                        <ChevronDown
+                          className={
+                            'size-4 shrink-0 text-muted-foreground transition-transform ' +
+                            (isCollapsed ? '-rotate-90' : '')
+                          }
+                        />
+                      </button>
+                    </div>
+                    {!isCollapsed && g.items.map((o) => renderItem(o, true))}
+                  </div>
+                );
+              })
+            : options.map((o) => renderItem(o, false))}
         </div>
       )}
     </div>
