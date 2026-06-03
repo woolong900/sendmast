@@ -29,6 +29,13 @@ export class SenderDomainController {
     return this.svc.list(user.accountId);
   }
 
+  // Declared before the `:id` param route so the literal path wins (otherwise
+  // ParseUUIDPipe would reject "acs-accounts" as a non-UUID).
+  @Get('acs-accounts')
+  acsAccounts(@CurrentUser() user: AuthenticatedUser) {
+    return this.svc.listAcsAccounts(user.accountId);
+  }
+
   @Get(':id')
   get(@CurrentUser() user: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.get(user.accountId, id);
@@ -38,7 +45,7 @@ export class SenderDomainController {
   create(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
     const r = CreateSenderDomainSchema.safeParse(body);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
-    return this.svc.create(user.accountId, r.data.domain);
+    return this.svc.create(user.accountId, r.data.domain, r.data.acsAccountId);
   }
 
   @Post(':id/verify')

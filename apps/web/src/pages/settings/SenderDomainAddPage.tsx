@@ -16,6 +16,7 @@ import type {
   SenderDomainVerificationStatus,
   SenderDomainView,
   SenderUsernameView,
+  TenantAcsAccountView,
 } from '@sendmast/shared';
 
 const RECORD_LABELS: Record<SenderDomainRecordKind, string> = {
@@ -35,6 +36,21 @@ export function SenderDomainAddPage() {
   const existingId = params.get('id');
   const [step, setStep] = useState(existingId ? 2 : 1);
   const [domainInput, setDomainInput] = useState('');
+  const [acsChoice, setAcsChoice] = useState('');
+
+  // ACS accounts assigned to this tenant. When more than one is assigned the
+  // user must pick which ACS to provision the domain under (immutable after).
+  const acsAccounts = useQuery<TenantAcsAccountView[]>({
+    queryKey: ['sender-domains', 'acs-accounts'],
+    queryFn: async () => (await api.get('/api/sender-domains/acs-accounts')).data,
+    enabled: !existingId,
+  });
+  const multiAcs = (acsAccounts.data?.length ?? 0) > 1;
+  useEffect(() => {
+    if (acsChoice || !acsAccounts.data?.length) return;
+    const primary = acsAccounts.data.find((a) => a.isPrimary) ?? acsAccounts.data[0];
+    setAcsChoice(primary.id);
+  }, [acsAccounts.data, acsChoice]);
 
   const detail = useQuery<SenderDomainView>({
     queryKey: ['sender-domains', existingId],
@@ -61,7 +77,8 @@ export function SenderDomainAddPage() {
   }, [detail.data]);
 
   const createMut = useMutation({
-    mutationFn: (domain: string) => api.post<SenderDomainView>('/api/sender-domains', { domain }),
+    mutationFn: (input: { domain: string; acsAccountId?: string }) =>
+      api.post<SenderDomainView>('/api/sender-domains', input),
     onError: (err) => toast(`创建失败:${apiErrMessage(err)}`, 'error'),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['sender-domains'] });
@@ -111,14 +128,42 @@ export function SenderDomainAddPage() {
                   onChange={(e) => setDomainInput(e.target.value)}
                 />
               </div>
+              {multiAcs && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="acs">ACS 账号</Label>
+                  <select
+                    id="acs"
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={acsChoice}
+                    onChange={(e) => setAcsChoice(e.target.value)}
+                  >
+                    {acsAccounts.data?.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                        {a.isPrimary ? ' · 主' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    域名提交后无法更改所属 ACS 账号,请谨慎选择。
+                  </p>
+                </div>
+              )}
               {createMut.isError && (
                 <div className="rounded-md bg-destructive/10 p-2 text-sm text-destructive">
                   {apiErrMessage(createMut.error)}
                 </div>
               )}
               <Button
-                onClick={() => createMut.mutate(domainInput.trim())}
-                disabled={!domainInput.trim() || createMut.isPending}
+                onClick={() =>
+                  createMut.mutate({
+                    domain: domainInput.trim(),
+                    acsAccountId: multiAcs ? acsChoice || undefined : undefined,
+                  })
+                }
+                disabled={
+                  !domainInput.trim() || createMut.isPending || (multiAcs && !acsChoice)
+                }
               >
                 {createMut.isPending ? (
                   <>

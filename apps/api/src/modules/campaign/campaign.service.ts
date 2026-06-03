@@ -1110,44 +1110,45 @@ export class CampaignService {
     if (!c) throw new NotFoundException();
     if (!c.html) throw new BadRequestException('活动尚未设置邮件正文');
 
-    // Resolve the campaign's full sender roster (falls back to the primary
-    // for pre-feature campaigns with no campaign_senders rows) and validate
-    // every address: domain must be verified, and all of them must live under
-    // the SAME active ACS account — the tick scheduler routes a whole
-    // campaign to one ACS account via its primary fromEmail, so a sender on a
-    // different ACS account would be rejected by the wrong transport.
+    // Resolve the campaign's full sender roster (falls back to the primary for
+    // pre-feature campaigns with no campaign_senders rows) and validate every
+    // address: its domain must be verified under an ACTIVE ACS account.
+    // Senders MAY span multiple ACS accounts — each recipient is routed to its
+    // own sender's ACS account at materialisation / dispatch time.
     const senders =
       c.senders.length > 0
         ? c.senders.map((s) => ({ fromEmail: s.fromEmail, fromName: s.fromName }))
         : [{ fromEmail: c.fromEmail, fromName: c.fromName }];
 
-    let acsAccountId: string | null = null;
+    const domainAcs = new Map<string, string>();
+    const enrichedSenders: Array<{
+      fromEmail: string;
+      fromName: string;
+      acsAccountId: string;
+    }> = [];
     for (const s of senders) {
       const domain = s.fromEmail.split('@')[1];
-      const verified = await this.prisma.senderDomain.findFirst({
-        where: { accountId, domain, status: 'verified' },
-        include: { acsAccount: true },
-      });
-      if (!verified) {
-        throw new BadRequestException(`寄件域名 ${domain} 尚未验证`);
+      let acsId = domainAcs.get(domain);
+      if (!acsId) {
+        const verified = await this.prisma.senderDomain.findFirst({
+          where: { accountId, domain, status: 'verified' },
+          include: { acsAccount: true },
+        });
+        if (!verified) {
+          throw new BadRequestException(`寄件域名 ${domain} 尚未验证`);
+        }
+        if (!verified.acsAccount) {
+          throw new BadRequestException(`寄件域名 ${domain} 未分配 ACS 账号`);
+        }
+        if (verified.acsAccount.status !== 'active') {
+          throw new BadRequestException(
+            `ACS 账号 ${verified.acsAccount.name} 当前状态为 ${verified.acsAccount.status}`,
+          );
+        }
+        acsId = verified.acsAccount.id;
+        domainAcs.set(domain, acsId);
       }
-      if (!verified.acsAccount) {
-        throw new BadRequestException(
-          `Sender domain ${domain} has no ACS account assigned`,
-        );
-      }
-      if (verified.acsAccount.status !== 'active') {
-        throw new BadRequestException(
-          `ACS account ${verified.acsAccount.name} is ${verified.acsAccount.status}`,
-        );
-      }
-      if (acsAccountId === null) {
-        acsAccountId = verified.acsAccount.id;
-      } else if (acsAccountId !== verified.acsAccount.id) {
-        throw new BadRequestException(
-          `所有发件人必须属于同一个 ACS 账号，${domain} 与其它发件人不在同一账号下`,
-        );
-      }
+      enrichedSenders.push({ ...s, acsAccountId: acsId });
     }
 
     // Audience resolution & recipient materialisation strategy:
@@ -1189,7 +1190,7 @@ export class CampaignService {
         accountId,
         c.lists.map((l) => l.listId),
         c.segments.map((s) => s.segmentId),
-        senders,
+        enrichedSenders,
       );
       if (inserted === 0) {
         throw new BadRequestException('所选列表/分群中没有可发送的联系人');
@@ -1278,11 +1279,13 @@ export class CampaignService {
     accountId: string,
     listIds: string[],
     segmentIds: string[],
-    senders: Array<{ fromEmail: string; fromName: string }>,
+    senders: Array<{ fromEmail: string; fromName: string; acsAccountId: string }>,
   ): Promise<number> {
-    // Single-sender campaigns leave the per-recipient columns NULL so the
-    // worker falls back to Campaign.fromEmail/fromName — no behaviour change.
+    // Single-sender campaigns leave the per-recipient from-columns NULL so the
+    // worker falls back to Campaign.fromEmail/fromName — but we always stamp
+    // acsAccountId so the dispatcher can route without re-resolving the domain.
     const rotate = senders.length > 1;
+    const primaryAcs = senders[0]?.acsAccountId ?? null;
     const BATCH = 5000;
     let inserted = 0;
     // Rotation is positioned over rows *processed* (not just inserted) so the
@@ -1303,6 +1306,7 @@ export class CampaignService {
             status: 'pending' as const,
             fromEmail: s?.fromEmail ?? null,
             fromName: s?.fromName ?? null,
+            acsAccountId: s?.acsAccountId ?? primaryAcs,
           };
         }),
         skipDuplicates: true,

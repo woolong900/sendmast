@@ -49,16 +49,39 @@ export interface AcsAccountView {
   updatedAt: string;
 }
 
-export const AssignDefaultAcsAccountSchema = z.object({
-  acsAccountId: z.string().uuid().nullable(),
-});
-export type AssignDefaultAcsAccountInput = z.infer<typeof AssignDefaultAcsAccountSchema>;
+/**
+ * Set the full set of ACS accounts a tenant may send through, plus which one is
+ * primary. An empty list clears all assignments. `primaryAcsAccountId` must be a
+ * member of `acsAccountIds` (or null when the list is empty).
+ */
+export const AssignAcsAccountsSchema = z
+  .object({
+    acsAccountIds: z.array(z.string().uuid()).max(50),
+    primaryAcsAccountId: z.string().uuid().nullable(),
+  })
+  .refine(
+    (v) =>
+      v.acsAccountIds.length === 0
+        ? v.primaryAcsAccountId === null
+        : v.primaryAcsAccountId !== null && v.acsAccountIds.includes(v.primaryAcsAccountId),
+    { message: '主 ACS 账号必须是已分配集合中的一个' },
+  );
+export type AssignAcsAccountsInput = z.infer<typeof AssignAcsAccountsSchema>;
+
+/** A single ACS assignment for a tenant, as shown in admin/tenant views. */
+export interface AssignedAcsAccountView {
+  id: string;
+  name: string;
+  status: AcsAccountStatusValue;
+  isPrimary: boolean;
+}
 
 export interface AdminAccountView {
   id: string;
   name: string;
   slug: string;
-  defaultAcsAccount: { id: string; name: string; status: AcsAccountStatusValue } | null;
+  /** All ACS accounts assigned to this tenant; one has isPrimary=true. */
+  acsAccounts: AssignedAcsAccountView[];
   senderDomainCount: number;
   sendQuotaRemaining: number;
   status: 'pending_activation' | 'active' | 'suspended';

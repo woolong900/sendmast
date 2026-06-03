@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -19,11 +20,11 @@ import { PlatformAdminGuard } from '../auth/platform-admin.guard';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
-  AssignDefaultAcsAccountSchema,
+  AssignAcsAccountsSchema,
   SetAccountStatusSchema,
   SetTenantQuotaSchema,
 } from '@sendmast/shared';
-import type { AdminAccountView } from '@sendmast/shared';
+import type { AdminAccountView, AssignedAcsAccountView } from '@sendmast/shared';
 import { firstZodError } from '../../common/zod-error';
 
 @ApiTags('admin/accounts')
@@ -41,7 +42,10 @@ export class AccountAdminController {
     const rows = await this.prisma.account.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        defaultAcsAccount: { select: { id: true, name: true, status: true } },
+        acsAccounts: {
+          include: { acsAccount: { select: { id: true, name: true, status: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
         // Owner email = first member with role=owner. There can be more in
         // theory but signup only ever creates one; if a second is added
         // later we just show the first by createdAt asc.
@@ -58,13 +62,14 @@ export class AccountAdminController {
       id: r.id,
       name: r.name,
       slug: r.slug,
-      defaultAcsAccount: r.defaultAcsAccount
-        ? {
-            id: r.defaultAcsAccount.id,
-            name: r.defaultAcsAccount.name,
-            status: r.defaultAcsAccount.status as 'active' | 'suspended' | 'retired',
-          }
-        : null,
+      acsAccounts: r.acsAccounts.map(
+        (l): AssignedAcsAccountView => ({
+          id: l.acsAccount.id,
+          name: l.acsAccount.name,
+          status: l.acsAccount.status as 'active' | 'suspended' | 'retired',
+          isPrimary: l.isPrimary,
+        }),
+      ),
       senderDomainCount: r._count.senderDomains,
       sendQuotaRemaining: r.sendQuotaRemaining,
       status: r.status,
@@ -157,25 +162,85 @@ export class AccountAdminController {
     );
   }
 
-  @Patch(':id/default-acs-account')
-  async assignDefault(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
-    const r = AssignDefaultAcsAccountSchema.safeParse(body);
-    if (!r.success) throw new BadRequestException(firstZodError(r.error));
+  @Get(':id/acs-accounts')
+  async listAcsAccounts(
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ): Promise<AssignedAcsAccountView[]> {
+    const links = await this.prisma.accountAcsAccount.findMany({
+      where: { accountId: id },
+      include: { acsAccount: { select: { id: true, name: true, status: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return links.map((l) => ({
+      id: l.acsAccount.id,
+      name: l.acsAccount.name,
+      status: l.acsAccount.status as 'active' | 'suspended' | 'retired',
+      isPrimary: l.isPrimary,
+    }));
+  }
 
-    if (r.data.acsAccountId) {
-      const acct = await this.prisma.acsAccount.findUnique({
-        where: { id: r.data.acsAccountId },
+  /**
+   * Replace a tenant's full ACS assignment set in one shot. The set must
+   * reference existing, active ACS accounts; exactly one is primary (unless the
+   * set is empty). An ACS account cannot be removed while the tenant still has
+   * sender domains bound to it (those domains' sends would break).
+   */
+  @Put(':id/acs-accounts')
+  async assignAcsAccounts(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+  ) {
+    const r = AssignAcsAccountsSchema.safeParse(body);
+    if (!r.success) throw new BadRequestException(firstZodError(r.error));
+    const { acsAccountIds, primaryAcsAccountId } = r.data;
+
+    const account = await this.prisma.account.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!account) throw new BadRequestException('账号不存在');
+
+    const ids = Array.from(new Set(acsAccountIds));
+    if (ids.length > 0) {
+      const found = await this.prisma.acsAccount.findMany({
+        where: { id: { in: ids } },
         select: { id: true, status: true },
       });
-      if (!acct) throw new BadRequestException('指定的 ACS 账号不存在');
-      if (acct.status !== 'active') {
-        throw new BadRequestException(`该 ACS 账号当前状态为 ${acct.status}，无法分配`);
+      if (found.length !== ids.length) {
+        throw new BadRequestException('包含不存在的 ACS 账号');
+      }
+      const inactive = found.find((a) => a.status !== 'active');
+      if (inactive) {
+        throw new BadRequestException(`ACS 账号 ${inactive.id} 当前状态为 ${inactive.status}，无法分配`);
       }
     }
 
-    await this.prisma.account.update({
-      where: { id },
-      data: { defaultAcsAccountId: r.data.acsAccountId },
+    // Guard: any ACS account currently bound to this tenant's sender domains
+    // must remain in the new set, otherwise those domains can no longer send.
+    const boundDomains = await this.prisma.senderDomain.findMany({
+      where: { accountId: id },
+      select: { acsAccountId: true },
+      distinct: ['acsAccountId'],
+    });
+    const boundAcsIds = new Set(boundDomains.map((d) => d.acsAccountId));
+    const removed = [...boundAcsIds].filter((acsId) => !ids.includes(acsId));
+    if (removed.length > 0) {
+      throw new BadRequestException(
+        '无法移除仍有发件域名绑定的 ACS 账号，请先删除相关域名',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.accountAcsAccount.deleteMany({ where: { accountId: id } });
+      if (ids.length > 0) {
+        await tx.accountAcsAccount.createMany({
+          data: ids.map((acsId) => ({
+            accountId: id,
+            acsAccountId: acsId,
+            isPrimary: acsId === primaryAcsAccountId,
+          })),
+        });
+      }
     });
     return { ok: true };
   }

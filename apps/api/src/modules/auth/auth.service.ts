@@ -149,9 +149,12 @@ export class AuthService {
           // Status defaults to `pending_activation` per Prisma schema; the
           // user gains read+limited-write access immediately, but campaign
           // create/start is gated until they redeem the activation link.
-          defaultAcsAccountId: platformDefault?.id ?? null,
           referredByChannelId,
           referredAt: referredByChannelId ? new Date() : null,
+          // Inherit the platform default ACS as the tenant's primary assignment.
+          ...(platformDefault
+            ? { acsAccounts: { create: { acsAccountId: platformDefault.id, isPrimary: true } } }
+            : {}),
         },
       });
       const user = await tx.user.create({

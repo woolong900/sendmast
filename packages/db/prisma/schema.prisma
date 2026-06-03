@@ -281,7 +281,6 @@ model Account {
   /// Free-form admin note shown in the Suspended banner so the tenant
   /// understands why writes are blocked. Optional.
   suspendedReason     String?       @map("suspended_reason")
-  defaultAcsAccountId String?       @map("default_acs_account_id") @db.Uuid
   /// Remaining prepaid send quota. Decremented atomically in runSend on
   /// every ACS call attempt (success or failure). When it reaches 0, the
   /// scheduler stops enqueueing for this tenant and any in-flight job
@@ -306,13 +305,30 @@ model Account {
   segments           Segment[]
   quotaOrders        QuotaOrder[]
   commissionRecords  CommissionRecord[]
+  acsAccounts        AccountAcsAccount[]
 
-  defaultAcsAccount AcsAccount? @relation("AccountDefaultAcs", fields: [defaultAcsAccountId], references: [id], onDelete: SetNull)
   referredByChannel ReferralChannel? @relation(fields: [referredByChannelId], references: [id], onDelete: SetNull)
 
-  @@index([defaultAcsAccountId])
   @@index([referredByChannelId])
   @@map("accounts")
+}
+
+/// Join table: which ACS accounts a tenant may send through. A tenant can be
+/// assigned multiple ACS accounts; exactly one is flagged `isPrimary` (enforced
+/// by a partial unique index in migration SQL) and is used as the default when
+/// adding a sender domain and as the fallback for single-ACS tenants.
+model AccountAcsAccount {
+  accountId    String   @map("account_id") @db.Uuid
+  acsAccountId String   @map("acs_account_id") @db.Uuid
+  isPrimary    Boolean  @default(false) @map("is_primary")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  account    Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  acsAccount AcsAccount @relation(fields: [acsAccountId], references: [id], onDelete: Restrict)
+
+  @@id([accountId, acsAccountId])
+  @@index([acsAccountId])
+  @@map("account_acs_accounts")
 }
 
 enum AccountStatus {
@@ -373,17 +389,17 @@ model AcsAccount {
   // before this column existed) keep working — they'll be rejected at the
   // link step until an admin edits and fills it in.
   azureCommunicationServiceName String?          @map("azure_communication_service_name")
-  /// Platform-wide default. New tenant signups inherit this as their
-  /// defaultAcsAccountId. At most one row may be true at a time — enforced
-  /// by a partial unique index defined in migration SQL (Prisma 5 doesn't
-  /// support partial unique constraints declaratively).
+  /// Platform-wide default. New tenant signups get a primary
+  /// AccountAcsAccount link to this ACS. At most one row may be true at a
+  /// time — enforced by a partial unique index defined in migration SQL
+  /// (Prisma 5 doesn't support partial unique constraints declaratively).
   isDefault                     Boolean          @default(false) @map("is_default")
   createdAt                     DateTime         @default(now()) @map("created_at")
   updatedAt                     DateTime         @updatedAt @map("updated_at")
 
-  senderDomains      SenderDomain[]
-  defaultForAccounts Account[]      @relation("AccountDefaultAcs")
-  sendLogs           SendLog[]
+  senderDomains    SenderDomain[]
+  accountLinks     AccountAcsAccount[]
+  sendLogs         SendLog[]
 
   @@map("acs_accounts")
 }
@@ -815,6 +831,10 @@ model CampaignRecipient {
   /// campaigns and all rows created before this feature).
   fromEmail    String?         @map("from_email")
   fromName     String?         @map("from_name")
+  /// ACS account this recipient's send is routed through, resolved from the
+  /// assigned sender's domain at materialisation. NULL = legacy rows; the
+  /// dispatcher falls back to resolving from the from-address domain.
+  acsAccountId String?         @map("acs_account_id") @db.Uuid
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
 
@@ -826,6 +846,7 @@ model CampaignRecipient {
   @@index([campaignId, status])
   @@index([accountId, status])
   @@index([messageId])
+  @@index([acsAccountId, status])
   @@map("campaign_recipients")
 }
 

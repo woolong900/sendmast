@@ -9,7 +9,7 @@ import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
-import type { SenderDomainView } from '@sendmast/shared';
+import type { SenderDomainView, TenantAcsAccountView } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
 
 type DomainView = SenderDomainView;
@@ -27,6 +27,14 @@ export function SenderDomainsPage() {
     queryKey: ['sender-domains'],
     queryFn: async () => (await api.get('/api/sender-domains')).data,
   });
+  // Surface which ACS account each domain belongs to only when the tenant has
+  // more than one assigned (single-ACS tenants don't need the extra column).
+  const { data: acsAccounts } = useQuery<TenantAcsAccountView[]>({
+    queryKey: ['sender-domains', 'acs-accounts'],
+    queryFn: async () => (await api.get('/api/sender-domains/acs-accounts')).data,
+  });
+  const multiAcs = (acsAccounts?.length ?? 0) > 1;
+  const colCount = multiAcs ? 6 : 5;
 
   const verifyMut = useMutation({
     mutationFn: (id: string) => api.post(`/api/sender-domains/${id}/verify`),
@@ -70,6 +78,7 @@ export function SenderDomainsPage() {
               <tr>
                 <th className="px-4 py-3 font-medium">域名</th>
                 <th className="px-4 py-3 font-medium">状态</th>
+                {multiAcs && <th className="px-4 py-3 font-medium">所属 ACS 账号</th>}
                 <th className="px-4 py-3 font-medium">发件人</th>
                 <th className="px-4 py-3 font-medium">最近检测</th>
                 <th className="px-4 py-3 font-medium">操作</th>
@@ -78,12 +87,12 @@ export function SenderDomainsPage() {
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={colCount} className="px-4 py-8 text-center text-muted-foreground">
                     加载中...
                   </td>
                 </tr>
               )}
-              {!isLoading && data && data.length === 0 && <EmptyStateRow colSpan={5} />}
+              {!isLoading && data && data.length === 0 && <EmptyStateRow colSpan={colCount} />}
               {data?.map((d) => {
                 // Domain is fully usable once DNS is verified AND there's at
                 // least one sender username (link to CommunicationService is
@@ -133,6 +142,11 @@ export function SenderDomainsPage() {
                         </Badge>
                       )}
                     </td>
+                    {multiAcs && (
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {d.acsAccount?.name ?? '—'}
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-muted-foreground">
                       {d.senderUsernames.length > 0 ? (
                         <span title={d.senderUsernames.map((u) => u.fullAddress).join('\n')}>

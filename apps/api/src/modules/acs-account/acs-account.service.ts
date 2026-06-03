@@ -111,7 +111,9 @@ export class AcsAccountService {
   async remove(id: string): Promise<void> {
     const acct = await this.prisma.acsAccount.findUnique({
       where: { id },
-      include: { _count: { select: { senderDomains: true } } },
+      include: {
+        _count: { select: { senderDomains: true, accountLinks: true } },
+      },
     });
     if (!acct) throw new NotFoundException();
     if (acct._count.senderDomains > 0) {
@@ -119,13 +121,18 @@ export class AcsAccountService {
         `Cannot delete: ${acct._count.senderDomains} sender domain(s) still bound`,
       );
     }
+    if (acct._count.accountLinks > 0) {
+      throw new ConflictException(
+        `无法删除:仍有 ${acct._count.accountLinks} 个租户分配了该 ACS 账号`,
+      );
+    }
     await this.prisma.acsAccount.delete({ where: { id } });
   }
 
   /**
    * Mark a single ACS account as the platform-wide default. New tenant
-   * signups will inherit this as their `defaultAcsAccountId`. Atomic:
-   * clear any previous default first, then promote the target.
+   * signups get a primary AccountAcsAccount link to it. Atomic: clear any
+   * previous default first, then promote the target.
    */
   async setDefault(id: string): Promise<AcsAccountView> {
     const target = await this.prisma.acsAccount.findUnique({

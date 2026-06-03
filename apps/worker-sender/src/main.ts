@@ -186,6 +186,7 @@ async function runDispatch(job: Job<DispatchJobData>) {
 async function materialiseRecipients(
   campaign: {
     id: string;
+    fromEmail: string;
     lists: { listId: string }[];
     senders: { fromEmail: string; fromName: string }[];
     totalRecipients: number;
@@ -204,6 +205,20 @@ async function materialiseRecipients(
   // the distribution roughly even instead of restarting at sender 0.
   const senders = campaign.senders;
   const rotate = senders.length > 1;
+
+  // Resolve the ACS account each sender's domain routes to, so we can stamp
+  // it per recipient (cross-ACS campaigns route each recipient independently).
+  const senderAcs: (string | null)[] = [];
+  for (const s of senders) {
+    const d = s.fromEmail.split('@')[1]?.toLowerCase();
+    senderAcs.push(d ? await resolveAcsAccountIdForDomain(d) : null);
+  }
+  const primaryDomain = (senders[0]?.fromEmail ?? campaign.fromEmail)
+    .split('@')[1]
+    ?.toLowerCase();
+  const primaryAcs = primaryDomain
+    ? await resolveAcsAccountIdForDomain(primaryDomain)
+    : null;
 
   const listIds = campaign.lists.map((l) => l.listId);
   // No lists means this is the segment-only path; API already materialised
@@ -232,7 +247,8 @@ async function materialiseRecipients(
 
     await prisma.campaignRecipient.createMany({
       data: batch.map((c, j) => {
-        const s = rotate ? senders[(inserted + j) % senders.length] : null;
+        const idx = (inserted + j) % senders.length;
+        const s = rotate ? senders[idx] : null;
         return {
           accountId,
           campaignId: campaign.id,
@@ -241,6 +257,7 @@ async function materialiseRecipients(
           status: 'pending' as const,
           fromEmail: s?.fromEmail ?? null,
           fromName: s?.fromName ?? null,
+          acsAccountId: rotate ? senderAcs[idx] : primaryAcs,
         };
       }),
       skipDuplicates: true,
@@ -325,66 +342,94 @@ async function runTick(_job: Job): Promise<void> {
   // tenants with budget > 0 reach the routing step below.
   if (exhausted.length === campaigns.length) return;
 
-  // 3. Group eligible campaigns (tenant has quota) by ACS account.
-  const groups = new Map<string, Array<{ id: string; accountId: string }>>();
+  // 3. Eligible campaigns = sending campaigns whose tenant still has quota.
+  //    Routing is now PER RECIPIENT: each campaign_recipients row carries the
+  //    ACS account resolved from its assigned sender's domain, so a single
+  //    campaign may fan out across multiple ACS accounts.
+  const eligibleCampaignIds: string[] = [];
+  const campaignTenant = new Map<string, string>();
   for (const c of campaigns) {
     if ((tenantBudget.get(c.accountId) ?? 0) <= 0) continue;
-    const domain = c.fromEmail.split('@')[1]?.toLowerCase();
-    if (!domain) continue;
-    const acsAccountId = await resolveAcsAccountIdForDomain(domain);
-    if (!acsAccountId) continue;
-    if (!groups.has(acsAccountId)) groups.set(acsAccountId, []);
-    groups.get(acsAccountId)!.push({ id: c.id, accountId: c.accountId });
+    eligibleCampaignIds.push(c.id);
+    campaignTenant.set(c.id, c.accountId);
+  }
+  if (eligibleCampaignIds.length === 0) return;
+
+  // 3b. Defensive backfill for legacy rows with no acs_account_id (new sends
+  //     are always stamped at materialisation; the migration backfilled
+  //     in-flight rows, so this is usually a no-op). NULL -> campaign primary
+  //     ACS resolved from Campaign.fromEmail.
+  const nullCount = await prisma.campaignRecipient.count({
+    where: { campaignId: { in: eligibleCampaignIds }, status: 'pending', acsAccountId: null },
+  });
+  if (nullCount > 0) {
+    for (const c of campaigns) {
+      if (!campaignTenant.has(c.id)) continue;
+      const domain = c.fromEmail.split('@')[1]?.toLowerCase();
+      if (!domain) continue;
+      const acs = await resolveAcsAccountIdForDomain(domain);
+      if (!acs) continue;
+      await prisma.campaignRecipient.updateMany({
+        where: { campaignId: c.id, status: 'pending', acsAccountId: null },
+        data: { acsAccountId: acs },
+      });
+    }
   }
 
-  // 4. Per ACS account: compute ACS-tier budget = min(remaining of 4 tiers),
-  //    divide evenly across campaigns, then cap each campaign's share by the
-  //    owning tenant's remaining prepaid quota.
-  for (const [acsAccountId, members] of groups) {
+  // 4. Per ACS account: compute ACS-tier budget (min of the 4 rate tiers),
+  //    take that many pending recipients for this ACS across all eligible
+  //    campaigns, then enqueue while respecting each owning tenant's remaining
+  //    prepaid quota (mutated in-tick so campaigns sharing a tenant don't
+  //    double-spend).
+  const acsBuckets = await prisma.campaignRecipient.groupBy({
+    by: ['acsAccountId'],
+    where: {
+      campaignId: { in: eligibleCampaignIds },
+      status: 'pending',
+      acsAccountId: { not: null },
+    },
+  });
+
+  for (const bucket of acsBuckets) {
+    const acsAccountId = bucket.acsAccountId;
+    if (!acsAccountId) continue;
     const acct = await getAcsAccount(acsAccountId);
     if (!acct || acct.status !== 'active') continue;
 
-    const budget = await quota.getAvailable(acsAccountId, acct);
-    if (budget === 0) continue;
+    let budget = await quota.getAvailable(acsAccountId, acct);
+    if (budget <= 0) continue;
 
-    const perCampaign = Math.floor(budget / members.length);
-    let leftover = budget - perCampaign * members.length;
+    const candidates = await prisma.campaignRecipient.findMany({
+      where: { acsAccountId, status: 'pending', campaignId: { in: eligibleCampaignIds } },
+      take: budget,
+      orderBy: { id: 'asc' },
+      select: { id: true, campaignId: true },
+    });
 
-    for (const { id: cid, accountId: tenantId } of members) {
+    const toQueue: string[] = [];
+    for (const r of candidates) {
+      if (budget <= 0) break;
+      const tenantId = campaignTenant.get(r.campaignId);
+      if (!tenantId) continue;
       const tenantRemaining = tenantBudget.get(tenantId) ?? 0;
       if (tenantRemaining <= 0) continue;
-
-      let myShare = perCampaign + (leftover > 0 ? 1 : 0);
-      if (leftover > 0) leftover -= 1;
-      // Cap by tenant prepaid quota — we never enqueue more than the tenant
-      // can pay for, even if ACS-tier budget would allow more.
-      myShare = Math.min(myShare, tenantRemaining);
-      if (myShare === 0) continue;
-
-      const recipients = await prisma.campaignRecipient.findMany({
-        where: { campaignId: cid, status: 'pending' },
-        take: myShare,
-        orderBy: { id: 'asc' },
-        select: { id: true },
-      });
-      if (recipients.length === 0) continue;
-
-      await sendEmailQueue.addBulk(
-        recipients.map((r) => ({
-          name: 'send',
-          data: { recipientId: r.id, acsAccountId },
-          opts: { jobId: `r-${r.id}` },
-        })),
-      );
-      await prisma.campaignRecipient.updateMany({
-        where: { id: { in: recipients.map((r) => r.id) } },
-        data: { status: 'queued' },
-      });
-
-      // Reduce the in-tick tenant budget so other campaigns sharing this
-      // tenant don't double-spend it within the same tick.
-      tenantBudget.set(tenantId, tenantRemaining - recipients.length);
+      toQueue.push(r.id);
+      tenantBudget.set(tenantId, tenantRemaining - 1);
+      budget -= 1;
     }
+    if (toQueue.length === 0) continue;
+
+    await sendEmailQueue.addBulk(
+      toQueue.map((id) => ({
+        name: 'send',
+        data: { recipientId: id, acsAccountId },
+        opts: { jobId: `r-${id}` },
+      })),
+    );
+    await prisma.campaignRecipient.updateMany({
+      where: { id: { in: toQueue } },
+      data: { status: 'queued' },
+    });
   }
 }
 

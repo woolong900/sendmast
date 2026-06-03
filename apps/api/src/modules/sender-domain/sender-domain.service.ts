@@ -15,6 +15,7 @@ import type {
   SenderDomainVerificationStates,
   SenderDomainView,
   SenderUsernameView,
+  TenantAcsAccountView,
 } from '@sendmast/shared';
 
 type SenderUsernameRow = {
@@ -37,7 +38,10 @@ export class SenderDomainService {
     const rows = await this.prisma.senderDomain.findMany({
       where: { accountId },
       orderBy: { createdAt: 'desc' },
-      include: { senderUsernames: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        senderUsernames: { orderBy: { createdAt: 'asc' } },
+        acsAccount: { select: { id: true, name: true } },
+      },
     });
     return rows.map((r) => this.toView(r, r.senderUsernames));
   }
@@ -45,10 +49,30 @@ export class SenderDomainService {
   async get(accountId: string, id: string): Promise<SenderDomainView> {
     const row = await this.prisma.senderDomain.findFirst({
       where: { id, accountId },
-      include: { senderUsernames: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        senderUsernames: { orderBy: { createdAt: 'asc' } },
+        acsAccount: { select: { id: true, name: true } },
+      },
     });
     if (!row) throw new NotFoundException('域名不存在');
     return this.toView(row, row.senderUsernames);
+  }
+
+  /**
+   * ACS accounts this tenant may provision domains under. Used by the
+   * domain-add wizard to render an ACS picker when more than one is assigned.
+   */
+  async listAcsAccounts(accountId: string): Promise<TenantAcsAccountView[]> {
+    const links = await this.prisma.accountAcsAccount.findMany({
+      where: { accountId, acsAccount: { status: 'active' } },
+      include: { acsAccount: { select: { id: true, name: true } } },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    });
+    return links.map((l) => ({
+      id: l.acsAccount.id,
+      name: l.acsAccount.name,
+      isPrimary: l.isPrimary,
+    }));
   }
 
   /**
@@ -61,29 +85,42 @@ export class SenderDomainService {
    *      (or `status='failed'` on error).
    * The front-end polls `GET /api/sender-domains/:id` until records appear.
    */
-  async create(accountId: string, domain: string): Promise<SenderDomainView> {
+  async create(
+    accountId: string,
+    domain: string,
+    acsAccountId?: string,
+  ): Promise<SenderDomainView> {
     const cleaned = domain.toLowerCase().trim();
     const exists = await this.prisma.senderDomain.findFirst({
       where: { accountId, domain: cleaned },
     });
     if (exists) throw new BadRequestException('该域名已添加');
 
-    const account = await this.prisma.account.findUnique({
-      where: { id: accountId },
-      include: { defaultAcsAccount: true },
+    // The tenant's assigned, active ACS accounts. The domain is provisioned
+    // under exactly one of them (immutable after creation).
+    const links = await this.prisma.accountAcsAccount.findMany({
+      where: { accountId, acsAccount: { status: 'active' } },
+      include: { acsAccount: true },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     });
-    if (!account) throw new NotFoundException('工作区不存在');
-    const acsAccount = account.defaultAcsAccount;
-    if (!acsAccount) {
+    if (links.length === 0) {
       throw new BadRequestException(
-        'No default ACS account assigned to this tenant. Contact a platform administrator.',
+        '当前租户尚未分配可用的 ACS 账号，请联系平台管理员。',
       );
     }
-    if (acsAccount.status !== 'active') {
-      throw new BadRequestException(
-        `Default ACS account ${acsAccount.name} is ${acsAccount.status}.`,
-      );
+
+    let chosen;
+    if (acsAccountId) {
+      chosen = links.find((l) => l.acsAccountId === acsAccountId)?.acsAccount;
+      if (!chosen) {
+        throw new BadRequestException('指定的 ACS 账号未分配给当前租户或不可用');
+      }
+    } else if (links.length === 1) {
+      chosen = links[0].acsAccount;
+    } else {
+      throw new BadRequestException('当前租户分配了多个 ACS 账号，请选择要使用的 ACS 账号');
     }
+    const acsAccount = chosen;
 
     const row = await this.prisma.senderDomain.create({
       data: {
@@ -97,7 +134,7 @@ export class SenderDomainService {
 
     void this.provisionInBackground(row.id, acsAccount, cleaned);
 
-    return this.toView(row);
+    return this.toView({ ...row, acsAccount: { id: acsAccount.id, name: acsAccount.name } });
   }
 
   /**
@@ -331,6 +368,7 @@ export class SenderDomainService {
       id: string;
       domain: string;
       acsAccountId: string;
+      acsAccount?: { id: string; name: string } | null;
       status: SenderDomainStatus;
       verificationRecords: Prisma.JsonValue;
       verificationStates: Prisma.JsonValue | null;
@@ -354,6 +392,7 @@ export class SenderDomainService {
       id: row.id,
       domain: row.domain,
       acsAccountId: row.acsAccountId,
+      acsAccount: row.acsAccount ?? null,
       status,
       records,
       states,

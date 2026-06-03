@@ -375,6 +375,13 @@ export function CampaignWizardPage() {
   // of from-addresses ACS will accept. A domain with no sender username
   // contributes no options (the user is pointed to the domain's wizard
   // step 3 to add one).
+  // Show the ACS account label next to each sender only when the tenant spans
+  // more than one ACS account (cross-ACS sending), so single-ACS tenants stay
+  // uncluttered.
+  const multiAcs = useMemo(
+    () => new Set(verifiedDomains.map((d) => d.acsAccount?.id ?? d.acsAccountId)).size > 1,
+    [verifiedDomains],
+  );
   const senderOptions = useMemo(
     () =>
       verifiedDomains.flatMap((d) =>
@@ -383,9 +390,10 @@ export function CampaignWizardPage() {
           label: u.displayName ? `${u.displayName} <${u.fullAddress}>` : u.fullAddress,
           displayName: u.displayName,
           username: u.username,
+          acsName: multiAcs ? d.acsAccount?.name ?? null : null,
         })),
       ),
-    [verifiedDomains],
+    [verifiedDomains, multiAcs],
   );
 
   // Resolve the sender username record matching the chosen address so we can
@@ -2024,12 +2032,12 @@ function SenderEmailSelect({
 }: {
   values: string[];
   onChange: (v: string[]) => void;
-  options: Array<{ value: string; label: string }>;
+  options: Array<{ value: string; label: string; acsName?: string | null }>;
 }) {
   const [open, setOpen] = useState(false);
   const selectedOptions = values
     .map((v) => options.find((o) => o.value === v))
-    .filter((o): o is { value: string; label: string } => !!o);
+    .filter((o): o is { value: string; label: string; acsName?: string | null } => !!o);
   const allSelected = options.length > 0 && values.length >= options.length;
 
   const toggle = (value: string) => {
@@ -2111,7 +2119,12 @@ function SenderEmailSelect({
                 >
                   {isSelected && <Check className="size-3" />}
                 </span>
-                {o.label}
+                <span className="flex-1 truncate">{o.label}</span>
+                {o.acsName && (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                    {o.acsName}
+                  </span>
+                )}
               </div>
             );
           })}

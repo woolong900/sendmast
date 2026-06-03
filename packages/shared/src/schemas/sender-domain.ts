@@ -6,8 +6,22 @@ export const CreateSenderDomainSchema = z.object({
     .min(3)
     .max(253)
     .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i, 'Invalid domain'),
+  /**
+   * Which ACS account to provision the domain under. Optional: required only
+   * when the tenant has more than one assigned ACS account; otherwise the
+   * tenant's single (primary) ACS is used. Validated against the tenant's
+   * assigned set in the service layer.
+   */
+  acsAccountId: z.string().uuid().optional(),
 });
 export type CreateSenderDomainInput = z.infer<typeof CreateSenderDomainSchema>;
+
+/** ACS account a tenant may send through — exposed to tenants for the domain-add picker. */
+export interface TenantAcsAccountView {
+  id: string;
+  name: string;
+  isPrimary: boolean;
+}
 
 /**
  * One DNS record the customer must add. Names match Azure's
@@ -65,6 +79,8 @@ export interface SenderDomainView {
   domain: string;
   status: SenderDomainStatus;
   acsAccountId: string;
+  /** The ACS account this domain is bound to (name shown in the domain list). */
+  acsAccount: { id: string; name: string } | null;
   /**
    * DNS records the customer should add. Empty while `status === 'provisioning'`
    * (Azure hasn't returned them yet); populated once provisioning succeeds.
