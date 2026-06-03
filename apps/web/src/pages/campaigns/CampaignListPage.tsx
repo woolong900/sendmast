@@ -247,9 +247,9 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
             <div className="leading-5">
               发送时间：{formatDateTime(c.sentAt ?? c.scheduledAt ?? c.createdAt)}
             </div>
-            <div className="truncate leading-5">
-              发送列表：
-              {c.lists.length > 0 ? c.lists.map((l) => l.name).join('、') : '-'}
+            <div className="flex leading-5">
+              <span className="shrink-0">发送列表：</span>
+              <SendListSummary lists={c.lists} />
             </div>
           </div>
           <div className="flex shrink-0 gap-4 sm:gap-7">
@@ -275,6 +275,35 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
         </div>
       </td>
     </tr>
+  );
+}
+
+/**
+ * 发送列表展示:列表多时只显示首个 + "…等 N 个列表",鼠标悬浮弹出全部。
+ * 用具名 group/sl 避免和外层行的 `group`(hover 高亮)冲突;浮层从 top-full
+ * 紧贴并用 pt-1 透明桥接,鼠标移向浮层时不会脱离 hover 导致闪退。
+ */
+function SendListSummary({ lists }: { lists: Array<{ id: string; name: string }> }) {
+  if (lists.length === 0) return <>-</>;
+  if (lists.length === 1) return <span className="min-w-0 truncate">{lists[0].name}</span>;
+
+  return (
+    <span className="group/sl relative inline-flex min-w-0 items-center gap-1 align-bottom">
+      <span className="min-w-0 truncate">{lists[0].name}</span>
+      <span className="shrink-0 cursor-default text-muted-foreground">
+        …等 {lists.length} 个列表
+      </span>
+      <div className="invisible absolute left-0 top-full z-30 pt-1 opacity-0 transition-opacity group-hover/sl:visible group-hover/sl:opacity-100">
+        <div className="max-h-64 w-max max-w-md overflow-auto rounded-md border bg-popover p-2 text-xs shadow-lg">
+          <div className="mb-1 font-medium text-muted-foreground">全部 {lists.length} 个列表</div>
+          {lists.map((l) => (
+            <div key={l.id} className="whitespace-nowrap py-0.5 text-foreground">
+              {l.name}
+            </div>
+          ))}
+        </div>
+      </div>
+    </span>
   );
 }
 
