@@ -37,9 +37,9 @@ export function AdminAccountsPage() {
   const confirm = useConfirm();
   const navigate = useNavigate();
   const setSession = useAuth((s) => s.setSession);
-  const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
+  const [editingAccount, setEditingAccount] = useState<AdminAccountView | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
-  const [managing, setManaging] = useState<AdminAccountView | null>(null);
   const { data: accounts, isLoading } = useQuery<AdminAccountView[]>({
     queryKey: ['admin', 'accounts'],
     queryFn: async () => (await api.get('/api/admin/accounts')).data,
@@ -47,34 +47,6 @@ export function AdminAccountsPage() {
   const { data: acsAccounts } = useQuery<AcsAccountView[]>({
     queryKey: ['admin', 'acs-accounts'],
     queryFn: async () => (await api.get('/api/admin/acs-accounts')).data,
-  });
-
-  const assignMut = useMutation({
-    mutationFn: (input: {
-      id: string;
-      acsAccountIds: string[];
-      primaryAcsAccountId: string | null;
-    }) =>
-      api.put(`/api/admin/accounts/${input.id}/acs-accounts`, {
-        acsAccountIds: input.acsAccountIds,
-        primaryAcsAccountId: input.primaryAcsAccountId,
-      }),
-    onSuccess: () => {
-      toast('ACS 账号分配已更新', 'success');
-      setManaging(null);
-      qc.invalidateQueries({ queryKey: ['admin', 'accounts'] });
-    },
-    onError: (e) => toast(apiErrMessage(e), 'error'),
-  });
-
-  const quotaMut = useMutation({
-    mutationFn: (input: { id: string; remaining: number }) =>
-      api.patch(`/api/admin/accounts/${input.id}/quota`, { remaining: input.remaining }),
-    onSuccess: () => {
-      setEditing(null);
-      qc.invalidateQueries({ queryKey: ['admin', 'accounts'] });
-    },
-    onError: (e) => toast(apiErrMessage(e), 'error'),
   });
 
   const statusMut = useMutation({
@@ -176,14 +148,27 @@ export function AdminAccountsPage() {
     }
   }
 
-  function commitQuota() {
-    if (!editing) return;
-    const n = Number(editing.value);
-    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
-      toast('请输入非负整数', 'error');
-      return;
+  async function handleSaveEdit(
+    acsAccountIds: string[],
+    primaryAcsAccountId: string | null,
+    remaining: number,
+  ) {
+    if (!editingAccount) return;
+    setSavingEdit(true);
+    try {
+      await api.put(`/api/admin/accounts/${editingAccount.id}/acs-accounts`, {
+        acsAccountIds,
+        primaryAcsAccountId,
+      });
+      await api.patch(`/api/admin/accounts/${editingAccount.id}/quota`, { remaining });
+      toast('已更新', 'success');
+      setEditingAccount(null);
+      qc.invalidateQueries({ queryKey: ['admin', 'accounts'] });
+    } catch (e) {
+      toast(apiErrMessage(e), 'error');
+    } finally {
+      setSavingEdit(false);
     }
-    quotaMut.mutate({ id: editing.id, remaining: n });
   }
 
   return (
@@ -240,21 +225,7 @@ export function AdminAccountsPage() {
                     ) : null}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex max-w-[300px] flex-wrap items-center gap-1.5">
-                      {a.acsAccounts.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">— 未分配 —</span>
-                      ) : (
-                        a.acsAccounts.map((acs) => (
-                          <Badge key={acs.id} variant={acs.isPrimary ? 'default' : 'muted'}>
-                            {acs.name}
-                            {acs.isPrimary ? ' · 主' : ''}
-                          </Badge>
-                        ))
-                      )}
-                      <Button size="sm" variant="ghost" onClick={() => setManaging(a)}>
-                        管理
-                      </Button>
-                    </div>
+                    <AcsAccountsCell acsAccounts={a.acsAccounts} />
                   </td>
                   <td className="px-4 py-3">
                     <Badge variant={a.senderDomainCount > 0 ? 'default' : 'muted'}>
@@ -262,69 +233,31 @@ export function AdminAccountsPage() {
                     </Badge>
                   </td>
                   <td className="px-4 py-3">
-                    {editing?.id === a.id ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min={0}
-                          step={1000}
-                          autoFocus
-                          className="h-8 w-32 rounded-md border border-input bg-background px-2 text-sm"
-                          value={editing.value}
-                          onChange={(e) => setEditing({ id: a.id, value: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') commitQuota();
-                            if (e.key === 'Escape') setEditing(null);
-                          }}
-                          disabled={quotaMut.isPending}
-                        />
-                        <Button
-                          size="sm"
-                          onClick={commitQuota}
-                          disabled={quotaMut.isPending}
-                        >
-                          保存
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setEditing(null)}
-                          disabled={quotaMut.isPending}
-                        >
-                          取消
-                        </Button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setEditing({ id: a.id, value: String(a.sendQuotaRemaining) })
-                        }
-                        className="group inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted"
-                        title="点击修改"
-                      >
-                        <span
-                          className={
-                            a.sendQuotaRemaining === 0
-                              ? 'font-medium text-destructive'
-                              : a.sendQuotaRemaining < 1000
-                                ? 'font-medium text-amber-600'
-                                : 'font-medium'
-                          }
-                        >
-                          {formatNumber(a.sendQuotaRemaining)}
-                        </span>
-                        <span className="text-xs text-muted-foreground opacity-0 group-hover:opacity-100">
-                          修改
-                        </span>
-                      </button>
-                    )}
+                    <span
+                      className={
+                        a.sendQuotaRemaining === 0
+                          ? 'font-medium text-destructive'
+                          : a.sendQuotaRemaining < 1000
+                            ? 'font-medium text-amber-600'
+                            : 'font-medium'
+                      }
+                    >
+                      {formatNumber(a.sendQuotaRemaining)}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {formatDateTime(a.createdAt)}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditingAccount(a)}
+                        title="修改该租户的 ACS 账号与剩余发送额度"
+                      >
+                        修改
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -373,22 +306,51 @@ export function AdminAccountsPage() {
         </CardContent>
       </Card>
 
-      {managing && (
-        <AcsAssignModal
-          account={managing}
+      {editingAccount && (
+        <AccountEditModal
+          account={editingAccount}
           acsAccounts={acsAccounts ?? []}
-          pending={assignMut.isPending}
-          onClose={() => setManaging(null)}
-          onSave={(acsAccountIds, primaryAcsAccountId) =>
-            assignMut.mutate({ id: managing.id, acsAccountIds, primaryAcsAccountId })
-          }
+          pending={savingEdit}
+          onClose={() => setEditingAccount(null)}
+          onSave={handleSaveEdit}
         />
       )}
     </div>
   );
 }
 
-function AcsAssignModal({
+/** ACS 账号列:只展示首个(优先主账号),绑定多个时追加省略号,悬浮显示全部。 */
+function AcsAccountsCell({
+  acsAccounts,
+}: {
+  acsAccounts: AdminAccountView['acsAccounts'];
+}) {
+  if (acsAccounts.length === 0) {
+    return <span className="text-xs text-muted-foreground">— 未分配 —</span>;
+  }
+  const ordered = [...acsAccounts].sort(
+    (x, y) => Number(y.isPrimary) - Number(x.isPrimary),
+  );
+  const first = ordered[0];
+  return (
+    <div className="flex items-center gap-1.5">
+      <Badge variant={first.isPrimary ? 'default' : 'muted'}>
+        {first.name}
+        {first.isPrimary ? ' · 主' : ''}
+      </Badge>
+      {acsAccounts.length > 1 && (
+        <span
+          className="cursor-default text-muted-foreground"
+          title={ordered.map((a) => a.name).join('、')}
+        >
+          …
+        </span>
+      )}
+    </div>
+  );
+}
+
+function AccountEditModal({
   account,
   acsAccounts,
   pending,
@@ -399,7 +361,11 @@ function AcsAssignModal({
   acsAccounts: AcsAccountView[];
   pending: boolean;
   onClose: () => void;
-  onSave: (acsAccountIds: string[], primaryAcsAccountId: string | null) => void;
+  onSave: (
+    acsAccountIds: string[],
+    primaryAcsAccountId: string | null,
+    remaining: number,
+  ) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(account.acsAccounts.map((a) => a.id)),
@@ -407,6 +373,7 @@ function AcsAssignModal({
   const [primary, setPrimary] = useState<string | null>(
     () => account.acsAccounts.find((a) => a.isPrimary)?.id ?? null,
   );
+  const [quota, setQuota] = useState<string>(() => String(account.sendQuotaRemaining));
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -423,61 +390,86 @@ function AcsAssignModal({
   }
 
   const ids = [...selected];
-  const valid = ids.length === 0 ? primary === null : primary !== null && selected.has(primary);
+  const acsValid =
+    ids.length === 0 ? primary === null : primary !== null && selected.has(primary);
+  const quotaNum = Number(quota);
+  const quotaValid = Number.isInteger(quotaNum) && quotaNum >= 0;
+  const valid = acsValid && quotaValid;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <Card className="w-full max-w-lg">
         <CardContent className="space-y-4 p-5">
           <div>
-            <h2 className="text-lg font-semibold">分配 ACS 账号 · {account.name}</h2>
+            <h2 className="text-lg font-semibold">修改租户 · {account.name}</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              勾选该租户可发送的 ACS 账号,并指定一个为「主」(添加域名时的默认 ACS)。
+              勾选该租户可发送的 ACS 账号(并指定一个为「主」,即添加域名时的默认 ACS),并设置剩余发送额度。
             </p>
           </div>
-          <div className="max-h-[320px] space-y-1.5 overflow-y-auto">
-            {acsAccounts.length === 0 && (
-              <div className="text-sm text-muted-foreground">尚无 ACS 账号</div>
-            )}
-            {acsAccounts.map((acs) => {
-              const checked = selected.has(acs.id);
-              const inactive = acs.status !== 'active';
-              return (
-                <div
-                  key={acs.id}
-                  className="flex items-center justify-between rounded-md border px-3 py-2"
-                >
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={pending || (inactive && !checked)}
-                      onChange={() => toggle(acs.id)}
-                    />
-                    <span>{acs.name}</span>
-                    {inactive && (
-                      <span className="text-xs text-muted-foreground">({acs.status})</span>
-                    )}
-                  </label>
-                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <input
-                      type="radio"
-                      name="primary-acs"
-                      checked={primary === acs.id}
-                      disabled={pending || !checked}
-                      onChange={() => setPrimary(acs.id)}
-                    />
-                    主
-                  </label>
-                </div>
-              );
-            })}
+
+          <div>
+            <div className="mb-1.5 text-sm font-medium">ACS 账号</div>
+            <div className="max-h-[280px] space-y-1.5 overflow-y-auto">
+              {acsAccounts.length === 0 && (
+                <div className="text-sm text-muted-foreground">尚无 ACS 账号</div>
+              )}
+              {acsAccounts.map((acs) => {
+                const checked = selected.has(acs.id);
+                const inactive = acs.status !== 'active';
+                return (
+                  <div
+                    key={acs.id}
+                    className="flex items-center justify-between rounded-md border px-3 py-2"
+                  >
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={pending || (inactive && !checked)}
+                        onChange={() => toggle(acs.id)}
+                      />
+                      <span>{acs.name}</span>
+                      {inactive && (
+                        <span className="text-xs text-muted-foreground">({acs.status})</span>
+                      )}
+                    </label>
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <input
+                        type="radio"
+                        name="primary-acs"
+                        checked={primary === acs.id}
+                        disabled={pending || !checked}
+                        onChange={() => setPrimary(acs.id)}
+                      />
+                      主
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+
+          <div>
+            <div className="mb-1.5 text-sm font-medium">剩余发送额度</div>
+            <input
+              type="number"
+              min={0}
+              step={1000}
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={quota}
+              onChange={(e) => setQuota(e.target.value)}
+              disabled={pending}
+            />
+            {!quotaValid && (
+              <p className="mt-1 text-xs text-destructive">请输入非负整数</p>
+            )}
+          </div>
+
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose} disabled={pending}>
               取消
             </Button>
-            <Button onClick={() => onSave(ids, primary)} disabled={pending || !valid}>
+            <Button onClick={() => onSave(ids, primary, quotaNum)} disabled={pending || !valid}>
               {pending ? '保存中…' : '保存'}
             </Button>
           </div>
