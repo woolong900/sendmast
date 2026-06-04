@@ -167,15 +167,15 @@ const COL_URL: Column = {
 };
 const COL_BOUNCE_TYPE: Column = {
   header: '弹回类型',
-  className: 'w-32',
+  className: 'w-28 whitespace-nowrap',
   cell: (r) => (
-    <span className="text-muted-foreground">{r.bounceType ?? '-'}</span>
+    <span className="whitespace-nowrap text-muted-foreground">{r.bounceType ?? '-'}</span>
   ),
 };
 const COL_REASON = (header: string): Column => ({
   header,
   cell: (r) => (
-    <span className="block max-w-md truncate text-muted-foreground" title={r.reason ?? undefined}>
+    <span className="block max-w-xs truncate text-muted-foreground" title={r.reason ?? undefined}>
       {r.reason ?? '-'}
     </span>
   ),
@@ -414,7 +414,7 @@ export function CampaignRecipientsPage() {
                 {list.data?.rows.map((r) => (
                   <tr key={r.id} className="border-t hover:bg-muted/30">
                     {columns.map((c) => (
-                      <td key={c.header} className="px-3 py-4 sm:px-6">
+                      <td key={c.header} className={cn('px-3 py-4 sm:px-6', c.className)}>
                         {c.cell(r)}
                       </td>
                     ))}
