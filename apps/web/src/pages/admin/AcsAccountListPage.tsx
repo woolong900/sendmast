@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
-import { formatDateTime } from '@/lib/utils';
+import { cn, formatDateTime } from '@/lib/utils';
 import type {
   AcsAccountStatusValue,
   AcsAccountView,
@@ -117,8 +117,13 @@ export function AcsAccountListPage() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 tabular-nums text-muted-foreground">
-                    {a.rpsLimit} / {a.rpmLimit} / {a.rphLimit} / {a.rpdLimit}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5">
+                      <QuotaPill label="秒" value={a.rpsLimit} className="bg-sky-50 text-sky-700" />
+                      <QuotaPill label="分" value={a.rpmLimit} className="bg-emerald-50 text-emerald-700" />
+                      <QuotaPill label="时" value={a.rphLimit} className="bg-amber-50 text-amber-700" />
+                      <QuotaPill label="日" value={a.rpdLimit} className="bg-violet-50 text-violet-700" />
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -138,7 +143,18 @@ export function AcsAccountListPage() {
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">{a.senderDomainCount}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={cn(
+                        'inline-flex min-w-[2rem] justify-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums',
+                        a.senderDomainCount > 0
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'bg-muted text-muted-foreground',
+                      )}
+                    >
+                      {a.senderDomainCount}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {formatDateTime(a.createdAt)}
                   </td>
@@ -239,6 +255,29 @@ export function AcsAccountListPage() {
         />
       )}
     </div>
+  );
+}
+
+function QuotaPill({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: number;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums',
+        className,
+      )}
+      title={`每${label}配额`}
+    >
+      <span className="opacity-60">{label}</span>
+      {value.toLocaleString()}
+    </span>
   );
 }
 
