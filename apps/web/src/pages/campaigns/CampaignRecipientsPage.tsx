@@ -339,7 +339,7 @@ export function CampaignRecipientsPage() {
             <ArrowLeft className="size-5" />
           </Link>
         </Button>
-        <h1 className="min-w-0 truncate text-xl font-semibold">用户明细数据</h1>
+        <h1 className="min-w-0 truncate text-xl font-semibold">活动明细数据</h1>
         {detail.data && (
           <span className="truncate text-sm text-muted-foreground">
             · {detail.data.name}

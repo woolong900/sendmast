@@ -99,7 +99,7 @@ export type RecipientStatusValue = z.infer<typeof RecipientStatusSchema>;
 
 /**
  * Slicing dimension for the per-campaign recipient detail view. Each value
- * corresponds to one tab in 用户明细数据 page:
+ * corresponds to one tab in 活动明细数据 page:
  *   sent / failed / invalid  → resolved from PG campaign_recipients
  *   delivered / opened / clicked / bounced / unsubscribed / complained
  *                            → resolved from ClickHouse email_events
