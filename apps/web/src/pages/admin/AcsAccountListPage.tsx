@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
@@ -52,6 +53,13 @@ export function AcsAccountListPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ['admin', 'acs-accounts'] }),
   });
 
+  const toggleStatusMut = useMutation({
+    mutationFn: (input: { id: string; status: AcsAccountStatusValue }) =>
+      api.patch(`/api/admin/acs-accounts/${input.id}`, { status: input.status }),
+    onError: (err) => toast(`状态更新失败:${apiErrMessage(err)}`, 'error'),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['admin', 'acs-accounts'] }),
+  });
+
   const setDefaultMut = useMutation({
     mutationFn: (id: string) => api.post(`/api/admin/acs-accounts/${id}/default`),
     onError: (err) => toast(`设置默认失败:${apiErrMessage(err)}`, 'error'),
@@ -80,8 +88,7 @@ export function AcsAccountListPage() {
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">名称</th>
-                <th className="px-4 py-3 font-medium">Email Service</th>
-                <th className="px-4 py-3 font-medium">秒/分/时/日</th>
+                <th className="px-4 py-3 font-medium">配额：秒/分/时/日</th>
                 <th className="px-4 py-3 font-medium">状态</th>
                 <th className="px-4 py-3 font-medium">绑定域名</th>
                 <th className="px-4 py-3 font-medium">创建时间</th>
@@ -91,12 +98,12 @@ export function AcsAccountListPage() {
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                     加载中...
                   </td>
                 </tr>
               )}
-              {!isLoading && data && data.length === 0 && <EmptyStateRow colSpan={7} />}
+              {!isLoading && data && data.length === 0 && <EmptyStateRow colSpan={6} />}
               {data?.map((a) => (
                 <tr key={a.id} className="border-b last:border-0">
                   <td className="px-4 py-3 font-medium">
@@ -110,19 +117,26 @@ export function AcsAccountListPage() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                    {a.azureResourceGroup} / {a.azureEmailServiceName}
-                    {a.azureCommunicationServiceName ? (
-                      <span className="text-muted-foreground/70"> + {a.azureCommunicationServiceName}</span>
-                    ) : (
-                      <span className="text-amber-600"> (communication service 未设置)</span>
-                    )}
-                  </td>
                   <td className="px-4 py-3 tabular-nums text-muted-foreground">
                     {a.rpsLimit} / {a.rpmLimit} / {a.rphLimit} / {a.rpdLimit}
                   </td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={a.status} />
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={a.status === 'active'}
+                        disabled={toggleStatusMut.isPending}
+                        title="启用 / 禁用"
+                        onCheckedChange={(next) =>
+                          toggleStatusMut.mutate({
+                            id: a.id,
+                            status: next ? 'active' : 'suspended',
+                          })
+                        }
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {a.status === 'active' ? '启用' : a.status === 'retired' ? '退役' : '禁用'}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{a.senderDomainCount}</td>
                   <td className="px-4 py-3 text-muted-foreground">
@@ -226,16 +240,6 @@ export function AcsAccountListPage() {
       )}
     </div>
   );
-}
-
-function StatusBadge({ status }: { status: AcsAccountStatusValue }) {
-  const map: Record<AcsAccountStatusValue, { label: string; variant: 'success' | 'muted' | 'danger' }> = {
-    active: { label: '启用', variant: 'success' },
-    suspended: { label: '暂停', variant: 'muted' },
-    retired: { label: '退役', variant: 'danger' },
-  };
-  const m = map[status];
-  return <Badge variant={m.variant}>{m.label}</Badge>;
 }
 
 function AccountEditor({
