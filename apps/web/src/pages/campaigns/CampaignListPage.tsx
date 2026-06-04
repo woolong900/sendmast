@@ -637,7 +637,7 @@ function ActionMenu({ c }: { c: CampaignListItem }) {
               任务详情
             </MenuLink>
           )}
-          {c.status === 'sent' && (
+          {c.status !== 'draft' && c.status !== 'scheduled' && (
             <MenuLink to={`/campaigns/${c.id}/analytics`} onClick={close}>
               查看数据
             </MenuLink>

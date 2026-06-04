@@ -117,7 +117,7 @@ export function CampaignDetailPage() {
   if (!data) return null;
 
   const editable = data.status === 'draft' || data.status === 'scheduled';
-  const canViewAnalytics = data.status === 'sending' || data.status === 'sent';
+  const canViewAnalytics = data.status !== 'draft' && data.status !== 'scheduled';
   const canPause = data.status === 'sending' || data.status === 'scheduled';
   const canResume = data.status === 'paused';
   const canCancel =
