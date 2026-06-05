@@ -543,13 +543,28 @@ async function runSend(job: Job<SendJobData>) {
     where: { id: r.contactId },
     select: { firstName: true, lastName: true },
   });
+
+  // {{list_name}} = the campaign's target list name(s). Constant per campaign,
+  // so only pay for the extra query when the template actually uses the tag
+  // (the vast majority of sends don't). Multiple lists join with 「、」; a
+  // segment-only campaign has no lists and resolves to ''.
+  let listName = '';
+  if (c.subject.includes('{{list_name}}') || c.html.includes('{{list_name}}')) {
+    const lists = await prisma.campaignList.findMany({
+      where: { campaignId: c.id },
+      include: { list: { select: { name: true } } },
+    });
+    listName = lists.map((l) => l.list.name).join('、');
+  }
+
   const sysCtx = {
     contact: {
       email: r.email,
       firstName: contact?.firstName ?? null,
       lastName: contact?.lastName ?? null,
     },
-    campaign: { id: c.id, fromEmail },
+    campaign: { id: c.id, name: c.name, fromEmail },
+    listName,
     unsubscribeUrl: unsubUrl,
   };
 

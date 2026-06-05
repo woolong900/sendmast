@@ -26,8 +26,11 @@ export interface SystemTagContext {
   };
   campaign: {
     id: string;
+    name: string;
     fromEmail: string;
   };
+  /** Target list name(s) for this campaign, joined by 「、」. Empty for segment-only sends. */
+  listName: string;
   unsubscribeUrl: string;
 }
 
@@ -35,6 +38,11 @@ export interface SystemTagContext {
 // in @sendmast/shared automatically widens the regex without touching
 // this file. The outer group captures the name.
 const SYS_TAG_RE = new RegExp(`\\{\\{(${SYSTEM_TAG_NAMES.join('|')})\\}\\}`, 'g');
+
+// Tags whose value may legitimately be empty — substitute to '' rather than
+// leaving the visible placeholder. Names: contacts often have no first/last
+// name; list_name is empty for segment-only sends.
+const MAY_BE_EMPTY = new Set(['first_name', 'last_name', 'full_name', 'list_name']);
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -65,6 +73,10 @@ function resolve(name: string, ctx: SystemTagContext): string {
       return ctx.contact.email;
     case 'campaign_id':
       return ctx.campaign.id;
+    case 'campaign_name':
+      return ctx.campaign.name;
+    case 'list_name':
+      return ctx.listName;
     case 'date':
       return new Date().toISOString().slice(0, 10);
     case 'sender_domain':
@@ -83,10 +95,10 @@ export function applySystemTags(
 ): string {
   return template.replace(SYS_TAG_RE, (match, name: string) => {
     const v = resolve(name, ctx);
-    if (v === '' && name !== 'first_name' && name !== 'last_name' && name !== 'full_name') {
-      // For non-name tags an empty resolve means a programming bug (regex
-      // matched a name we don't handle) — leave the placeholder in place
-      // so it's visible in the inbox rather than silently disappearing.
+    if (v === '' && !MAY_BE_EMPTY.has(name)) {
+      // For tags that must always resolve, an empty value means a programming
+      // bug (regex matched a name we don't handle) — leave the placeholder in
+      // place so it's visible in the inbox rather than silently disappearing.
       return match;
     }
     return renderCtx === 'html' ? escapeHtml(v) : v;

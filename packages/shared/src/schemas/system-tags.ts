@@ -58,6 +58,18 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
     description: '当前活动的 UUID',
   },
   {
+    name: 'campaign_name',
+    placeholder: '{{campaign_name}}',
+    label: '活动名',
+    description: '当前活动的名称',
+  },
+  {
+    name: 'list_name',
+    placeholder: '{{list_name}}',
+    label: '列表名',
+    description: '本次活动发送的列表名称；多个列表时以「、」连接，仅用分群发送时为空',
+  },
+  {
     name: 'date',
     placeholder: '{{date}}',
     label: '日期',
