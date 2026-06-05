@@ -67,7 +67,7 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
     name: 'list_name',
     placeholder: '{{list_name}}',
     label: '列表名',
-    description: '本次活动发送的列表名称；多个列表时以「、」连接，仅用分群发送时为空',
+    description: '该收件人所属的列表名称（仅限本次活动发送的列表）；属于多个时以「、」连接，仅经分群命中时为空',
   },
   {
     name: 'date',
