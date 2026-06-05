@@ -10,9 +10,11 @@ export interface CampaignAnalyticsView {
     delivered: number;
     failed: number;
     /**
-     * Accepted by ACS but no delivery report yet (neither delivered nor
-     * bounced nor send-failed). Mostly deferred/in-transit mail or delivery
-     * reports we haven't received. = sent − delivered − bounces − failed.
+     * Backlog still waiting to be handed to ACS — recipients in
+     * status pending|queued. Once ACS accepts (status='sent') a recipient is
+     * considered delivered and drops out of this bucket, so a finished
+     * campaign reads 0 here instead of getting stuck on missing delivery
+     * reports.
      */
     pending: number;
     uniqueOpens: number;
@@ -86,10 +88,6 @@ export class AnalyticsService {
     let bouncesHard = 0;
     let complaints = 0;
     let unsubscribes = 0;
-    // Recipients with ANY terminal delivery outcome (delivered OR bounced),
-    // deduplicated. Used for `pending` so a recipient who soft-bounced then
-    // delivered (or hard+soft bounced) is counted once, not subtracted twice.
-    let terminalRecipients = 0;
     let chOk = false;
 
     try {
@@ -108,7 +106,6 @@ export class AnalyticsService {
         bounces_hard: string;
         complaints: string;
         unsubscribes: string;
-        terminal: string;
       }>(
         `SELECT
            toString(uniqExactIf(recipient_id, event_type = 'open')) AS opens,
@@ -117,8 +114,7 @@ export class AnalyticsService {
            toString(uniqExactIf(recipient_id, event_type = 'bounce')) AS bounces,
            toString(uniqExactIf(recipient_id, event_type = 'bounce' AND bounce_kind = 'hard')) AS bounces_hard,
            toString(uniqExactIf(recipient_id, event_type = 'complaint')) AS complaints,
-           toString(uniqExactIf(recipient_id, event_type = 'unsubscribe')) AS unsubscribes,
-           toString(uniqExactIf(recipient_id, event_type IN ('delivered', 'bounce'))) AS terminal
+           toString(uniqExactIf(recipient_id, event_type = 'unsubscribe')) AS unsubscribes
          FROM sendmast.email_events
          WHERE account_id = {acc:UUID} AND campaign_id = {cid:UUID}`,
         { acc: accountId, cid: campaignId },
@@ -132,7 +128,6 @@ export class AnalyticsService {
         bouncesHard = Number(r.bounces_hard);
         complaints = Number(r.complaints);
         unsubscribes = Number(r.unsubscribes);
-        terminalRecipients = Number(r.terminal);
       }
       chOk = true;
     } catch (err) {
@@ -146,16 +141,18 @@ export class AnalyticsService {
     // in-flight mail right after a real send before reports arrive.
     if (chOk && delivered === 0 && sent > 0 && process.env.NODE_ENV !== 'production') {
       delivered = sent;
-      terminalRecipients = sent;
     }
 
     const safe = (a: number, b: number) => (b > 0 ? a / b : 0);
 
-    // Whatever's left after a terminal outcome (delivered/bounced) or send-time
-    // failure is still in flight (or its delivery report hasn't reached us).
-    // `terminalRecipients` is the deduped delivered∪bounce set, so overlapping
-    // states aren't subtracted twice. Clamp at 0 for safety.
-    const pending = Math.max(0, sent - terminalRecipients - failed);
+    // 投递中 = 尚未交给 ACS 的待发送收件人 (status pending|queued)。ACS 受理
+    // (status='sent') 后即视为已投递，不再因缺投递回执而长期停留在投递中。归档
+    // 活动的热表行已被清走且都已是终态，故计 0。
+    const pending = archived
+      ? 0
+      : await this.prisma.campaignRecipient.count({
+          where: { campaignId, status: { in: ['pending', 'queued'] } },
+        });
 
     const totals = {
       recipients: c.totalRecipients,
