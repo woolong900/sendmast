@@ -194,7 +194,7 @@ export function AdminAccountsPage() {
               <tr>
                 <th className="px-4 py-3 font-medium">租户</th>
                 <th className="px-4 py-3 font-medium">状态</th>
-                <th className="px-4 py-3 font-medium">ACS 账号</th>
+                <th className="px-4 py-3 font-medium">角色</th>
                 <th className="px-4 py-3 font-medium">已添加域名</th>
                 <th className="px-4 py-3 font-medium">剩余发送额度</th>
                 <th className="px-4 py-3 font-medium">注册时间</th>
@@ -215,14 +215,7 @@ export function AdminAccountsPage() {
               {accounts?.map((a) => (
                 <tr key={a.id} className="border-b last:border-0">
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-medium">{a.name}</span>
-                      {a.isCollaborator && (
-                        <Badge variant="default" className="bg-violet-100 text-violet-700">
-                          合作者
-                        </Badge>
-                      )}
-                    </div>
+                    <div className="font-medium">{a.name}</div>
                     <div className="text-xs text-muted-foreground">
                       {a.ownerEmail ?? a.slug}
                     </div>
@@ -239,7 +232,13 @@ export function AdminAccountsPage() {
                     ) : null}
                   </td>
                   <td className="px-4 py-3">
-                    <AcsAccountsCell acsAccounts={a.acsAccounts} />
+                    {a.isCollaborator ? (
+                      <Badge variant="default" className="bg-violet-100 text-violet-700">
+                        合作者
+                      </Badge>
+                    ) : (
+                      <Badge variant="muted">普通租户</Badge>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <Badge variant={a.senderDomainCount > 0 ? 'default' : 'muted'}>
@@ -334,36 +333,6 @@ export function AdminAccountsPage() {
 }
 
 /** ACS 账号列:只展示首个(优先主账号),绑定多个时追加省略号,悬浮显示全部。 */
-function AcsAccountsCell({
-  acsAccounts,
-}: {
-  acsAccounts: AdminAccountView['acsAccounts'];
-}) {
-  if (acsAccounts.length === 0) {
-    return <span className="text-xs text-muted-foreground">— 未分配 —</span>;
-  }
-  const ordered = [...acsAccounts].sort(
-    (x, y) => Number(y.isPrimary) - Number(x.isPrimary),
-  );
-  const first = ordered[0];
-  return (
-    <div className="flex items-center gap-1.5">
-      <Badge variant={first.isPrimary ? 'default' : 'muted'}>
-        {first.name}
-        {first.isPrimary ? ' · 主' : ''}
-      </Badge>
-      {acsAccounts.length > 1 && (
-        <span
-          className="cursor-default text-muted-foreground"
-          title={ordered.map((a) => a.name).join('、')}
-        >
-          …
-        </span>
-      )}
-    </div>
-  );
-}
-
 function AccountEditModal({
   account,
   acsAccounts,
@@ -483,9 +452,18 @@ function AccountEditModal({
 
           <div className="flex items-start justify-between gap-3 rounded-md border px-3 py-2.5">
             <div className="min-w-0">
-              <div className="text-sm font-medium">合作者</div>
+              <div className="flex items-center gap-1.5 text-sm font-medium">
+                角色
+                {collaborator ? (
+                  <Badge variant="default" className="bg-violet-100 text-violet-700">
+                    合作者
+                  </Badge>
+                ) : (
+                  <Badge variant="muted">普通租户</Badge>
+                )}
+              </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                开启后该租户为「合作者」,活动数据显示真实投递情况(含真实弹回率)。关闭则为普通租户:软弹回并入送达、隐藏弹回率。
+                「合作者」活动数据显示真实投递情况(含真实弹回率);「普通租户」则软弹回并入送达、隐藏弹回率。
               </p>
             </div>
             <Switch
