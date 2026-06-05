@@ -3,6 +3,8 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -18,9 +20,15 @@ import type {
   QuotaOrderView,
 } from '@sendmast/shared';
 
+/** A pending order older than this with no payment is considered abandoned. */
+const STALE_ORDER_MS = 30 * 60 * 1000;
+/** How often the background sweep runs. */
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
 @Injectable()
-export class QuotaBillingService {
+export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QuotaBillingService.name);
+  private sweepTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -29,6 +37,28 @@ export class QuotaBillingService {
     private readonly config: ConfigService,
     private readonly referral: ReferralService,
   ) {}
+
+  // ---------- Lifecycle: background stale-order sweep -------------------
+
+  // Single-replica deployment, so a plain in-process timer is enough (no
+  // external scheduler / cross-replica lock needed). If the API ever scales
+  // horizontally, move this to a worker repeatable job or add a Redis lock so
+  // it doesn't run on every replica.
+  onModuleInit(): void {
+    if (process.env.NODE_ENV === 'test') return;
+    this.sweepTimer = setInterval(() => {
+      this.expireStalePendingOrders().catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(`stale-order sweep failed: ${msg}`);
+      });
+    }, SWEEP_INTERVAL_MS);
+    // Don't keep the process alive just for this timer.
+    this.sweepTimer.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+  }
 
   // ---------- Tier read (user) ------------------------------------------
 
@@ -90,6 +120,17 @@ export class QuotaBillingService {
     // Tier delete cascades to nothing — orders carry tier_id ON DELETE SET
     // NULL so historical paid orders are still readable. Refuse only if
     // there are PENDING orders pointing at it (those would be orphaned).
+    //
+    // Proactively run the stale-order sweep for this tier first so an admin
+    // isn't blocked waiting for the periodic one: abandoned unpaid orders get
+    // closed (and any quietly-paid ones credited) here and now. Fresh pending
+    // orders (< STALE_ORDER_MS old) are intentionally left alone — someone may
+    // be mid-payment — so the guard below can still legitimately refuse.
+    await this.expireStalePendingOrders({ tierId: id }).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`deleteTier sweep failed for ${id}, proceeding to count: ${msg}`);
+    });
+
     const pending = await this.prisma.quotaOrder.count({
       where: { tierId: id, status: 'pending' },
     });
@@ -256,39 +297,130 @@ export class QuotaBillingService {
     }
 
     try {
-      await this.prisma.$transaction(async (tx) => {
-        const result = await tx.quotaOrder.updateMany({
-          where: { providerOrderId: outTradeNo, status: 'pending' },
-          data: {
-            status: 'paid',
-            providerTradeNo: truth.tradeNo,
-            paidAt: new Date(),
-          },
-        });
-        if (result.count !== 1) {
-          this.logger.log(`Shouqianba notify: ${outTradeNo} won by another worker`);
-          return;
-        }
-        await tx.account.update({
-          where: { id: order.accountId },
-          data: { sendQuotaRemaining: { increment: order.emails } },
-        });
-        // Referral commission. No-op for non-referred accounts; on
-        // retried notifies the orderId UNIQUE constraint inside
-        // recordCommissionForPaidOrder makes this idempotent. Errors
-        // there are swallowed + logged so a referral bookkeeping
-        // failure never rolls back the user's paid order.
-        await this.referral.recordCommissionForPaidOrder(order.id, tx);
-        this.logger.log(
-          `Shouqianba notify: ${outTradeNo} credited ${order.emails} to account ${order.accountId}`,
-        );
-      });
+      await this.creditPaidOrder(order, truth.tradeNo);
       return 'success';
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`Shouqianba notify processing failed: ${msg}`);
       return 'failure';
     }
+  }
+
+  /**
+   * Flip a pending order → paid and credit the account's quota, exactly once.
+   * Idempotent: the `status='pending'` guard inside the transaction means a
+   * retried notify (or a concurrent sweep) that loses the race is a no-op.
+   * Shared by the notify webhook and the stale-order sweep (the sweep also
+   * uses it to recover payments whose notify never arrived).
+   */
+  private async creditPaidOrder(
+    order: { id: string; providerOrderId: string; accountId: string; emails: number },
+    tradeNo: string | null,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const result = await tx.quotaOrder.updateMany({
+        where: { providerOrderId: order.providerOrderId, status: 'pending' },
+        data: {
+          status: 'paid',
+          providerTradeNo: tradeNo,
+          paidAt: new Date(),
+        },
+      });
+      if (result.count !== 1) {
+        this.logger.log(`creditPaidOrder: ${order.providerOrderId} already settled, skipping`);
+        return;
+      }
+      await tx.account.update({
+        where: { id: order.accountId },
+        data: { sendQuotaRemaining: { increment: order.emails } },
+      });
+      // Referral commission. No-op for non-referred accounts; on retried
+      // notifies the orderId UNIQUE constraint inside
+      // recordCommissionForPaidOrder makes this idempotent. Errors there are
+      // swallowed + logged so a referral bookkeeping failure never rolls back
+      // the user's paid order.
+      await this.referral.recordCommissionForPaidOrder(order.id, tx);
+      this.logger.log(
+        `creditPaidOrder: ${order.providerOrderId} credited ${order.emails} to account ${order.accountId}`,
+      );
+    });
+  }
+
+  // ---------- Stale-order sweep -----------------------------------------
+
+  /**
+   * Close abandoned unpaid orders so they don't linger as `pending` forever
+   * (which, among other things, blocks deleting the tier they point at).
+   *
+   * For each pending order older than `olderThanMs` we ask the gateway for the
+   * authoritative status:
+   *   - PAID            → credit it (also recovers a payment whose notify was lost).
+   *   - anything else   → cancel at the gateway (so a late scan can't pay it),
+   *                       then mark our order `cancelled`.
+   * If the gateway query or cancel fails we leave the order pending and retry
+   * on the next sweep — never drop a possibly-payable order.
+   *
+   * Safe to run repeatedly and concurrently (the credit path is idempotent).
+   */
+  async expireStalePendingOrders(opts?: {
+    olderThanMs?: number;
+    tierId?: string;
+    limit?: number;
+  }): Promise<{ checked: number; paid: number; cancelled: number }> {
+    if (!this.shouqianba.isConfigured()) return { checked: 0, paid: 0, cancelled: 0 };
+
+    const cutoff = new Date(Date.now() - (opts?.olderThanMs ?? STALE_ORDER_MS));
+    const stale = await this.prisma.quotaOrder.findMany({
+      where: {
+        status: 'pending',
+        createdAt: { lt: cutoff },
+        ...(opts?.tierId ? { tierId: opts.tierId } : {}),
+      },
+      orderBy: { createdAt: 'asc' },
+      take: opts?.limit ?? 100,
+    });
+
+    let paid = 0;
+    let cancelled = 0;
+    for (const order of stale) {
+      let truth: { orderStatus: string; tradeNo: string | null } | null;
+      try {
+        truth = await this.shouqianba.queryOrder(order.providerOrderId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`sweep: query failed for ${order.providerOrderId}, will retry: ${msg}`);
+        continue;
+      }
+
+      if (truth?.orderStatus === 'PAID') {
+        try {
+          await this.creditPaidOrder(order, truth.tradeNo);
+          paid += 1;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.error(`sweep: credit failed for ${order.providerOrderId}: ${msg}`);
+        }
+        continue;
+      }
+
+      // Not paid (CREATED / PAY_CANCELED / PAY_ERROR / unknown). Close it at the
+      // gateway first so it can't be paid late, only then mark ours cancelled.
+      const closed = await this.shouqianba.cancelOrder(order.providerOrderId);
+      if (!closed) {
+        this.logger.warn(`sweep: gateway cancel failed for ${order.providerOrderId}, will retry`);
+        continue;
+      }
+      await this.prisma.quotaOrder.updateMany({
+        where: { id: order.id, status: 'pending' },
+        data: { status: 'cancelled' },
+      });
+      cancelled += 1;
+    }
+
+    if (paid || cancelled) {
+      this.logger.log(`sweep: checked=${stale.length} paid=${paid} cancelled=${cancelled}`);
+    }
+    return { checked: stale.length, paid, cancelled };
   }
 
   // ---------- Mappers ---------------------------------------------------

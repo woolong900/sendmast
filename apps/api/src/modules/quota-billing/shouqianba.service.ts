@@ -227,6 +227,60 @@ export class ShouqianbaService {
     };
   }
 
+  /**
+   * Cancel (撤单) an order so its QR can no longer be paid. Used by the
+   * stale-order sweep to permanently close abandoned unpaid orders — once the
+   * gateway confirms cancel, a late scan can't pay it, which is what makes it
+   * safe for us to then mark the order cancelled locally.
+   *
+   * CALLER CONTRACT: only call this for orders you've confirmed are NOT paid.
+   * 撤单 on an already-paid 当面付 order triggers a refund at the gateway.
+   *
+   * Returns true when the gateway confirms the order is closed (CANCEL_SUCCESS)
+   * or never existed there (ORDER_NOT_EXIST — nothing to pay). Returns false on
+   * any transport / biz failure so the caller leaves the order pending and
+   * retries on the next sweep rather than risking a late payment we'd drop.
+   */
+  async cancelOrder(clientSn: string): Promise<boolean> {
+    if (!this.isConfigured()) return false;
+    const terminalSn = this.config.getOrThrow<string>('SHOUQIANBA_TERMINAL_SN');
+    const terminalKey = this.config.getOrThrow<string>('SHOUQIANBA_TERMINAL_KEY');
+    const gateway = this.config.getOrThrow<string>('SHOUQIANBA_GATEWAY');
+
+    const body = JSON.stringify({ terminal_sn: terminalSn, client_sn: clientSn });
+    const auth = `${terminalSn} ${this.sign(body, terminalKey)}`;
+
+    let respText: string;
+    try {
+      const res = await fetch(`${gateway}/upay/v2/cancel`, {
+        method: 'POST',
+        headers: { Authorization: auth, 'Content-Type': 'application/json' },
+        body,
+      });
+      respText = await res.text();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Shouqianba cancel transport error for ${clientSn}: ${msg}`);
+      return false;
+    }
+
+    let parsed: {
+      result_code?: string;
+      biz_response?: { result_code?: string; error_code?: string; error_message?: string };
+    };
+    try {
+      parsed = JSON.parse(respText);
+    } catch {
+      this.logger.warn(`Shouqianba cancel non-JSON response for ${clientSn}: ${respText.slice(0, 200)}`);
+      return false;
+    }
+    if (parsed.result_code !== '200') return false;
+    const biz = parsed.biz_response;
+    // Nothing on the gateway side to pay → treat as closed.
+    if (biz?.error_code === 'ORDER_NOT_EXIST') return true;
+    return biz?.result_code === 'CANCEL_SUCCESS';
+  }
+
   // ---------- internal --------------------------------------------------
 
   private sign(body: string, key: string): string {
