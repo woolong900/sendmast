@@ -1,10 +1,13 @@
 import { Component, type ReactNode } from 'react';
+import { isDynamicImportError, reloadForStaleChunkOnce } from '@/lib/chunk-reload';
 
 interface Props {
   children: ReactNode;
 }
 interface State {
   error: Error | null;
+  /** True while we're hard-reloading to recover from a stale-deploy chunk miss. */
+  reloading: boolean;
 }
 
 /**
@@ -17,13 +20,24 @@ interface State {
  * surfaced through inline `isError` states, which is fine.
  */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, reloading: false };
 
   static getDerivedStateFromError(error: Error): State {
-    return { error };
+    // Show a neutral "updating" screen (not the error card) while we reload to
+    // recover from a stale-deploy chunk miss — the actual reload is kicked off
+    // in componentDidCatch.
+    return { error, reloading: isDynamicImportError(error) };
   }
 
   componentDidCatch(error: Error, info: { componentStack?: string | null }): void {
+    if (isDynamicImportError(error)) {
+      // Stale tab after a deploy: fetch a chunk that no longer exists. Reload
+      // once. If we reloaded too recently (real failure), fall back to the card.
+      if (!reloadForStaleChunkOnce()) {
+        this.setState({ reloading: false });
+      }
+      return;
+    }
     // eslint-disable-next-line no-console
     console.error('[ErrorBoundary]', error, info.componentStack);
   }
@@ -33,6 +47,13 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   render() {
+    if (this.state.reloading) {
+      return (
+        <div className="flex h-screen w-full items-center justify-center bg-background p-6 text-sm text-muted-foreground">
+          检测到新版本,正在刷新…
+        </div>
+      );
+    }
     if (this.state.error) {
       return (
         <div className="flex h-screen w-full items-center justify-center bg-background p-6">

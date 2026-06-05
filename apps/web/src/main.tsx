@@ -3,7 +3,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { reloadForStaleChunkOnce } from './lib/chunk-reload';
 import './index.css';
+
+// Vite fires this when a lazy route's chunk fails to load — typically because a
+// new deploy pruned the hashed filenames this (now stale) tab still references.
+// One hard reload pulls the fresh index.html + chunks.
+window.addEventListener('vite:preloadError', () => {
+  reloadForStaleChunkOnce();
+});
 
 const queryClient = new QueryClient({
   defaultOptions: {
