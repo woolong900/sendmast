@@ -227,6 +227,19 @@ async function materialiseRecipients(
   // is the truth and the tick scheduler will pick up what's there).
   if (listIds.length === 0) return existing;
 
+  // {{list_name}} is captured per recipient at materialisation: each contact
+  // gets the name(s) of the target list(s) THEY belong to (joined by 、),
+  // frozen here so a later membership change can't drift the rendered email
+  // and so runSend needs no extra query. Build the id→name map once.
+  const listNameById = new Map(
+    (
+      await prisma.contactList.findMany({
+        where: { id: { in: listIds } },
+        select: { id: true, name: true },
+      })
+    ).map((l) => [l.id, l.name]),
+  );
+
   const PAGE = 5000;
   let cursor: string | undefined;
   let inserted = existing;
@@ -238,7 +251,14 @@ async function materialiseRecipients(
         subscriptionStatus: 'subscribed',
         memberships: { some: { listId: { in: listIds } } },
       },
-      select: { id: true, email: true },
+      select: {
+        id: true,
+        email: true,
+        memberships: {
+          where: { listId: { in: listIds } },
+          select: { listId: true },
+        },
+      },
       take: PAGE,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       orderBy: { id: 'asc' },
@@ -249,12 +269,18 @@ async function materialiseRecipients(
       data: batch.map((c, j) => {
         const idx = (inserted + j) % senders.length;
         const s = rotate ? senders[idx] : null;
+        const listName =
+          c.memberships
+            .map((m) => listNameById.get(m.listId))
+            .filter((n): n is string => !!n)
+            .join('、') || null;
         return {
           accountId,
           campaignId: campaign.id,
           contactId: c.id,
           email: c.email,
           status: 'pending' as const,
+          listName,
           fromEmail: s?.fromEmail ?? null,
           fromName: s?.fromName ?? null,
           acsAccountId: rotate ? senderAcs[idx] : primaryAcs,
@@ -544,23 +570,6 @@ async function runSend(job: Job<SendJobData>) {
     select: { firstName: true, lastName: true },
   });
 
-  // {{list_name}} = the list(s) THIS contact belongs to among the campaign's
-  // target lists (not every list the campaign sends to). Per-recipient, so we
-  // only pay for the extra query when the template actually uses the tag (the
-  // vast majority of sends don't). Multiple matching lists join with 「、」; a
-  // contact reached only via a segment (no matching target list) resolves to ''.
-  let listName = '';
-  if (c.subject.includes('{{list_name}}') || c.html.includes('{{list_name}}')) {
-    const lists = await prisma.campaignList.findMany({
-      where: {
-        campaignId: c.id,
-        list: { memberships: { some: { contactId: r.contactId } } },
-      },
-      include: { list: { select: { name: true } } },
-    });
-    listName = lists.map((l) => l.list.name).join('、');
-  }
-
   const sysCtx = {
     contact: {
       email: r.email,
@@ -568,7 +577,9 @@ async function runSend(job: Job<SendJobData>) {
       lastName: contact?.lastName ?? null,
     },
     campaign: { id: c.id, name: c.name, fromEmail },
-    listName,
+    // Captured at materialisation; '' when the contact was matched only via a
+    // segment or is a legacy pre-feature row.
+    listName: r.listName ?? '',
     unsubscribeUrl: unsubUrl,
   };
 

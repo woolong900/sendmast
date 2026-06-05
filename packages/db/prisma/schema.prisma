@@ -840,6 +840,11 @@ model CampaignRecipient {
   /// assigned sender's domain at materialisation. NULL = legacy rows; the
   /// dispatcher falls back to resolving from the from-address domain.
   acsAccountId String?         @map("acs_account_id") @db.Uuid
+  /// Name(s) of the campaign target list(s) THIS contact belongs to, captured
+  /// at materialisation (joined by 、 when multiple). Powers the {{list_name}}
+  /// system tag without a send-time join and frozen against later membership
+  /// changes. NULL = matched only via a segment, or legacy pre-feature rows.
+  listName     String?         @map("list_name")
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
 

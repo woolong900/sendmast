@@ -1291,7 +1291,9 @@ export class CampaignService {
     // few — mirrors the worker's `(inserted + j)` convention.
     let positioned = 0;
 
-    const insertBatch = async (rows: Array<{ id: string; email: string }>) => {
+    const insertBatch = async (
+      rows: Array<{ id: string; email: string; listName?: string | null }>,
+    ) => {
       if (rows.length === 0) return;
       const res = await this.prisma.campaignRecipient.createMany({
         data: rows.map((c, j) => {
@@ -1302,6 +1304,7 @@ export class CampaignService {
             contactId: c.id,
             email: c.email,
             status: 'pending' as const,
+            listName: c.listName ?? null,
             fromEmail: s?.fromEmail ?? null,
             fromName: s?.fromName ?? null,
             acsAccountId: s?.acsAccountId ?? primaryAcs,
@@ -1314,8 +1317,18 @@ export class CampaignService {
     };
 
     // 1. Lists — cursor-stream subscribed contacts so memory stays at one
-    //    batch regardless of list size.
+    //    batch regardless of list size. Capture each contact's target list
+    //    name(s) for {{list_name}} (joined by 、) — frozen at materialisation,
+    //    no send-time join. Build the id→name map once.
     if (listIds.length > 0) {
+      const listNameById = new Map(
+        (
+          await this.prisma.contactList.findMany({
+            where: { id: { in: listIds } },
+            select: { id: true, name: true },
+          })
+        ).map((l) => [l.id, l.name]),
+      );
       let cursor: string | undefined;
       for (;;) {
         const rows = await this.prisma.contact.findMany({
@@ -1324,13 +1337,30 @@ export class CampaignService {
             subscriptionStatus: 'subscribed',
             memberships: { some: { listId: { in: listIds } } },
           },
-          select: { id: true, email: true },
+          select: {
+            id: true,
+            email: true,
+            memberships: {
+              where: { listId: { in: listIds } },
+              select: { listId: true },
+            },
+          },
           take: BATCH,
           ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
           orderBy: { id: 'asc' },
         });
         if (rows.length === 0) break;
-        await insertBatch(rows);
+        await insertBatch(
+          rows.map((c) => ({
+            id: c.id,
+            email: c.email,
+            listName:
+              c.memberships
+                .map((m) => listNameById.get(m.listId))
+                .filter((n): n is string => !!n)
+                .join('、') || null,
+          })),
+        );
         if (rows.length < BATCH) break;
         cursor = rows[rows.length - 1].id;
       }
