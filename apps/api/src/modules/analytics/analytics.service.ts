@@ -171,19 +171,20 @@ export class AnalyticsService {
       unsubscribes,
     };
 
+    // Shared denominator for all engagement/deliverability rates: messages that
+    // reached a final outcome (送达 + 弹回 + 失败), excluding still-pending mail
+    // whose delivery reports are in flight. Keeps every rate on one consistent
+    // base so they don't disagree. (投递中 is intentionally kept on /总投放.)
+    const outcome = delivered + bounces + failed;
     const rates = {
-      // 送达率 denominator excludes still-pending mail: of the messages that
-      // reached a final outcome (delivered + bounced + failed), how many
-      // delivered. Pending recipients don't drag the rate down while their
-      // delivery reports are still in flight.
-      delivery: safe(delivered, delivered + bounces + failed),
-      uniqueOpen: safe(uniqueOpens, delivered || sent),
-      uniqueClick: safe(uniqueClicks, delivered || sent),
-      bounce: safe(bounces, sent),
-      bounceHard: safe(bouncesHard, sent),
+      delivery: safe(delivered, outcome),
+      uniqueOpen: safe(uniqueOpens, outcome),
+      uniqueClick: safe(uniqueClicks, outcome),
+      bounce: safe(bounces, outcome),
+      bounceHard: safe(bouncesHard, outcome),
       pending: safe(pending, sent),
-      complaint: safe(complaints, sent),
-      unsubscribe: safe(unsubscribes, sent),
+      complaint: safe(complaints, outcome),
+      unsubscribe: safe(unsubscribes, outcome),
     };
 
     const sentBase = sent || c.totalRecipients;

@@ -115,8 +115,9 @@ export function CampaignAnalyticsPage() {
   if (!analytics.data || !detail.data) return null;
 
   const { totals, rates, funnel } = analytics.data;
-  const failureRate =
-    totals.recipients > 0 ? totals.failed / totals.recipients : 0;
+  // 发送失败率与其它各率分母统一为「送达 + 弹回 + 失败」(达到终态的消息)。
+  const outcome = totals.delivered + totals.bounces + totals.failed;
+  const failureRate = outcome > 0 ? totals.failed / outcome : 0;
   const utmRows = collectUtm(detail.data);
 
   return (
