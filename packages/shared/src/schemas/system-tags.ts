@@ -73,7 +73,7 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
     name: 'date',
     placeholder: '{{date}}',
     label: '日期',
-    description: '邮件发送日期（UTC，格式 YYYY-MM-DD）',
+    description: '邮件发送日期（UTC，格式 MMDD，如 0603）',
   },
   {
     name: 'sender_domain',

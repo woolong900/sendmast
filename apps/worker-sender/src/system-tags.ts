@@ -77,8 +77,12 @@ function resolve(name: string, ctx: SystemTagContext): string {
       return ctx.campaign.name;
     case 'list_name':
       return ctx.listName;
-    case 'date':
-      return new Date().toISOString().slice(0, 10);
+    case 'date': {
+      const now = new Date();
+      const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(now.getUTCDate()).padStart(2, '0');
+      return `${mm}${dd}`;
+    }
     case 'sender_domain':
       return (ctx.campaign.fromEmail.split('@')[1] ?? '').toLowerCase();
     case 'unsubscribe_url':
