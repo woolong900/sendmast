@@ -78,6 +78,7 @@ async function resolveRecipient(data: EventJobData) {
         accountId: true,
         campaignId: true,
         contactId: true,
+        status: true,
       },
     });
     if (hot) return hot;
@@ -110,6 +111,28 @@ async function runEventJob(job: Job<EventJobData>) {
   if (!recipient) {
     console.warn(`Event for unknown recipient (kind=${eventType})`);
     return;
+  }
+
+  // A delivery receipt (delivered/bounce) proves ACS actually accepted and
+  // attempted the send. If we had optimistically marked this recipient 'failed'
+  // — e.g. an `ACS beginSend timed out after 10000ms` client-side timeout where
+  // the request still went through — correct it back to 'sent'. Otherwise the
+  // recipient is double-counted as both 发送失败 AND 送达/弹回, and 总投放 no
+  // longer reconciles (送达 + 弹回 + 失败 > 总投放). Gated on the in-memory
+  // status so we don't issue a write for the common non-failed case; updateMany
+  // re-checks status='failed' to stay correct under concurrency and is a no-op
+  // for archived rows.
+  if (
+    (eventType === 'delivered' || eventType === 'bounce') &&
+    'status' in recipient &&
+    recipient.status === 'failed'
+  ) {
+    await prisma.campaignRecipient
+      .updateMany({
+        where: { id: recipient.id, status: 'failed' },
+        data: { status: 'sent', errorMessage: null },
+      })
+      .catch(() => undefined);
   }
 
   // Suppress ONLY on hard (5xx) bounces. Wrapped in updateMany to tolerate the
