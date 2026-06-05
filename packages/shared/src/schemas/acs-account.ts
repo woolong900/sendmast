@@ -91,19 +91,29 @@ export interface AdminAccountView {
   /** Owner email — shown in the admin table so the operator knows who they're suspending. */
   ownerEmail: string | null;
   /**
-   * Collaborator (trusted partner) account. Normal tenants (false) get the
-   * softened analytics view (soft bounces folded into 送达, 弹回邮箱率 hidden);
-   * collaborators (true) see the real deliverability data.
+   * The tenant's role, derived from the owner user's platform-admin flag and the
+   * account's collaborator flag (precedence: platform_admin > collaborator >
+   * tenant). 普通租户 (tenant) gets the softened analytics view (soft bounces
+   * folded into 送达, 弹回邮箱率 hidden); 合作者/平台管理员 see real data.
    */
-  isCollaborator: boolean;
+  role: AccountRole;
   createdAt: string;
 }
 
-/** Toggle a tenant between normal-tenant and collaborator (real-data) view. */
-export const SetCollaboratorSchema = z.object({
-  isCollaborator: z.boolean(),
+/**
+ * The three mutually-exclusive tenant roles surfaced in 租户管理:
+ *  - platform_admin: owner user is a global platform admin
+ *  - collaborator:   trusted partner, sees real deliverability data
+ *  - tenant:         normal tenant, softened analytics view
+ */
+export const ACCOUNT_ROLES = ['platform_admin', 'collaborator', 'tenant'] as const;
+export type AccountRole = (typeof ACCOUNT_ROLES)[number];
+
+/** Set a tenant's role (admin-only). Maps to is_platform_admin / is_collaborator. */
+export const SetAccountRoleSchema = z.object({
+  role: z.enum(ACCOUNT_ROLES),
 });
-export type SetCollaboratorInput = z.infer<typeof SetCollaboratorSchema>;
+export type SetAccountRoleInput = z.infer<typeof SetAccountRoleSchema>;
 
 export const SetTenantQuotaSchema = z.object({
   remaining: z.coerce.number().int().min(0).max(2_000_000_000),

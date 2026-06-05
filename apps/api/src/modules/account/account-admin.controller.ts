@@ -21,11 +21,11 @@ import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   AssignAcsAccountsSchema,
+  SetAccountRoleSchema,
   SetAccountStatusSchema,
-  SetCollaboratorSchema,
   SetTenantQuotaSchema,
 } from '@sendmast/shared';
-import type { AdminAccountView, AssignedAcsAccountView } from '@sendmast/shared';
+import type { AccountRole, AdminAccountView, AssignedAcsAccountView } from '@sendmast/shared';
 import { firstZodError } from '../../common/zod-error';
 
 @ApiTags('admin/accounts')
@@ -54,7 +54,7 @@ export class AccountAdminController {
           where: { role: 'owner' },
           orderBy: { createdAt: 'asc' },
           take: 1,
-          include: { user: { select: { email: true } } },
+          include: { user: { select: { email: true, isPlatformAdmin: true } } },
         },
         _count: { select: { senderDomains: true } },
       },
@@ -78,7 +78,7 @@ export class AccountAdminController {
       suspendedAt: r.suspendedAt ? r.suspendedAt.toISOString() : null,
       suspendedReason: r.suspendedReason,
       ownerEmail: r.members[0]?.user.email ?? null,
-      isCollaborator: r.isCollaborator,
+      role: deriveAccountRole(r.members[0]?.user.isPlatformAdmin ?? false, r.isCollaborator),
       createdAt: r.createdAt.toISOString(),
     }));
   }
@@ -143,18 +143,39 @@ export class AccountAdminController {
   }
 
   /**
-   * Flip a tenant between normal-tenant (softened analytics: soft bounces folded
-   * into 送达, 弹回邮箱率 hidden) and collaborator (real, unmodified data).
+   * Set a tenant's role. The three roles map onto two flags:
+   *   - platform_admin → owner user(s) isPlatformAdmin=true, account collaborator
+   *   - collaborator    → owner user(s) isPlatformAdmin=false, collaborator=true
+   *   - tenant          → owner user(s) isPlatformAdmin=false, collaborator=false
+   * 普通租户 (tenant) gets the softened analytics view; the other two see real
+   * deliverability data. Promoting to platform_admin grants GLOBAL admin to the
+   * owner — admin-only (this controller is PlatformAdminGuard'd).
    */
-  @Patch(':id/collaborator')
-  async setCollaborator(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
-    const r = SetCollaboratorSchema.safeParse(body);
+  @Patch(':id/role')
+  async setRole(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
+    const r = SetAccountRoleSchema.safeParse(body);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
-    await this.prisma.account.update({
-      where: { id },
-      data: { isCollaborator: r.data.isCollaborator },
+    const role = r.data.role;
+
+    const owners = await this.prisma.accountUser.findMany({
+      where: { accountId: id, role: 'owner' },
+      select: { userId: true },
     });
-    return { ok: true, isCollaborator: r.data.isCollaborator };
+    if (role === 'platform_admin' && owners.length === 0) {
+      throw new BadRequestException('该租户没有所有者用户,无法设为平台管理员');
+    }
+
+    const isPlatformAdmin = role === 'platform_admin';
+    const isCollaborator = role === 'platform_admin' || role === 'collaborator';
+
+    await this.prisma.$transaction([
+      this.prisma.account.update({ where: { id }, data: { isCollaborator } }),
+      this.prisma.user.updateMany({
+        where: { id: { in: owners.map((o) => o.userId) } },
+        data: { isPlatformAdmin },
+      }),
+    ]);
+    return { ok: true, role };
   }
 
   /**
@@ -266,4 +287,11 @@ export class AccountAdminController {
 function requestIp(req: Request): string | undefined {
   const xff = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
   return xff || req.ip;
+}
+
+/** Precedence: platform_admin > collaborator > tenant. */
+function deriveAccountRole(ownerIsPlatformAdmin: boolean, isCollaborator: boolean): AccountRole {
+  if (ownerIsPlatformAdmin) return 'platform_admin';
+  if (isCollaborator) return 'collaborator';
+  return 'tenant';
 }

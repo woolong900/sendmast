@@ -4,17 +4,18 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/utils';
 import { useAuth } from '@/store/auth';
-import type {
-  AcsAccountView,
-  AdminAccountView,
-  AuthTokens,
-  SetAccountStatusInput,
+import {
+  ACCOUNT_ROLES,
+  type AccountRole,
+  type AcsAccountView,
+  type AdminAccountView,
+  type AuthTokens,
+  type SetAccountStatusInput,
 } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
 
@@ -31,6 +32,34 @@ const STATUS_VARIANT: Record<
   active: 'success',
   suspended: 'danger',
 };
+
+const ROLE_LABEL: Record<AccountRole, string> = {
+  platform_admin: '平台管理员',
+  collaborator: '合作者',
+  tenant: '普通租户',
+};
+const ROLE_DESC: Record<AccountRole, string> = {
+  platform_admin: '全局平台管理员(可管理整个平台);活动数据显示真实投递情况。',
+  collaborator: '合作者:活动数据显示真实投递情况(含真实弹回率)。',
+  tenant: '普通租户:软弹回并入送达、隐藏弹回率。',
+};
+function RoleBadge({ role }: { role: AccountRole }) {
+  if (role === 'platform_admin') {
+    return (
+      <Badge variant="default" className="bg-rose-100 text-rose-700">
+        平台管理员
+      </Badge>
+    );
+  }
+  if (role === 'collaborator') {
+    return (
+      <Badge variant="default" className="bg-violet-100 text-violet-700">
+        合作者
+      </Badge>
+    );
+  }
+  return <Badge variant="muted">普通租户</Badge>;
+}
 
 export function AdminAccountsPage() {
   const qc = useQueryClient();
@@ -153,7 +182,7 @@ export function AdminAccountsPage() {
     acsAccountIds: string[],
     primaryAcsAccountId: string | null,
     remaining: number,
-    isCollaborator: boolean,
+    role: AccountRole,
   ) {
     if (!editingAccount) return;
     setSavingEdit(true);
@@ -163,10 +192,8 @@ export function AdminAccountsPage() {
         primaryAcsAccountId,
       });
       await api.patch(`/api/admin/accounts/${editingAccount.id}/quota`, { remaining });
-      if (isCollaborator !== editingAccount.isCollaborator) {
-        await api.patch(`/api/admin/accounts/${editingAccount.id}/collaborator`, {
-          isCollaborator,
-        });
+      if (role !== editingAccount.role) {
+        await api.patch(`/api/admin/accounts/${editingAccount.id}/role`, { role });
       }
       toast('已更新', 'success');
       setEditingAccount(null);
@@ -232,13 +259,7 @@ export function AdminAccountsPage() {
                     ) : null}
                   </td>
                   <td className="px-4 py-3">
-                    {a.isCollaborator ? (
-                      <Badge variant="default" className="bg-violet-100 text-violet-700">
-                        合作者
-                      </Badge>
-                    ) : (
-                      <Badge variant="muted">普通租户</Badge>
-                    )}
+                    <RoleBadge role={a.role} />
                   </td>
                   <td className="px-4 py-3">
                     <Badge variant={a.senderDomainCount > 0 ? 'default' : 'muted'}>
@@ -348,7 +369,7 @@ function AccountEditModal({
     acsAccountIds: string[],
     primaryAcsAccountId: string | null,
     remaining: number,
-    isCollaborator: boolean,
+    role: AccountRole,
   ) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
@@ -358,7 +379,7 @@ function AccountEditModal({
     () => account.acsAccounts.find((a) => a.isPrimary)?.id ?? null,
   );
   const [quota, setQuota] = useState<string>(() => String(account.sendQuotaRemaining));
-  const [collaborator, setCollaborator] = useState<boolean>(() => account.isCollaborator);
+  const [role, setRole] = useState<AccountRole>(() => account.role);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -450,28 +471,34 @@ function AccountEditModal({
             )}
           </div>
 
-          <div className="flex items-start justify-between gap-3 rounded-md border px-3 py-2.5">
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-sm font-medium">
-                角色
-                {collaborator ? (
-                  <Badge variant="default" className="bg-violet-100 text-violet-700">
-                    合作者
-                  </Badge>
-                ) : (
-                  <Badge variant="muted">普通租户</Badge>
-                )}
-              </div>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                「合作者」活动数据显示真实投递情况(含真实弹回率);「普通租户」则软弹回并入送达、隐藏弹回率。
-              </p>
+          <div>
+            <div className="mb-1.5 text-sm font-medium">角色</div>
+            <div className="space-y-1.5">
+              {ACCOUNT_ROLES.map((r) => (
+                <label
+                  key={r}
+                  className="flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 has-[:checked]:border-primary has-[:checked]:bg-muted/40"
+                >
+                  <input
+                    type="radio"
+                    name="account-role"
+                    className="mt-0.5"
+                    checked={role === r}
+                    disabled={pending}
+                    onChange={() => setRole(r)}
+                  />
+                  <span className="min-w-0">
+                    <span className="text-sm font-medium">{ROLE_LABEL[r]}</span>
+                    <span className="block text-xs text-muted-foreground">{ROLE_DESC[r]}</span>
+                  </span>
+                </label>
+              ))}
             </div>
-            <Switch
-              checked={collaborator}
-              disabled={pending}
-              title="切换 合作者 / 普通租户"
-              onCheckedChange={setCollaborator}
-            />
+            {role === 'platform_admin' && role !== account.role && (
+              <p className="mt-1.5 text-xs text-amber-600">
+                注意:将把该租户的所有者用户提升为全局平台管理员。
+              </p>
+            )}
           </div>
 
           <div className="flex justify-end gap-2">
@@ -479,7 +506,7 @@ function AccountEditModal({
               取消
             </Button>
             <Button
-              onClick={() => onSave(ids, primary, quotaNum, collaborator)}
+              onClick={() => onSave(ids, primary, quotaNum, role)}
               disabled={pending || !valid}
             >
               {pending ? '保存中…' : '保存'}
