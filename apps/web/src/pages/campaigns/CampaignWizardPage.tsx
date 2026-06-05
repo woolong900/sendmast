@@ -871,8 +871,6 @@ export function CampaignWizardPage() {
               未自定义参数时，则默认拼接
               <br />
               {'utm_source: sendmast、utm_medium: email、utm_campaign: {{campaign_id}}'}
-              <br />
-              三个参数均支持变量，如 {'{{campaign_id}}'}、{'{{date}}'} 等。
             </div>
             <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input
@@ -891,7 +889,10 @@ export function CampaignWizardPage() {
             {utmCustomized && (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">utm_source</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-muted-foreground">utm_source</Label>
+                    <VariablesHelper />
+                  </div>
                   <Input
                     value={utmSource}
                     onChange={(e) => setUtmSource(e.target.value)}
@@ -899,7 +900,10 @@ export function CampaignWizardPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">utm_medium</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-muted-foreground">utm_medium</Label>
+                    <VariablesHelper />
+                  </div>
                   <Input
                     value={utmMedium}
                     onChange={(e) => setUtmMedium(e.target.value)}
@@ -907,7 +911,10 @@ export function CampaignWizardPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">utm_campaign</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-muted-foreground">utm_campaign</Label>
+                    <VariablesHelper />
+                  </div>
                   <Input
                     value={utmCampaign}
                     onChange={(e) => setUtmCampaign(e.target.value)}
