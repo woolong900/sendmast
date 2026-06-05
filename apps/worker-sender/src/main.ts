@@ -22,6 +22,17 @@ const TRACKING_SECRET = process.env.TRACKING_TOKEN_SECRET;
 // future). Pool empty = send fails — see the recipient-fail path below.
 const SEND_CONCURRENCY = Number(process.env.SEND_CONCURRENCY ?? '8');
 
+// Fairness cap: max recipients kept in-flight (queued but not yet sent) per ACS
+// account. Sends drain through ONE shared FIFO queue, so without this cap an
+// earlier/larger campaign front-loads tens of thousands of jobs and starves any
+// campaign that starts later (head-of-line blocking). Bounding per-ACS depth
+// keeps the shared queue shallow and interleaved, so the worker drains all
+// active ACS accounts (hence all campaigns) fairly. The 1Hz tick refills as the
+// worker drains, so a shallow buffer never starves the workers nor caps
+// throughput — it only changes WHICH jobs sit in the queue, not how fast they
+// leave it.
+const MAX_INFLIGHT_PER_ACS = Number(process.env.MAX_INFLIGHT_PER_ACS ?? '2000');
+
 if (!TRACKING_SECRET) {
   throw new Error('TRACKING_TOKEN_SECRET is required');
 }
@@ -416,6 +427,20 @@ async function runTick(_job: Job): Promise<void> {
     },
   });
 
+  // Current in-flight (queued, not yet sent) depth per ACS. Used to bound how
+  // much we add to the shared FIFO queue this tick so no single ACS/campaign
+  // can pile a deep backlog and starve others (see MAX_INFLIGHT_PER_ACS).
+  const queuedBuckets = await prisma.campaignRecipient.groupBy({
+    by: ['acsAccountId'],
+    where: { status: 'queued', acsAccountId: { not: null } },
+    _count: { _all: true },
+  });
+  const inflightByAcs = new Map<string, number>(
+    queuedBuckets
+      .filter((b): b is typeof b & { acsAccountId: string } => b.acsAccountId != null)
+      .map((b) => [b.acsAccountId, b._count._all]),
+  );
+
   for (const bucket of acsBuckets) {
     const acsAccountId = bucket.acsAccountId;
     if (!acsAccountId) continue;
@@ -424,6 +449,12 @@ async function runTick(_job: Job): Promise<void> {
 
     let budget = await quota.getAvailable(acsAccountId, acct);
     if (budget <= 0) continue;
+
+    // Cap by remaining in-flight headroom for this ACS so the shared send queue
+    // stays shallow and fair across all active ACS accounts / campaigns.
+    const headroom = MAX_INFLIGHT_PER_ACS - (inflightByAcs.get(acsAccountId) ?? 0);
+    if (headroom <= 0) continue;
+    if (budget > headroom) budget = headroom;
 
     const candidates = await prisma.campaignRecipient.findMany({
       where: { acsAccountId, status: 'pending', campaignId: { in: eligibleCampaignIds } },
