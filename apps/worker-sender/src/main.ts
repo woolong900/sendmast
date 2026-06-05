@@ -602,11 +602,14 @@ async function runSend(job: Job<SendJobData>) {
     baseUrl: trackingBaseUrl,
     secret: TRACKING_SECRET!,
     recipientId: r.id,
+    // UTM values support system variables (e.g. {{campaign_id}}, {{date}}).
+    // Resolve with the 'text' context — applyUtm URL-encodes via
+    // searchParams.set, so we must NOT HTML-escape here.
     utm: c.utmEnabled
       ? {
-          source: c.utmSource ?? 'sendmast',
-          medium: c.utmMedium ?? 'email',
-          campaign: c.utmCampaign ?? c.id,
+          source: applySystemTags(c.utmSource ?? 'sendmast', sysCtx, 'text'),
+          medium: applySystemTags(c.utmMedium ?? 'email', sysCtx, 'text'),
+          campaign: applySystemTags(c.utmCampaign ?? c.id, sysCtx, 'text'),
         }
       : undefined,
     trackClicks: c.trackClicks,

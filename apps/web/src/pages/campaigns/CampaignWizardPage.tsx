@@ -870,13 +870,21 @@ export function CampaignWizardPage() {
             <div className="text-xs text-muted-foreground">
               未自定义参数时，则默认拼接
               <br />
-              utm_source: sendmast、utm_medium: email、utm_campaign: [活动ID]
+              {'utm_source: sendmast、utm_medium: email、utm_campaign: {{campaign_id}}'}
+              <br />
+              三个参数均支持变量，如 {'{{campaign_id}}'}、{'{{date}}'} 等。
             </div>
             <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={utmCustomized}
-                onChange={(e) => setUtmCustomized(e.target.checked)}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setUtmCustomized(on);
+                  // Pre-fill utm_campaign with the campaign-id variable so the
+                  // custom path defaults to the same behaviour as the auto path.
+                  if (on && !utmCampaign) setUtmCampaign('{{campaign_id}}');
+                }}
               />
               数据追踪参数自定义
             </label>
@@ -903,7 +911,7 @@ export function CampaignWizardPage() {
                   <Input
                     value={utmCampaign}
                     onChange={(e) => setUtmCampaign(e.target.value)}
-                    placeholder="[活动ID]"
+                    placeholder="{{campaign_id}}"
                   />
                 </div>
               </div>
@@ -1254,7 +1262,7 @@ export function CampaignWizardPage() {
                   </div>
                   <div>
                     utm_campaign：
-                    {utmCustomized && utmCampaign ? utmCampaign : '[活动ID]'}
+                    {utmCustomized && utmCampaign ? utmCampaign : '{{campaign_id}}'}
                   </div>
                   <div className="pt-1">
                     链接点击追踪：
