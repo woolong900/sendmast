@@ -224,12 +224,9 @@ export function CampaignAnalyticsPage() {
                 value={formatPercent(rates.unsubscribe)}
                 hint={`(退订数 ${formatNumber(totals.unsubscribes)})`}
               />
-              <SmallStat
-                to={recipientLink(id, 'complained')}
-                label="投诉率"
-                value={formatPercent(rates.complaint)}
-                hint={`(投诉数 ${formatNumber(totals.complaints)})`}
-              />
+              {/* 投诉率 hidden: ACS provides no complaint/FBL feed, so the value
+                  is always 0 — surfacing it just misleads. See complaint
+                  pipeline (worker-events) which stays ready for a future source. */}
             </div>
           </div>
 
