@@ -17,6 +17,12 @@ export interface AuthAccount {
   /** Tenant lifecycle. Drives the activation banner and the create-campaign gate. */
   status?: 'pending_activation' | 'active' | 'suspended';
   suspendedReason?: string | null;
+  /**
+   * Collaborator (trusted partner) account. Normal tenants (false/undefined)
+   * see the softened analytics view — soft bounces folded into 送达 and 弹回率
+   * hidden. Collaborators (true) see the real deliverability data.
+   */
+  isCollaborator?: boolean;
 }
 
 /**

@@ -340,7 +340,7 @@ export class CampaignService {
     // anything else, otherwise we'd leak archived data across tenants.
     const campaign = await this.prisma.campaign.findFirst({
       where: { id: campaignId, accountId },
-      select: { id: true },
+      select: { id: true, account: { select: { isCollaborator: true } } },
     });
     if (!campaign) throw new NotFoundException('活动不存在');
 
@@ -352,6 +352,17 @@ export class CampaignService {
     // 投递中 = 尚未交给 ACS 的待发送收件人 (status pending|queued)。纯 PG 查询。
     if (query.dimension === 'pending') {
       return this.listPendingRecipients(campaignId, query);
+    }
+
+    // Normal tenants get the softened view (collaborators see real data): soft
+    // bounces are listed under 送达 instead of 弹回, and the 弹回 tab is empty
+    // (its recipients moved to 送达). 无效邮箱 (hard) is unaffected.
+    const softenBounce = !campaign.account?.isCollaborator;
+    if (softenBounce && query.dimension === 'bounced') {
+      return { source: 'events', rows: [], nextCursor: null, total: 0 };
+    }
+    if (softenBounce && query.dimension === 'delivered') {
+      return this.listRecipientsFromEvents(accountId, campaignId, query, 'delivered', undefined, true);
     }
 
     // Event-based dimensions (delivered/open/click/bounce/...) are answered
@@ -579,6 +590,10 @@ export class CampaignService {
     q: ListRecipientsQuery,
     eventType: string,
     bounceKindFilter?: 'hard' | 'soft',
+    // Softened 送达 view (normal tenants): match delivered events PLUS non-hard
+    // (soft) bounces, so soft-bounced recipients show up under 送达. Hard
+    // bounces stay out (they remain in the 无效邮箱 tab).
+    foldSoftBounce = false,
   ): Promise<ListRecipientsResponse> {
     const params: Record<string, unknown> = {
       acc: accountId,
@@ -591,10 +606,18 @@ export class CampaignService {
       cursorClause = 'AND ts < parseDateTime64BestEffort({cursor:String}, 3)';
       params.cursor = q.cursor;
     }
-    let bounceClause = '';
-    if (bounceKindFilter) {
-      bounceClause = ' AND bounce_kind = {bk:String}';
-      params.bk = bounceKindFilter;
+    // The full event-match predicate, reused by both the page and the count
+    // query below so they always agree.
+    let eventClause: string;
+    if (foldSoftBounce) {
+      eventClause =
+        "(event_type = 'delivered' OR (event_type = 'bounce' AND bounce_kind != 'hard'))";
+    } else {
+      eventClause = 'event_type = {et:String}';
+      if (bounceKindFilter) {
+        eventClause += ' AND bounce_kind = {bk:String}';
+        params.bk = bounceKindFilter;
+      }
     }
 
     // argMax(x, event_time) returns x at the latest event for the recipient.
@@ -630,7 +653,7 @@ export class CampaignService {
            FROM sendmast.email_events
            WHERE account_id = {acc:UUID}
              AND campaign_id = {cid:UUID}
-             AND event_type = {et:String}${bounceClause}
+             AND ${eventClause}
            GROUP BY recipient_id
            HAVING 1=1 ${cursorClause}
            ORDER BY ts DESC
@@ -642,7 +665,7 @@ export class CampaignService {
            FROM sendmast.email_events
            WHERE account_id = {acc:UUID}
              AND campaign_id = {cid:UUID}
-             AND event_type = {et:String}${bounceClause}`,
+             AND ${eventClause}`,
           params,
         ),
       ]);

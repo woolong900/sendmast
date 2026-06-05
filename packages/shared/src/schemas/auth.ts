@@ -61,6 +61,13 @@ export interface MeResponse {
     status: AccountStatus;
     /** Filled when status === 'suspended', shown in the suspended banner. */
     suspendedReason: string | null;
+    /**
+     * Collaborator (trusted partner) account. Normal tenants (false) get the
+     * softened analytics view — soft bounces folded into 送达 and 弹回邮箱率
+     * hidden. Collaborators (true) see the real deliverability data. Drives
+     * which bounce metrics/tabs the frontend renders.
+     */
+    isCollaborator: boolean;
   };
   /**
    * Present only while a Platform Admin is acting "as" another tenant via the

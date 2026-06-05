@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { api, apiErrMessage } from '@/lib/api';
@@ -152,6 +153,7 @@ export function AdminAccountsPage() {
     acsAccountIds: string[],
     primaryAcsAccountId: string | null,
     remaining: number,
+    isCollaborator: boolean,
   ) {
     if (!editingAccount) return;
     setSavingEdit(true);
@@ -161,6 +163,11 @@ export function AdminAccountsPage() {
         primaryAcsAccountId,
       });
       await api.patch(`/api/admin/accounts/${editingAccount.id}/quota`, { remaining });
+      if (isCollaborator !== editingAccount.isCollaborator) {
+        await api.patch(`/api/admin/accounts/${editingAccount.id}/collaborator`, {
+          isCollaborator,
+        });
+      }
       toast('已更新', 'success');
       setEditingAccount(null);
       qc.invalidateQueries({ queryKey: ['admin', 'accounts'] });
@@ -208,7 +215,14 @@ export function AdminAccountsPage() {
               {accounts?.map((a) => (
                 <tr key={a.id} className="border-b last:border-0">
                   <td className="px-4 py-3">
-                    <div className="font-medium">{a.name}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium">{a.name}</span>
+                      {a.isCollaborator && (
+                        <Badge variant="default" className="bg-violet-100 text-violet-700">
+                          合作者
+                        </Badge>
+                      )}
+                    </div>
                     <div className="text-xs text-muted-foreground">
                       {a.ownerEmail ?? a.slug}
                     </div>
@@ -365,6 +379,7 @@ function AccountEditModal({
     acsAccountIds: string[],
     primaryAcsAccountId: string | null,
     remaining: number,
+    isCollaborator: boolean,
   ) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
@@ -374,6 +389,7 @@ function AccountEditModal({
     () => account.acsAccounts.find((a) => a.isPrimary)?.id ?? null,
   );
   const [quota, setQuota] = useState<string>(() => String(account.sendQuotaRemaining));
+  const [collaborator, setCollaborator] = useState<boolean>(() => account.isCollaborator);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -465,11 +481,29 @@ function AccountEditModal({
             )}
           </div>
 
+          <div className="flex items-start justify-between gap-3 rounded-md border px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="text-sm font-medium">合作者</div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                开启后该租户为「合作者」,活动数据显示真实投递情况(含真实弹回率)。关闭则为普通租户:软弹回并入送达、隐藏弹回率。
+              </p>
+            </div>
+            <Switch
+              checked={collaborator}
+              disabled={pending}
+              title="切换 合作者 / 普通租户"
+              onCheckedChange={setCollaborator}
+            />
+          </div>
+
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose} disabled={pending}>
               取消
             </Button>
-            <Button onClick={() => onSave(ids, primary, quotaNum)} disabled={pending || !valid}>
+            <Button
+              onClick={() => onSave(ids, primary, quotaNum, collaborator)}
+              disabled={pending || !valid}
+            >
               {pending ? '保存中…' : '保存'}
             </Button>
           </div>

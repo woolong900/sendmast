@@ -49,9 +49,19 @@ export class AnalyticsService {
   async campaign(accountId: string, campaignId: string): Promise<CampaignAnalyticsView> {
     const c = await this.prisma.campaign.findFirst({
       where: { id: campaignId, accountId },
-      select: { id: true, totalRecipients: true },
+      select: {
+        id: true,
+        totalRecipients: true,
+        account: { select: { isCollaborator: true } },
+      },
     });
     if (!c) throw new NotFoundException('活动不存在');
+
+    // Normal tenants get a softened view: soft bounces (mostly reputation /
+    // greylisting — recoverable) are folded into 送达 and 弹回邮箱率 is hidden.
+    // Genuine 无效邮箱 (hard bounces) are left untouched. Collaborators (trusted
+    // partners) see the real, unmodified deliverability data.
+    const softenBounce = !c.account?.isCollaborator;
 
     // "发送/总投放" = the full audience we attempted (totalRecipients). Used as
     // the denominator for delivery/open/bounce rates so the funnel stays
@@ -141,6 +151,17 @@ export class AnalyticsService {
     // in-flight mail right after a real send before reports arrive.
     if (chOk && delivered === 0 && sent > 0 && process.env.NODE_ENV !== 'production') {
       delivered = sent;
+    }
+
+    // Fold soft bounces into 送达 for normal tenants. `bounces` is the deduped
+    // set of recipients with ANY bounce; `bouncesHard` is the hard subset. The
+    // soft-only set = bounces − bouncesHard moves to delivered; `bounces` then
+    // collapses to the hard count so 弹回邮箱率 (hidden anyway) and the shared
+    // `outcome` denominator stay self-consistent (送达+弹回+失败 is unchanged).
+    if (softenBounce) {
+      const softBounces = Math.max(0, bounces - bouncesHard);
+      delivered += softBounces;
+      bounces = bouncesHard;
     }
 
     const safe = (a: number, b: number) => (b > 0 ? a / b : 0);

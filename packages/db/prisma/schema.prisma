@@ -287,6 +287,11 @@ model Account {
   /// fails the recipient (and same-campaign pending) with a quota error.
   /// Top-up is admin-driven via PATCH /api/admin/accounts/:id/quota.
   sendQuotaRemaining  Int           @default(0) @map("send_quota_remaining")
+  /// Account type / role. Normal tenants (false) see a softened analytics view:
+  /// soft bounces are folded into 送达 and 弹回邮箱率 is hidden. "Collaborators"
+  /// (true) are trusted partners who see the real, unmodified deliverability
+  /// data (including the true bounce rate). Toggled by admin in 租户管理.
+  isCollaborator      Boolean       @default(false) @map("is_collaborator")
   createdAt           DateTime      @default(now()) @map("created_at")
   updatedAt           DateTime      @updatedAt @map("updated_at")
 

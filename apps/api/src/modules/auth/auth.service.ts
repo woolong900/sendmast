@@ -588,6 +588,7 @@ export class AuthService {
           role: 'admin',
           status: account.status,
           suspendedReason: account.suspendedReason,
+          isCollaborator: account.isCollaborator,
         },
         impersonation: {
           originalUser: {
@@ -619,6 +620,7 @@ export class AuthService {
         role: membership.role,
         status: membership.account.status,
         suspendedReason: membership.account.suspendedReason,
+        isCollaborator: membership.account.isCollaborator,
       },
       impersonation: null,
     };

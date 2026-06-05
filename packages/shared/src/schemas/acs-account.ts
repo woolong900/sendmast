@@ -90,8 +90,20 @@ export interface AdminAccountView {
   suspendedReason: string | null;
   /** Owner email — shown in the admin table so the operator knows who they're suspending. */
   ownerEmail: string | null;
+  /**
+   * Collaborator (trusted partner) account. Normal tenants (false) get the
+   * softened analytics view (soft bounces folded into 送达, 弹回邮箱率 hidden);
+   * collaborators (true) see the real deliverability data.
+   */
+  isCollaborator: boolean;
   createdAt: string;
 }
+
+/** Toggle a tenant between normal-tenant and collaborator (real-data) view. */
+export const SetCollaboratorSchema = z.object({
+  isCollaborator: z.boolean(),
+});
+export type SetCollaboratorInput = z.infer<typeof SetCollaboratorSchema>;
 
 export const SetTenantQuotaSchema = z.object({
   remaining: z.coerce.number().int().min(0).max(2_000_000_000),

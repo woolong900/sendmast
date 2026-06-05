@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton, PageSkeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
 import { formatNumber, formatPercent } from '@/lib/utils';
+import { useAuth } from '@/store/auth';
 
 interface AnalyticsView {
   campaignId: string;
@@ -65,6 +66,11 @@ const FUNNEL_ORDER = ['sent', 'delivered', 'opened', 'clicked', 'ordered'] as co
 
 export function CampaignAnalyticsPage() {
   const { id } = useParams<{ id: string }>();
+  // Normal tenants get the softened view: soft bounces are folded into 送达 by
+  // the backend, so we hide 弹回邮箱率 (it'd just mirror 无效邮箱率). Collaborators
+  // see the real bounce rate. 无效邮箱率 (hard bounces) is shown for everyone.
+  const account = useAuth((s) => s.account);
+  const showBounceRate = account?.isCollaborator === true;
 
   const detail = useQuery<CampaignDetail>({
     queryKey: ['campaigns', id],
@@ -204,12 +210,14 @@ export function CampaignAnalyticsPage() {
                 value={formatPercent(failureRate)}
                 hint={`(发送失败 ${formatNumber(totals.failed)})`}
               />
-              <SmallStat
-                to={recipientLink(id, 'bounced')}
-                label="弹回邮箱率"
-                value={formatPercent(rates.bounce)}
-                hint={`(弹回邮箱 ${formatNumber(totals.bounces)})`}
-              />
+              {showBounceRate && (
+                <SmallStat
+                  to={recipientLink(id, 'bounced')}
+                  label="弹回邮箱率"
+                  value={formatPercent(rates.bounce)}
+                  hint={`(弹回邮箱 ${formatNumber(totals.bounces)})`}
+                />
+              )}
               <SmallStat
                 to={recipientLink(id, 'unsubscribed')}
                 label="退订率"

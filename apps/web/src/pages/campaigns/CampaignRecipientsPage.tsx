@@ -6,6 +6,7 @@ import { UAParser } from 'ua-parser-js';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { api } from '@/lib/api';
+import { useAuth } from '@/store/auth';
 import { cn, formatDateTime, formatNumber } from '@/lib/utils';
 import { EmptyStateRow } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -267,6 +268,15 @@ const COLUMNS_BY_DIM: Record<Dimension, Column[]> = {
 export function CampaignRecipientsPage() {
   const { id } = useParams<{ id: string }>();
   const [params, setParams] = useSearchParams();
+  // Normal tenants get the softened view: soft bounces are folded into 送达, so
+  // the 弹回 tab is hidden (those recipients show under 送达). Collaborators see
+  // the real data with the 弹回 tab. 无效邮箱 (hard) is shown for everyone.
+  const account = useAuth((s) => s.account);
+  const showBounceTab = account?.isCollaborator === true;
+  const tabs = useMemo(
+    () => (showBounceTab ? TABS : TABS.filter((t) => t.key !== 'bounced')),
+    [showBounceTab],
+  );
   const dimRaw = params.get('tab');
   const dim: Dimension = isDimension(dimRaw) ? dimRaw : 'sent';
   const cursor = params.get('cursor') ?? undefined;
@@ -351,7 +361,7 @@ export function CampaignRecipientsPage() {
         <CardContent className="p-0">
           <div className="border-b">
             <div role="tablist" className="flex flex-wrap gap-x-1 px-2">
-              {TABS.map((t) => {
+              {tabs.map((t) => {
                 const active = t.key === dim;
                 return (
                   <button

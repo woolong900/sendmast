@@ -22,6 +22,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import {
   AssignAcsAccountsSchema,
   SetAccountStatusSchema,
+  SetCollaboratorSchema,
   SetTenantQuotaSchema,
 } from '@sendmast/shared';
 import type { AdminAccountView, AssignedAcsAccountView } from '@sendmast/shared';
@@ -77,6 +78,7 @@ export class AccountAdminController {
       suspendedAt: r.suspendedAt ? r.suspendedAt.toISOString() : null,
       suspendedReason: r.suspendedReason,
       ownerEmail: r.members[0]?.user.email ?? null,
+      isCollaborator: r.isCollaborator,
       createdAt: r.createdAt.toISOString(),
     }));
   }
@@ -138,6 +140,21 @@ export class AccountAdminController {
       data: { sendQuotaRemaining: r.data.remaining },
     });
     return { ok: true, remaining: r.data.remaining };
+  }
+
+  /**
+   * Flip a tenant between normal-tenant (softened analytics: soft bounces folded
+   * into 送达, 弹回邮箱率 hidden) and collaborator (real, unmodified data).
+   */
+  @Patch(':id/collaborator')
+  async setCollaborator(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
+    const r = SetCollaboratorSchema.safeParse(body);
+    if (!r.success) throw new BadRequestException(firstZodError(r.error));
+    await this.prisma.account.update({
+      where: { id },
+      data: { isCollaborator: r.data.isCollaborator },
+    });
+    return { ok: true, isCollaborator: r.data.isCollaborator };
   }
 
   /**
