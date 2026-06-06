@@ -24,6 +24,16 @@ import type {
 const STALE_ORDER_MS = 30 * 60 * 1000;
 /** How often the background sweep runs. */
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+/**
+ * Past this age a pending order's QR is long dead — it can no longer be paid,
+ * and the gateway may refuse to even query/cancel it (unknown/expired order, or
+ * a legacy over-length client_sn). We still query once for a lost-notify PAID,
+ * but if that can't be confirmed we close the order locally instead of retrying
+ * the same doomed gateway calls forever (which would block deleting its tier).
+ * Well beyond both the QR validity window and the notify-retry window, so a
+ * real payment would already have been credited via notify or an earlier sweep.
+ */
+const HARD_EXPIRE_MS = 6 * 60 * 60 * 1000;
 
 @Injectable()
 export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
@@ -357,8 +367,14 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
    *   - PAID            → credit it (also recovers a payment whose notify was lost).
    *   - anything else   → cancel at the gateway (so a late scan can't pay it),
    *                       then mark our order `cancelled`.
-   * If the gateway query or cancel fails we leave the order pending and retry
-   * on the next sweep — never drop a possibly-payable order.
+   *
+   * If the gateway query or cancel fails we normally leave the order pending and
+   * retry on the next sweep — never drop a possibly-payable order. The exception
+   * is orders older than HARD_EXPIRE_MS: their QR is dead and the gateway may
+   * reject query/cancel permanently (unknown/expired order, or a legacy
+   * over-length client_sn), so retrying is futile and would pin the order
+   * `pending` forever (blocking tier deletion). For those we still try the PAID
+   * lookup, but otherwise close locally regardless of gateway failures.
    *
    * Safe to run repeatedly and concurrently (the credit path is idempotent).
    */
@@ -383,12 +399,25 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
     let paid = 0;
     let cancelled = 0;
     for (const order of stale) {
-      let truth: { orderStatus: string; tradeNo: string | null } | null;
+      // Past this point the QR is dead; failed gateway calls must not pin the
+      // order pending forever, so we close it locally instead of retrying.
+      const hardExpired = order.createdAt.getTime() < Date.now() - HARD_EXPIRE_MS;
+
+      let truth: { orderStatus: string; tradeNo: string | null } | null = null;
       try {
         truth = await this.shouqianba.queryOrder(order.providerOrderId);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`sweep: query failed for ${order.providerOrderId}, will retry: ${msg}`);
+        if (!hardExpired) {
+          this.logger.warn(`sweep: query failed for ${order.providerOrderId}, will retry: ${msg}`);
+          continue;
+        }
+        // Unrecoverable (gateway can't even query it) and long past payable —
+        // close locally so it stops blocking tier deletion.
+        this.logger.warn(
+          `sweep: query failed for ${order.providerOrderId} but past hard-expire, closing locally: ${msg}`,
+        );
+        if (await this.closeLocally(order.id)) cancelled += 1;
         continue;
       }
 
@@ -406,21 +435,29 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
       // Not paid (CREATED / PAY_CANCELED / PAY_ERROR / unknown). Close it at the
       // gateway first so it can't be paid late, only then mark ours cancelled.
       const closed = await this.shouqianba.cancelOrder(order.providerOrderId);
-      if (!closed) {
+      if (!closed && !hardExpired) {
         this.logger.warn(`sweep: gateway cancel failed for ${order.providerOrderId}, will retry`);
         continue;
       }
-      await this.prisma.quotaOrder.updateMany({
-        where: { id: order.id, status: 'pending' },
-        data: { status: 'cancelled' },
-      });
-      cancelled += 1;
+      // Either the gateway confirmed cancel, or the order is past hard-expire so
+      // a failed cancel no longer matters (the QR can't be paid). Close locally.
+      if (await this.closeLocally(order.id)) cancelled += 1;
     }
 
     if (paid || cancelled) {
       this.logger.log(`sweep: checked=${stale.length} paid=${paid} cancelled=${cancelled}`);
     }
     return { checked: stale.length, paid, cancelled };
+  }
+
+  /** Flip a still-pending order → cancelled. Returns true if it was the one to
+   *  flip it (guarded so a concurrent credit/cancel can't double-count). */
+  private async closeLocally(orderId: string): Promise<boolean> {
+    const res = await this.prisma.quotaOrder.updateMany({
+      where: { id: orderId, status: 'pending' },
+      data: { status: 'cancelled' },
+    });
+    return res.count === 1;
   }
 
   // ---------- Mappers ---------------------------------------------------
