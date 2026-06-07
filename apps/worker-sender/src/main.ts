@@ -128,7 +128,7 @@ async function runDispatch(job: Job<DispatchJobData>) {
 
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, accountId },
-    include: { lists: true, senders: { orderBy: { position: 'asc' } } },
+    include: { lists: { orderBy: { position: 'asc' } }, senders: { orderBy: { position: 'asc' } } },
   });
   if (!campaign) throw new Error('Campaign not found');
   if (
@@ -239,9 +239,10 @@ async function materialiseRecipients(
   if (listIds.length === 0) return existing;
 
   // {{list_name}} is captured per recipient at materialisation: each contact
-  // gets the name(s) of the target list(s) THEY belong to (joined by 、),
-  // frozen here so a later membership change can't drift the rendered email
-  // and so runSend needs no extra query. Build the id→name map once.
+  // gets the name of the target list THEY belong to — the FIRST one by
+  // selection order (listIds is ordered by CampaignList.position) when the
+  // contact is in several. Frozen here so a later membership change can't drift
+  // the rendered email and so runSend needs no extra query. Build id→name once.
   const listNameById = new Map(
     (
       await prisma.contactList.findMany({
@@ -280,11 +281,9 @@ async function materialiseRecipients(
       data: batch.map((c, j) => {
         const idx = (inserted + j) % senders.length;
         const s = rotate ? senders[idx] : null;
-        const listName =
-          c.memberships
-            .map((m) => listNameById.get(m.listId))
-            .filter((n): n is string => !!n)
-            .join('、') || null;
+        const member = new Set(c.memberships.map((m) => m.listId));
+        const firstListId = listIds.find((id) => member.has(id));
+        const listName = firstListId ? listNameById.get(firstListId) ?? null : null;
         return {
           accountId,
           campaignId: campaign.id,

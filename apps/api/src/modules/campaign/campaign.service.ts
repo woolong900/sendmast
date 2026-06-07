@@ -847,7 +847,7 @@ export class CampaignService {
         utmMedium: input.utmMedium,
         utmCampaign: input.utmCampaign,
         trackClicks: input.trackClicks,
-        lists: { create: input.listIds.map((listId) => ({ listId })) },
+        lists: { create: input.listIds.map((listId, position) => ({ listId, position })) },
         segments: { create: input.segmentIds.map((segmentId) => ({ segmentId })) },
         senders: { create: senders },
       },
@@ -980,7 +980,7 @@ export class CampaignService {
       if (input.listIds) {
         await tx.campaignList.deleteMany({ where: { campaignId: id } });
         await tx.campaignList.createMany({
-          data: input.listIds.map((listId) => ({ campaignId: id, listId })),
+          data: input.listIds.map((listId, position) => ({ campaignId: id, listId, position })),
         });
       }
       if (input.segmentIds) {
@@ -1100,7 +1100,7 @@ export class CampaignService {
     const c = await this.prisma.campaign.findFirst({
       where: { id, accountId },
       include: {
-        lists: true,
+        lists: { orderBy: { position: 'asc' } },
         segments: true,
         senders: { orderBy: { position: 'asc' } },
       },
@@ -1317,9 +1317,10 @@ export class CampaignService {
     };
 
     // 1. Lists — cursor-stream subscribed contacts so memory stays at one
-    //    batch regardless of list size. Capture each contact's target list
-    //    name(s) for {{list_name}} (joined by 、) — frozen at materialisation,
-    //    no send-time join. Build the id→name map once.
+    //    batch regardless of list size. Capture each contact's target list name
+    //    for {{list_name}} — when a contact is in several target lists we take
+    //    the FIRST one (by selection order; listIds is ordered by
+    //    CampaignList.position). Frozen at materialisation, no send-time join.
     if (listIds.length > 0) {
       const listNameById = new Map(
         (
@@ -1351,15 +1352,15 @@ export class CampaignService {
         });
         if (rows.length === 0) break;
         await insertBatch(
-          rows.map((c) => ({
-            id: c.id,
-            email: c.email,
-            listName:
-              c.memberships
-                .map((m) => listNameById.get(m.listId))
-                .filter((n): n is string => !!n)
-                .join('、') || null,
-          })),
+          rows.map((c) => {
+            const member = new Set(c.memberships.map((m) => m.listId));
+            const firstListId = listIds.find((id) => member.has(id));
+            return {
+              id: c.id,
+              email: c.email,
+              listName: firstListId ? listNameById.get(firstListId) ?? null : null,
+            };
+          }),
         );
         if (rows.length < BATCH) break;
         cursor = rows[rows.length - 1].id;
@@ -1474,7 +1475,7 @@ export class CampaignService {
   async duplicate(accountId: string, id: string) {
     const c = await this.prisma.campaign.findFirst({
       where: { id, accountId },
-      include: { lists: true, senders: { orderBy: { position: 'asc' } } },
+      include: { lists: { orderBy: { position: 'asc' } }, senders: { orderBy: { position: 'asc' } } },
     });
     if (!c) throw new NotFoundException();
     const copy = await this.prisma.campaign.create({
@@ -1501,7 +1502,7 @@ export class CampaignService {
         utmMedium: c.utmMedium,
         utmCampaign: c.utmCampaign,
         trackClicks: c.trackClicks,
-        lists: { create: c.lists.map((l) => ({ listId: l.listId })) },
+        lists: { create: c.lists.map((l, position) => ({ listId: l.listId, position })) },
         senders: {
           create: c.senders.map((s) => ({
             fromEmail: s.fromEmail,
