@@ -97,7 +97,7 @@ export function mapOrder(payload: Json): NormalizedOrder | null {
   if (!externalOrderId || !email) return null;
   return {
     externalOrderId,
-    orderNo: pickStr(o, ['order_no', 'orderNo', 'order_sn', 'sn', 'number', 'name']),
+    orderNo: pickStr(o, ['order_number', 'order_no', 'orderNo', 'order_sn', 'sn', 'number', 'name']),
     email,
     value:
       pickNum(o, [
