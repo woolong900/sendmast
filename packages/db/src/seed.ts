@@ -9,6 +9,8 @@ const SYSTEM_TEMPLATES: Array<{
   mjml?: string;
   /** Pre-rendered HTML (for templates authored directly as HTML, not MJML). */
   html?: string;
+  /** easy-email designJson so the block editor can render/edit the template. */
+  designJson?: unknown;
 }> = [
   {
     name: 'Welcome',
@@ -29,6 +31,7 @@ const SYSTEM_TEMPLATES: Array<{
     name: '弃单召回（默认）',
     category: 'promotion',
     html: abandonedCartHtml(),
+    designJson: abandonedCartDesignJson(),
   },
 ];
 
@@ -36,9 +39,10 @@ async function main() {
   for (const tpl of SYSTEM_TEMPLATES) {
     const html = tpl.html ?? '';
     const mjml = tpl.mjml ?? null;
+    const designJson = (tpl.designJson ?? null) as never;
     await prisma.emailTemplate.upsert({
       where: { id: deterministicId(tpl.name) },
-      update: { mjml, html, category: tpl.category },
+      update: { mjml, html, designJson, category: tpl.category },
       create: {
         id: deterministicId(tpl.name),
         scope: 'system',
@@ -46,6 +50,7 @@ async function main() {
         category: tpl.category,
         mjml,
         html,
+        designJson,
       },
     });
   }
@@ -99,7 +104,19 @@ function abandonedCartHtml(): string {
 </style>
 </head>
 <body style="margin:0; background:#f4f4f5;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-spacing:0; border-collapse:collapse; background:#f4f4f5;">
+${abandonedCartInner()}
+</body>
+</html>`;
+}
+
+/**
+ * Body-inner markup shared by the rendered HTML above and the easy-email `raw`
+ * block in {@link abandonedCartDesignJson}. The `page` wrapper provides the
+ * <html>/<head>; head-only rules (a:link color, mobile media query) live in the
+ * page's user-style. Keep in sync with the `abandoned_cart_default_*` migrations.
+ */
+function abandonedCartInner(): string {
+  return `  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-spacing:0; border-collapse:collapse; background:#f4f4f5;">
     <tr>
       <td style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Helvetica Neue',Arial,sans-serif;">
 
@@ -155,9 +172,51 @@ function abandonedCartHtml(): string {
 
       </td>
     </tr>
-  </table>
-</body>
-</html>`;
+  </table>`;
+}
+
+/**
+ * easy-email designJson that wraps {@link abandonedCartInner} in a single `raw`
+ * block under the page, so the block editor renders/edits the template instead
+ * of showing a blank canvas. Keep in sync with the
+ * `abandoned_cart_default_design_json` migration.
+ */
+function abandonedCartDesignJson(): unknown {
+  return {
+    subject: 'Complete your purchase',
+    subTitle: '',
+    content: {
+      type: 'page',
+      data: {
+        value: {
+          breakpoint: '480px',
+          headAttributes: '',
+          'font-size': '14px',
+          'font-weight': '400',
+          'line-height': '1.7',
+          headStyles: [],
+          fonts: [],
+          responsive: true,
+          'font-family':
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif",
+          'text-color': '#111827',
+          'user-style': {
+            content:
+              'body{margin:0;} a{color:#111827;} @media (max-width:600px){.container{width:92%!important;}.cta,.cta a{width:100%!important;display:block!important;}}',
+          },
+        },
+      },
+      attributes: { 'background-color': '#f4f4f5', width: '600px' },
+      children: [
+        {
+          type: 'raw',
+          data: { value: { content: abandonedCartInner() } },
+          attributes: {},
+          children: [],
+        },
+      ],
+    },
+  };
 }
 
 main()
