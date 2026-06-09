@@ -1152,7 +1152,6 @@ export function CampaignWizardPage() {
                   >
                     <Button
                       variant="outline"
-                      size="sm"
                       onClick={() => setTemplatePickerOpen(true)}
                     >
                       <LayoutTemplate className="mr-1.5 size-4" />
