@@ -54,7 +54,7 @@ const SHOPYY_WEBHOOK_EVENTS: ReadonlyArray<{
  * template.
  */
 const ABANDONED_CART_DEFAULT_TEMPLATE_ID = '00000000-0000-4000-8000-000000000004';
-const ABANDONED_CART_DEFAULT_SUBJECT = 'Complete your purchase';
+const ABANDONED_CART_DEFAULT_SUBJECT = '您的购物车还在等您';
 
 /** shopyy `expired_at` may be Unix seconds, ms, or an ISO string. */
 function parseExpiredAt(v: string | number | undefined): Date | null {
