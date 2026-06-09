@@ -12,7 +12,9 @@ export const DDL_STATEMENTS: string[] = [
       user_agent     Nullable(String),
       link_url       Nullable(String),
       raw_meta       Nullable(String) CODEC(ZSTD(3)),
-      bounce_kind    LowCardinality(String) DEFAULT ''
+      bounce_kind    LowCardinality(String) DEFAULT '',
+      source_type    LowCardinality(String) DEFAULT 'campaign',
+      source_id      Nullable(UUID)
    )
    ENGINE = MergeTree
    PARTITION BY toYYYYMM(event_time)
@@ -24,6 +26,13 @@ export const DDL_STATEMENTS: string[] = [
   // ClickHouse's ALTER ADD COLUMN IF NOT EXISTS is the safe form; runs in
   // O(1) since LowCardinality with DEFAULT '' doesn't rewrite any data.
   `ALTER TABLE sendmast.email_events ADD COLUMN IF NOT EXISTS bounce_kind LowCardinality(String) DEFAULT ''`,
+
+  // Klaviyo-style flow sends share email_events with campaigns. `source_type`
+  // separates campaign vs flow analytics; `source_id` is the automation/flow id
+  // for flow events (NULL for campaigns). campaign_id stays the zero-UUID for
+  // flow rows so the existing ORDER BY prefix is unaffected.
+  `ALTER TABLE sendmast.email_events ADD COLUMN IF NOT EXISTS source_type LowCardinality(String) DEFAULT 'campaign'`,
+  `ALTER TABLE sendmast.email_events ADD COLUMN IF NOT EXISTS source_id Nullable(UUID)`,
 
   `CREATE TABLE IF NOT EXISTS sendmast.orders (
       account_id              UUID,

@@ -31,7 +31,7 @@ export class DashboardService {
         }),
         this.prisma.campaign.groupBy({
           by: ['status'],
-          where: { accountId, isAutomation: false },
+          where: { accountId },
           _count: { _all: true },
         }),
         // The cohort for the open-rate card: campaigns SENT in the window.

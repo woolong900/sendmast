@@ -6,6 +6,7 @@ import {
   buildClickHouseClient,
   findArchivedRecipientById,
   insertEmailEvents,
+  ZERO_UUID,
   type BounceKind,
   type EmailEventRow,
   type EmailEventType,
@@ -38,6 +39,23 @@ interface EventJobData {
   rawMeta?: Record<string, unknown>;
   /** Set by webhook for bounce events; '' / undefined for everything else. */
   bounceKind?: BounceKind;
+  /** 'a' = the id/messageId belongs to a flow send (shop_automation_sends). */
+  source?: 'a';
+}
+
+/** Normalised resolution of an event back to its owning send (campaign or flow). */
+interface ResolvedSend {
+  id: string;
+  accountId: string;
+  contactId: string | null;
+  /** 'campaign' | 'flow' for the email_events.source_type column. */
+  sourceType: 'campaign' | 'flow';
+  /** Campaign id for campaign sends; ZERO_UUID for flow sends. */
+  campaignId: string;
+  /** Automation id for flow sends; null for campaigns. */
+  sourceId: string | null;
+  /** Present only for the hot campaign-recipient path. */
+  status?: string;
 }
 
 const KIND_MAP: Record<string, EmailEventType> = {
@@ -69,7 +87,37 @@ function scheduleFlush() {
   }, FLUSH_INTERVAL_MS);
 }
 
-async function resolveRecipient(data: EventJobData) {
+async function resolveFlowSend(
+  where: { id: string } | { messageId: string },
+): Promise<ResolvedSend | null> {
+  const send =
+    'id' in where
+      ? await prisma.shopAutomationSend.findUnique({
+          where: { id: where.id },
+          select: { id: true, accountId: true, contactId: true, automationId: true, status: true },
+        })
+      : await prisma.shopAutomationSend.findFirst({
+          where: { messageId: where.messageId },
+          select: { id: true, accountId: true, contactId: true, automationId: true, status: true },
+        });
+  if (!send) return null;
+  return {
+    id: send.id,
+    accountId: send.accountId,
+    contactId: send.contactId,
+    sourceType: 'flow',
+    campaignId: ZERO_UUID,
+    sourceId: send.automationId,
+    status: send.status,
+  };
+}
+
+async function resolveRecipient(data: EventJobData): Promise<ResolvedSend | null> {
+  // Flow send (tracking pixel/link carries source='a').
+  if (data.source === 'a' && data.recipientId) {
+    return resolveFlowSend({ id: data.recipientId });
+  }
+
   if (data.recipientId) {
     const hot = await prisma.campaignRecipient.findUnique({
       where: { id: data.recipientId },
@@ -81,24 +129,52 @@ async function resolveRecipient(data: EventJobData) {
         status: true,
       },
     });
-    if (hot) return hot;
+    if (hot) {
+      return {
+        id: hot.id,
+        accountId: hot.accountId,
+        contactId: hot.contactId,
+        sourceType: 'campaign',
+        campaignId: hot.campaignId,
+        sourceId: null,
+        status: hot.status,
+      };
+    }
     // PG miss → try the ClickHouse cold archive. This is the normal path for
     // open/click events that arrive >90 days after send (people opening old
     // newsletters from their archive). Without this fallback those events
     // would be dropped instead of recorded against the original campaign.
     const cold = await findArchivedRecipientById(ch, data.recipientId);
-    return cold;
+    if (cold) {
+      return {
+        id: cold.id,
+        accountId: cold.accountId,
+        contactId: cold.contactId,
+        sourceType: 'campaign',
+        campaignId: cold.campaignId,
+        sourceId: null,
+      };
+    }
+    return null;
   }
   if (data.messageId) {
-    return prisma.campaignRecipient.findFirst({
+    // ACS delivery/bounce report. Try campaign recipients first (the common
+    // case), then flow sends.
+    const hot = await prisma.campaignRecipient.findFirst({
       where: { messageId: data.messageId },
-      select: {
-        id: true,
-        accountId: true,
-        campaignId: true,
-        contactId: true,
-      },
+      select: { id: true, accountId: true, campaignId: true, contactId: true },
     });
+    if (hot) {
+      return {
+        id: hot.id,
+        accountId: hot.accountId,
+        contactId: hot.contactId,
+        sourceType: 'campaign',
+        campaignId: hot.campaignId,
+        sourceId: null,
+      };
+    }
+    return resolveFlowSend({ messageId: data.messageId });
   }
   return null;
 }
@@ -123,8 +199,8 @@ async function runEventJob(job: Job<EventJobData>) {
   // re-checks status='failed' to stay correct under concurrency and is a no-op
   // for archived rows.
   if (
+    recipient.sourceType === 'campaign' &&
     (eventType === 'delivered' || eventType === 'bounce') &&
-    'status' in recipient &&
     recipient.status === 'failed'
   ) {
     await prisma.campaignRecipient
@@ -144,7 +220,7 @@ async function runEventJob(job: Job<EventJobData>) {
   // DNS rejections like AUP#DNS) are deliberately NOT suppressed: the recipient
   // address is probably fine, so we keep it mailable rather than permanently
   // blacklisting a good contact over our own deliverability issue.
-  if (eventType === 'bounce' && data.bounceKind === 'hard') {
+  if (eventType === 'bounce' && data.bounceKind === 'hard' && recipient.contactId) {
     // We deliberately do NOT flip campaignRecipient.status to 'failed': the
     // address WAS transmitted to (status stays 'sent'), and the bounce already
     // lives in ClickHouse where it surfaces under 弹回/无效邮箱. Counting it as
@@ -178,7 +254,7 @@ async function runEventJob(job: Job<EventJobData>) {
         .catch(() => undefined);
     }
   }
-  if (eventType === 'complaint') {
+  if (eventType === 'complaint' && recipient.contactId) {
     const contact = await prisma.contact.findUnique({
       where: { id: recipient.contactId },
       select: { email: true },
@@ -206,8 +282,10 @@ async function runEventJob(job: Job<EventJobData>) {
   buffer.push({
     account_id: recipient.accountId,
     campaign_id: recipient.campaignId,
-    contact_id: recipient.contactId,
+    contact_id: recipient.contactId ?? ZERO_UUID,
     recipient_id: recipient.id,
+    source_type: recipient.sourceType,
+    source_id: recipient.sourceId,
     event_type: eventType,
     // CH 24.x's DateTime64 JSON parser rejects the `Z` UTC suffix; use space
     // separator and strip Z. Column is declared `DateTime64(3, 'UTC')` so

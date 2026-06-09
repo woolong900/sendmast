@@ -50,6 +50,17 @@ export interface ShopConnectionView {
   lastSyncAt: string | null;
 }
 
+/** Per-flow engagement rollup (Klaviyo-style flow performance). */
+export interface FlowStatsView {
+  /** Sends accepted by ACS (shop_automation_sends.status='sent'). */
+  sent: number;
+  /** Unique recipients with a delivered/open/click/bounce event (ClickHouse). */
+  delivered: number;
+  opened: number;
+  clicked: number;
+  bounced: number;
+}
+
 export interface ShopAutomationView {
   id: string;
   type: ShopAutomationType;
@@ -60,6 +71,8 @@ export interface ShopAutomationView {
   fromName: string | null;
   subject: string | null;
   delayMinutes: number;
+  /** Lifetime performance for this flow. */
+  stats: FlowStatsView;
 }
 
 /**

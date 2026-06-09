@@ -10,6 +10,12 @@ export interface RewriteOptions {
   baseUrl: string;
   secret: string;
   recipientId: string;
+  /**
+   * Send source. 'automation' marks tokens with `s:'a'` so tracking resolves
+   * against `shop_automation_sends` instead of `campaign_recipients`. Defaults
+   * to 'campaign'.
+   */
+  source?: 'campaign' | 'automation';
   /** When set, utm_source/utm_medium/utm_campaign are appended to each tracked URL. */
   utm?: UtmParams;
   /**
@@ -46,6 +52,7 @@ function applyUtm(url: string, utm?: UtmParams): string {
 export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
   const links: Array<{ index: number; url: string }> = [];
   const trackClicks = opts.trackClicks !== false;
+  const src = opts.source === 'automation' ? { s: 'a' as const } : {};
   let i = 0;
 
   const rewritten = html.replace(HREF_REGEX, (match, q1: string, url: string) => {
@@ -61,15 +68,15 @@ export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
     }
     const idx = i++;
     links.push({ index: idx, url: finalUrl });
-    const token = signTrackingToken({ r: opts.recipientId, k: 'c', i: idx }, opts.secret);
+    const token = signTrackingToken({ r: opts.recipientId, k: 'c', i: idx, ...src }, opts.secret);
     const wrapped = `${opts.baseUrl.replace(/\/$/, '')}/t/c/${token}?u=${encodeURIComponent(finalUrl)}`;
     return `href=${q1}${wrapped}${q1}`;
   });
 
-  const openToken = signTrackingToken({ r: opts.recipientId, k: 'o' }, opts.secret);
+  const openToken = signTrackingToken({ r: opts.recipientId, k: 'o', ...src }, opts.secret);
   const pixel = `<img src="${opts.baseUrl.replace(/\/$/, '')}/t/o/${openToken}.gif" width="1" height="1" alt="" style="display:block;border:0" />`;
 
-  const unsubToken = signTrackingToken({ r: opts.recipientId, k: 'u' }, opts.secret);
+  const unsubToken = signTrackingToken({ r: opts.recipientId, k: 'u', ...src }, opts.secret);
   const unsubUrl = `${opts.baseUrl.replace(/\/$/, '')}/t/u/${unsubToken}`;
 
   let final = rewritten.replace(/{{unsubscribe_url}}/g, unsubUrl);

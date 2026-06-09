@@ -2,16 +2,14 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import type { Queue } from 'bullmq';
 
 /**
- * Transactional send mechanism shared by all shopyy automations.
+ * Transactional send mechanism shared by all shopyy automations (Klaviyo-style
+ * "flow send").
  *
- * Each triggered email is materialised as a hidden single-recipient campaign
- * (`isAutomation = true`) plus one `campaign_recipients` row, then pushed
- * straight onto the `send-email` queue. This reuses worker-sender's `runSend`
- * verbatim — tenant quota reservation, ACS routing, click/open tracking,
- * operation-id idempotency and bounce accounting all apply unchanged. A
- * per-send campaign (rather than one shared campaign per automation) keeps the
- * existing `@@unique([campaignId, contactId])` invariant intact so a repeat
- * customer's second order still gets its own email.
+ * Each triggered email is a first-class `shop_automation_sends` row that is
+ * sent and tracked independently — NOT a campaign. worker-sender's runFlowSend
+ * picks it off the `send-email` queue, renders the automation's template with
+ * the per-send merge vars, and applies the same quota / ACS routing / open-
+ * click-bounce tracking machinery as campaigns (source='automation').
  */
 
 export interface TransactionalParams {
@@ -21,13 +19,10 @@ export interface TransactionalParams {
   dedupKey: string;
   contactId: string;
   email: string;
-  /** Internal campaign name (never shown to the buyer). */
-  name: string;
   subject: string;
-  html: string;
   fromEmail: string;
   fromName: string;
-  /** Per-recipient {{order_total}} etc. resolved at send time. */
+  /** Per-send {{order_total}} etc. resolved at send time. */
   mergeVars: Record<string, string>;
 }
 
@@ -46,8 +41,7 @@ export function formatMoney(value: number, currency: string): string {
 
 /**
  * Resolve the ACS account a from-address routes through (its domain must be a
- * verified sender domain on this tenant). NULL = unroutable; caller records a
- * failed send so the operator can fix the sender config.
+ * verified sender domain on this tenant). NULL = unroutable.
  */
 async function resolveAcsAccountId(
   prisma: PrismaClient,
@@ -64,10 +58,9 @@ async function resolveAcsAccountId(
 }
 
 /**
- * Enqueue one transactional email. Returns the created recipient id, or null
- * when skipped (already sent for this dedupKey, or unroutable sender). Safe to
- * call from a webhook-driven path: the `ShopAutomationSend` unique index makes
- * re-delivery idempotent.
+ * Create + enqueue one flow send. Returns the send id, or null when skipped
+ * (already sent for this dedupKey, or unroutable sender). The
+ * `(automationId, dedupKey)` unique index makes webhook re-delivery idempotent.
  */
 export async function enqueueTransactional(
   deps: { prisma: PrismaClient; sendQueue: Queue },
@@ -75,19 +68,24 @@ export async function enqueueTransactional(
 ): Promise<string | null> {
   const { prisma, sendQueue } = deps;
 
-  // Reserve the dedup slot first so a re-delivered webhook can't create a
-  // second campaign before the first finishes. Unique violation = already done.
+  let sendId: string;
   try {
-    await prisma.shopAutomationSend.create({
+    const created = await prisma.shopAutomationSend.create({
       data: {
         accountId: params.accountId,
         automationId: params.automationId,
         dedupKey: params.dedupKey,
         email: params.email,
         contactId: params.contactId,
+        subject: params.subject,
+        fromEmail: params.fromEmail,
+        fromName: params.fromName,
+        mergeVars: params.mergeVars as Prisma.InputJsonValue,
         status: 'pending',
       },
+      select: { id: true },
     });
+    sendId = created.id;
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return null;
@@ -101,8 +99,8 @@ export async function enqueueTransactional(
     params.fromEmail,
   );
   if (!acsAccountId) {
-    await prisma.shopAutomationSend.updateMany({
-      where: { automationId: params.automationId, dedupKey: params.dedupKey },
+    await prisma.shopAutomationSend.update({
+      where: { id: sendId },
       data: {
         status: 'failed',
         errorMessage: `发件域名 ${params.fromEmail.split('@')[1] ?? ''} 未在本账户验证`,
@@ -111,48 +109,16 @@ export async function enqueueTransactional(
     return null;
   }
 
-  const campaign = await prisma.campaign.create({
-    data: {
-      accountId: params.accountId,
-      name: params.name,
-      subject: params.subject,
-      fromName: params.fromName,
-      fromEmail: params.fromEmail,
-      html: params.html,
-      editorMode: 'html',
-      status: 'draft',
-      isAutomation: true,
-      totalRecipients: 1,
-      utmEnabled: false,
-    },
-    select: { id: true },
-  });
-
-  const recipient = await prisma.campaignRecipient.create({
-    data: {
-      accountId: params.accountId,
-      campaignId: campaign.id,
-      contactId: params.contactId,
-      email: params.email,
-      status: 'queued',
-      fromEmail: params.fromEmail,
-      fromName: params.fromName,
-      acsAccountId,
-      mergeVars: params.mergeVars as Prisma.InputJsonValue,
-    },
-    select: { id: true },
-  });
-
-  await prisma.shopAutomationSend.updateMany({
-    where: { automationId: params.automationId, dedupKey: params.dedupKey },
-    data: { status: 'sent', recipientId: recipient.id },
+  await prisma.shopAutomationSend.update({
+    where: { id: sendId },
+    data: { acsAccountId, status: 'queued' },
   });
 
   await sendQueue.add(
     'send',
-    { recipientId: recipient.id, acsAccountId },
-    { jobId: `r-${recipient.id}`, removeOnComplete: true, removeOnFail: { age: 86400 * 7 } },
+    { flowSendId: sendId, acsAccountId },
+    { jobId: `f-${sendId}`, removeOnComplete: true, removeOnFail: { age: 86400 * 7 } },
   );
 
-  return recipient.id;
+  return sendId;
 }

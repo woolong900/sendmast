@@ -709,10 +709,6 @@ model Campaign {
   thumbnail        String?
   thumbnailPending Boolean        @default(false) @map("thumbnail_pending")
   status           CampaignStatus @default(draft)
-  /// Hidden system campaign backing a transactional/automation send (one per
-  /// triggered email). Excluded from all tenant-facing campaign lists, status
-  /// counts and dashboard rollups. Normal campaigns are false.
-  isAutomation     Boolean        @default(false) @map("is_automation")
   scheduledAt      DateTime?      @map("scheduled_at")
   sendingStartedAt DateTime?      @map("sending_started_at")
   sentAt           DateTime?      @map("sent_at")
@@ -859,10 +855,6 @@ model CampaignRecipient {
   /// against later membership changes. NULL = matched only via a segment, or
   /// legacy pre-feature rows.
   listName     String?         @map("list_name")
-  /// Per-recipient merge values resolved into system tags at send time
-  /// (e.g. {{order_total}}, {{tracking_url}} for transactional automation
-  /// sends). NULL for ordinary bulk-campaign recipients.
-  mergeVars    Json?           @map("merge_vars")
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
 
@@ -1166,25 +1158,40 @@ model ShopAutomation {
   @@map("shop_automations")
 }
 
-/// Idempotency + audit ledger for automation sends. `@@unique([automationId,
-/// dedupKey])` guarantees a re-delivered webhook (same order/checkout) never
-/// double-sends.
+/// A single flow-message send — the Klaviyo-style first-class, independently
+/// tracked transactional/automation email (NOT a campaign). Replaces the old
+/// hidden-campaign-per-send borrow. Open/click/unsubscribe events and ACS
+/// delivery/bounce reports resolve back to this row (by `id` for the tracking
+/// pixel/links, by `messageId` for ACS reports). `@@unique([automationId,
+/// dedupKey])` makes a re-delivered webhook (same order/checkout) idempotent.
 model ShopAutomationSend {
-  id           String   @id @default(uuid()) @db.Uuid
-  accountId    String   @map("account_id") @db.Uuid
-  automationId String   @map("automation_id") @db.Uuid
-  dedupKey     String   @map("dedup_key")
+  id           String    @id @default(uuid()) @db.Uuid
+  accountId    String    @map("account_id") @db.Uuid
+  automationId String    @map("automation_id") @db.Uuid
+  dedupKey     String    @map("dedup_key")
   email        String
-  contactId    String?  @map("contact_id") @db.Uuid
-  status       String   @default("sent")
-  recipientId  String?  @map("recipient_id") @db.Uuid
-  errorMessage String?  @map("error_message")
-  createdAt    DateTime @default(now()) @map("created_at")
+  contactId    String?   @map("contact_id") @db.Uuid
+  /// Lifecycle: pending → queued → sent | failed | skipped.
+  status       String    @default("pending")
+  /// ACS operationId, echoed back as messageId on delivery/bounce reports.
+  messageId    String?   @map("message_id")
+  /// ACS account the send is routed through (resolved from the sender domain).
+  acsAccountId String?   @map("acs_account_id") @db.Uuid
+  /// Sender snapshot at send time.
+  fromEmail    String?   @map("from_email")
+  fromName     String?   @map("from_name")
+  subject      String?
+  /// Per-send merge values ({{order_total}}, {{tracking_url}}, ...).
+  mergeVars    Json?     @map("merge_vars")
+  errorMessage String?   @map("error_message")
+  sentAt       DateTime? @map("sent_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
 
   automation ShopAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
 
   @@unique([automationId, dedupKey])
   @@index([accountId, createdAt])
+  @@index([messageId])
   @@map("shop_automation_sends")
 }
 

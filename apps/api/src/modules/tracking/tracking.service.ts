@@ -40,6 +40,9 @@ export class TrackingService {
     await this.queue.add(QUEUE_NAMES.EVENTS_INGEST, 'event', {
       kind: input.payload.k,
       recipientId: input.payload.r,
+      // 'a' = the id points at a flow send (shop_automation_sends), not a
+      // campaign recipient; worker-events resolves accordingly.
+      source: input.payload.s,
       linkIndex: input.payload.i,
       linkUrl: input.linkUrl,
       ip: input.ip,
@@ -49,11 +52,22 @@ export class TrackingService {
     });
   }
 
-  async resolveRecipient(recipientId: string) {
-    return this.prisma.campaignRecipient.findUnique({
-      where: { id: recipientId },
-      include: { campaign: true },
+  /** Resolve the (accountId, email) a token's send unit belongs to. */
+  private async resolveSendIdentity(
+    payload: TrackingPayload,
+  ): Promise<{ accountId: string; email: string } | null> {
+    if (payload.s === 'a') {
+      const send = await this.prisma.shopAutomationSend.findUnique({
+        where: { id: payload.r },
+        select: { accountId: true, email: true },
+      });
+      return send ? { accountId: send.accountId, email: send.email } : null;
+    }
+    const recipient = await this.prisma.campaignRecipient.findUnique({
+      where: { id: payload.r },
+      select: { accountId: true, email: true },
     });
+    return recipient ? { accountId: recipient.accountId, email: recipient.email } : null;
   }
 
   async unsubscribeByToken(
@@ -61,14 +75,10 @@ export class TrackingService {
     reason?: string,
   ): Promise<{ ok: boolean; email?: string }> {
     if (payload.k !== 'u') return { ok: false };
-    const recipient = await this.prisma.campaignRecipient.findUnique({
-      where: { id: payload.r },
-      include: { campaign: true },
-    });
-    if (!recipient) return { ok: false };
+    const identity = await this.resolveSendIdentity(payload);
+    if (!identity) return { ok: false };
 
-    const accountId = recipient.accountId;
-    const email = recipient.email;
+    const { accountId, email } = identity;
 
     await this.prisma.$transaction([
       this.prisma.contact.updateMany({

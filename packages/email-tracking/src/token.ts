@@ -1,12 +1,22 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export interface TrackingPayload {
-  /** recipient id (campaign_recipient row uuid) */
+  /**
+   * Send-unit id. When `s` is absent this is a `campaign_recipients` row uuid
+   * (the default / legacy form); when `s === 'a'` it is a
+   * `shop_automation_sends` (flow-send) row uuid.
+   */
   r: string;
   /** kind: open / click / unsubscribe */
   k: 'o' | 'c' | 'u';
   /** optional click target index (which link) */
   i?: number;
+  /**
+   * Source discriminator. Absent = campaign recipient (backward compatible
+   * with tokens already embedded in delivered inboxes). 'a' = automation /
+   * flow send.
+   */
+  s?: 'a';
 }
 
 const SEP = '.';

@@ -185,7 +185,7 @@ export class CampaignService {
   ) {}
 
   async list(accountId: string, query: ListCampaignsQuery) {
-    const where: Prisma.CampaignWhereInput = { accountId, isAutomation: false };
+    const where: Prisma.CampaignWhereInput = { accountId };
     if (query.status) where.status = query.status;
     if (query.search)
       where.OR = [
@@ -300,7 +300,7 @@ export class CampaignService {
   async statusCounts(accountId: string) {
     const groups = await this.prisma.campaign.groupBy({
       by: ['status'],
-      where: { accountId, isAutomation: false },
+      where: { accountId },
       _count: { _all: true },
     });
     const out: Record<string, number> = { sending: 0, scheduled: 0, sent: 0, draft: 0 };

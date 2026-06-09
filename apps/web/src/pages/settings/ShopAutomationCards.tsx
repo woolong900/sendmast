@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
 import {
   SHOP_AUTOMATION_LABELS,
+  type FlowStatsView,
   type ShopAutomationType,
   type ShopAutomationView,
   type SenderDomainView,
@@ -72,6 +73,27 @@ export function ShopAutomationCards({ connectionId }: { connectionId: string }) 
           templates={templates.data ?? []}
           senderOptions={senderOptions}
         />
+      ))}
+    </div>
+  );
+}
+
+function FlowStats({ stats }: { stats: FlowStatsView }) {
+  const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 1000) / 10}%` : '—');
+  const items = [
+    { label: '已发送', value: String(stats.sent) },
+    { label: '送达', value: String(stats.delivered) },
+    { label: '打开率', value: pct(stats.opened, stats.delivered || stats.sent) },
+    { label: '点击率', value: pct(stats.clicked, stats.delivered || stats.sent) },
+    { label: '退信', value: String(stats.bounced) },
+  ];
+  return (
+    <div className="grid grid-cols-5 gap-2 rounded-md bg-muted/40 px-3 py-2">
+      {items.map((it) => (
+        <div key={it.label} className="text-center">
+          <div className="text-sm font-semibold tabular-nums">{it.value}</div>
+          <div className="text-[11px] text-muted-foreground">{it.label}</div>
+        </div>
       ))}
     </div>
   );
@@ -194,6 +216,8 @@ function AutomationCard({
             </label>
           )}
         </div>
+
+        <FlowStats stats={automation.stats} />
 
         {senderOptions.length === 0 && (
           <p className="text-xs text-amber-600">

@@ -71,9 +71,15 @@ interface DispatchJobData {
 }
 
 interface SendJobData {
-  recipientId: string;
+  /** Campaign send: a campaign_recipients row id. */
+  recipientId?: string;
+  /** Flow/automation send: a shop_automation_sends row id (Klaviyo-style). */
+  flowSendId?: string;
   acsAccountId: string;
 }
+
+/** Automation types that are transactional (no unsubscribe, sent regardless of opt-out). */
+const TRANSACTIONAL_AUTOMATIONS = new Set(['order_paid', 'order_shipped']);
 
 // ============================================================================
 // AcsAccount cache (rebuilt by tick at most every 30s)
@@ -511,6 +517,7 @@ async function loadCustomTagIndex(accountId: string): Promise<Map<string, string
 // ============================================================================
 
 async function runSend(job: Job<SendJobData>) {
+  if (!job.data.recipientId) return;
   const r = await prisma.campaignRecipient.findUnique({
     where: { id: job.data.recipientId },
     include: { campaign: true },
@@ -611,9 +618,6 @@ async function runSend(job: Job<SendJobData>) {
     // segment or is a legacy pre-feature row.
     listName: r.listName ?? '',
     unsubscribeUrl: unsubUrl,
-    // Per-recipient transactional values (order_total, tracking_url, ...) for
-    // automation sends; null/absent for ordinary bulk campaigns.
-    mergeVars: (r.mergeVars as Record<string, string> | null) ?? null,
   };
 
   // Order matters: system tags first, custom tags second, then link rewrite.
@@ -803,6 +807,184 @@ async function maybeFinaliseCampaign(campaignId: string): Promise<void> {
 }
 
 // ============================================================================
+// Flow send — a Klaviyo-style first-class transactional/automation email. Not
+// a campaign: it carries its own template + per-send merge vars and is tracked
+// independently (source='automation'). Reuses the same tag-substitution,
+// tracking-rewrite, transport, quota and ACS-dedup machinery as runSend, but
+// reads/writes status on shop_automation_sends instead of campaign_recipients.
+// ============================================================================
+
+async function runFlowSend(job: Job<SendJobData>) {
+  const sendId = job.data.flowSendId!;
+  const send = await prisma.shopAutomationSend.findUnique({
+    where: { id: sendId },
+    include: { automation: true },
+  });
+  if (!send) return;
+  if (send.status === 'sent' || send.status === 'failed' || send.status === 'skipped') return;
+
+  const automation = send.automation;
+  const transactional = TRANSACTIONAL_AUTOMATIONS.has(automation.type);
+
+  const fail = (msg: string, terminal: 'failed' | 'skipped' = 'failed') =>
+    prisma.shopAutomationSend.update({
+      where: { id: sendId },
+      data: { status: terminal, errorMessage: terminal === 'failed' ? msg : null },
+    });
+
+  if (!automation.enabled || !automation.templateId) {
+    await fail('自动化已停用或未配置模板', 'skipped');
+    return;
+  }
+  const fromEmail = send.fromEmail ?? automation.fromEmail;
+  const fromName = send.fromName ?? automation.fromName ?? fromEmail?.split('@')[0] ?? 'Store';
+  if (!fromEmail) {
+    await fail('自动化未配置发件邮箱');
+    return;
+  }
+
+  // Marketing flows (abandoned cart) respect opt-out; transactional ones
+  // (order paid/shipped) send regardless — order confirmations are exempt.
+  const contact = await prisma.contact.findUnique({
+    where: { id: send.contactId ?? '00000000-0000-0000-0000-000000000000' },
+    select: { firstName: true, lastName: true, subscriptionStatus: true },
+  });
+  if (!transactional && contact && contact.subscriptionStatus !== 'subscribed') {
+    await fail('联系人已退订/被抑制', 'skipped');
+    return;
+  }
+
+  const tpl = await prisma.emailTemplate.findUnique({
+    where: { id: automation.templateId },
+    select: { html: true },
+  });
+  if (!tpl?.html) {
+    await fail('自动化邮件模板不存在或为空');
+    return;
+  }
+
+  const acct = await getAcsAccount(job.data.acsAccountId);
+  if (!acct) {
+    await fail('ACS 账号已不存在');
+    return;
+  }
+  if (acct.status !== 'active') {
+    await fail(`ACS 账号 ${acct.name} 当前状态为 ${acct.status}`);
+    return;
+  }
+
+  const trackingDomains = await getActiveTrackingDomains(prisma);
+  const trackingHost = pickTrackingHost(trackingDomains, send.id);
+  if (!trackingHost) {
+    await fail('追踪域名池为空,请联系管理员添加追踪域名');
+    return;
+  }
+  const trackingBaseUrl = `https://${trackingHost}`;
+
+  // Unsubscribe only for marketing flows. Token is source-tagged ('a') so the
+  // tracking endpoint resolves it against shop_automation_sends.
+  const unsubUrl = transactional
+    ? ''
+    : `${trackingBaseUrl}/t/u/${signTrackingToken({ r: send.id, k: 'u', s: 'a' }, TRACKING_SECRET!)}`;
+
+  const subject = send.subject?.trim() || automation.subject?.trim() || '通知';
+  const mergeVars = (send.mergeVars as Record<string, string> | null) ?? null;
+
+  const sysCtx = {
+    contact: {
+      email: send.email,
+      firstName: contact?.firstName ?? null,
+      lastName: contact?.lastName ?? null,
+    },
+    // Flow sends have no campaign; expose the automation id as campaign_id so
+    // {{campaign_id}} / UTM still resolve to a stable identifier.
+    campaign: { id: automation.id, name: subject, fromEmail },
+    listName: '',
+    unsubscribeUrl: unsubUrl,
+    mergeVars,
+  };
+
+  const tagIndex = await loadCustomTagIndex(send.accountId);
+  const subjectOut = applyCustomTags(applySystemTags(subject, sysCtx, 'text'), tagIndex, 'text');
+  // Marketing emails get the unsubscribe footer; transactional ones never do.
+  const bodyBase = transactional ? tpl.html : ensureUnsubscribeFooter(tpl.html);
+  const bodyHtmlSys = applySystemTags(bodyBase, sysCtx, 'html');
+  const bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
+
+  const { html } = rewriteHtml(bodyHtml, {
+    baseUrl: trackingBaseUrl,
+    secret: TRACKING_SECRET!,
+    recipientId: send.id,
+    source: 'automation',
+    trackClicks: true,
+  });
+
+  let transport;
+  try {
+    transport = await getTransportForAccount(acct);
+  } catch (err) {
+    await fail(err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+
+  const reserved = await prisma.account.updateMany({
+    where: { id: send.accountId, sendQuotaRemaining: { gt: 0 } },
+    data: { sendQuotaRemaining: { decrement: 1 } },
+  });
+  if (reserved.count === 0) {
+    await fail('租户发送额度不足');
+    return;
+  }
+
+  const operationId = send.messageId ?? randomUUID();
+  if (!send.messageId) {
+    await prisma.shopAutomationSend.update({
+      where: { id: sendId },
+      data: { messageId: operationId },
+    });
+  }
+
+  const headers: Record<string, string> = {
+    'X-SendMast-FlowSend': send.id,
+    'X-SendMast-Automation': automation.id,
+  };
+  if (!transactional && unsubUrl) {
+    headers['List-Unsubscribe'] = `<${unsubUrl}>, <mailto:unsubscribe@${fromEmail.split('@')[1]}>`;
+    headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+  }
+
+  const result = await transport.send({
+    from: { name: fromName, address: fromEmail },
+    to: send.email,
+    subject: subjectOut,
+    html,
+    operationId,
+    headers,
+  });
+
+  const duplicateOperation =
+    !result.ok &&
+    /operation ?id already exists/i.test(`${result.errorMessage ?? ''} ${result.errorCode ?? ''}`);
+
+  if (result.ok || duplicateOperation) {
+    await prisma.shopAutomationSend.update({
+      where: { id: sendId },
+      data: { status: 'sent', messageId: operationId, sentAt: new Date(), errorMessage: null },
+    });
+    try {
+      await quota.consume(job.data.acsAccountId, acct, 1);
+    } catch {}
+    return;
+  }
+
+  await prisma.shopAutomationSend.update({
+    where: { id: sendId },
+    data: { status: 'failed', errorMessage: result.errorMessage ?? 'ACS 发送失败' },
+  });
+  throw new Error(result.errorMessage ?? `ACS send failed (${result.providerStatus})`);
+}
+
+// ============================================================================
 // Workers + bootstrap
 // ============================================================================
 
@@ -811,10 +993,14 @@ new Worker<DispatchJobData>(QUEUE_NAMES.SEND_CAMPAIGN, runDispatch, {
   concurrency: 4,
 });
 
-new Worker<SendJobData>(QUEUE_NAMES.SEND_EMAIL, runSend, {
-  connection,
-  concurrency: SEND_CONCURRENCY,
-});
+new Worker<SendJobData>(
+  QUEUE_NAMES.SEND_EMAIL,
+  (job) => (job.data.flowSendId ? runFlowSend(job) : runSend(job)),
+  {
+    connection,
+    concurrency: SEND_CONCURRENCY,
+  },
+);
 
 // Tick worker. concurrency=1 across this process; if multiple worker hosts
 // run, BullMQ ensures each repeated occurrence is delivered to one consumer.

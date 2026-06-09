@@ -13,9 +13,12 @@ import {
   ShopyyAuthError,
   ShopyyClient,
 } from '@sendmast/shopyy';
+import { getAutomationEngagement } from '@sendmast/clickhouse';
+import { ClickHouseService } from '../../common/clickhouse/clickhouse.service';
 import {
   SHOP_AUTOMATION_TYPES,
   type ConnectShopyyInput,
+  type FlowStatsView,
   type ShopAutomationType as ShopAutomationTypeDto,
   type ShopAutomationView,
   type ShopConnectionView,
@@ -43,7 +46,7 @@ function parseExpiredAt(v: string | number | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function toAutomationView(a: ShopAutomation): ShopAutomationView {
+function toAutomationView(a: ShopAutomation, stats: FlowStatsView): ShopAutomationView {
   return {
     id: a.id,
     type: a.type,
@@ -54,8 +57,10 @@ function toAutomationView(a: ShopAutomation): ShopAutomationView {
     fromName: a.fromName,
     subject: a.subject,
     delayMinutes: a.delayMinutes,
+    stats,
   };
 }
+
 
 function toView(c: ShopConnection): ShopConnectionView {
   return {
@@ -79,6 +84,7 @@ export class IntegrationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly ch: ClickHouseService,
   ) {}
 
   /** Whether the partnership app secret is present (gates the connect flow). */
@@ -205,6 +211,25 @@ export class IntegrationsService {
     }
   }
 
+  /** PG sent count + ClickHouse engagement for one flow. Best-effort on CH outage. */
+  private async automationStats(
+    accountId: string,
+    automationId: string,
+  ): Promise<FlowStatsView> {
+    const [sent, engagement] = await Promise.all([
+      this.prisma.shopAutomationSend.count({
+        where: { automationId, status: 'sent' },
+      }),
+      getAutomationEngagement(this.ch.client, { accountId, automationId }).catch(() => ({
+        delivered: 0,
+        opened: 0,
+        clicked: 0,
+        bounced: 0,
+      })),
+    ]);
+    return { sent, ...engagement };
+  }
+
   /** Verify the store belongs to this tenant; throws 404 otherwise. */
   private async assertConnection(
     accountId: string,
@@ -246,7 +271,9 @@ export class IntegrationsService {
     });
     const order = SHOP_AUTOMATION_TYPES;
     rows.sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
-    return rows.map(toAutomationView);
+    return Promise.all(
+      rows.map(async (a) => toAutomationView(a, await this.automationStats(accountId, a.id))),
+    );
   }
 
   async updateAutomation(
@@ -289,7 +316,7 @@ export class IntegrationsService {
       },
       update: { ...input },
     });
-    return toAutomationView(updated);
+    return toAutomationView(updated, await this.automationStats(accountId, updated.id));
   }
 
   async disconnect(accountId: string, id: string): Promise<{ ok: true }> {

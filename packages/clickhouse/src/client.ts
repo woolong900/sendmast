@@ -64,6 +64,9 @@ export type EmailEventType =
  */
 export type BounceKind = '' | 'hard' | 'soft';
 
+/** Zero UUID used for `campaign_id` on flow-send events (no owning campaign). */
+export const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+
 export interface EmailEventRow {
   account_id: string;
   campaign_id: string;
@@ -77,6 +80,10 @@ export interface EmailEventRow {
   raw_meta?: string | null;
   /** Only meaningful when event_type='bounce'; '' otherwise. */
   bounce_kind?: BounceKind;
+  /** 'campaign' (default) or 'flow'. Separates campaign vs automation analytics. */
+  source_type?: 'campaign' | 'flow';
+  /** Automation/flow id for flow events; null for campaign events. */
+  source_id?: string | null;
 }
 
 export async function insertEmailEvents(
@@ -160,11 +167,14 @@ export async function findLastClick(
   opts: { accountId: string; contactId: string; withinDays: number },
 ): Promise<{ campaignId: string; clickTime: string } | null> {
   const r = await client.query({
+    // source_type='campaign' so a click on a flow email (campaign_id = zero
+    // UUID) can't mis-attribute an order to a non-existent campaign.
     query: `SELECT campaign_id, event_time
             FROM sendmast.email_events
             WHERE account_id = {accountId:UUID}
               AND contact_id = {contactId:UUID}
               AND event_type = 'click'
+              AND source_type = 'campaign'
               AND event_time >= now() - INTERVAL {days:UInt16} DAY
             ORDER BY event_time DESC
             LIMIT 1`,
@@ -238,6 +248,50 @@ export async function getAccountSales(
     revenue: Number(row?.revenue ?? 0),
     currency: row?.currency || 'USD',
   };
+}
+
+// ---------------------------------------------------------------------------
+// Flow (automation) engagement analytics
+// ---------------------------------------------------------------------------
+
+/** Unique-recipient engagement counts for one flow/automation. */
+export interface FlowEngagement {
+  delivered: number;
+  opened: number;
+  clicked: number;
+  bounced: number;
+}
+
+/**
+ * Per-automation engagement from email_events (source_type='flow'). Counts
+ * unique flow-sends (recipient_id) per event type so a recipient opening twice
+ * counts once. `sent` is tracked in Postgres (shop_automation_sends), not here.
+ */
+export async function getAutomationEngagement(
+  client: ClickHouseClient,
+  opts: { accountId: string; automationId: string },
+): Promise<FlowEngagement> {
+  const r = await client.query({
+    query: `SELECT event_type, toString(uniqExact(recipient_id)) AS uniques
+            FROM sendmast.email_events
+            WHERE account_id = {accountId:UUID}
+              AND source_type = 'flow'
+              AND source_id = {automationId:UUID}
+              AND event_type IN ('delivered','open','click','bounce')
+            GROUP BY event_type`,
+    query_params: { accountId: opts.accountId, automationId: opts.automationId },
+    format: 'JSONEachRow',
+  });
+  const rows = (await r.json()) as Array<{ event_type: string; uniques: string }>;
+  const out: FlowEngagement = { delivered: 0, opened: 0, clicked: 0, bounced: 0 };
+  for (const row of rows) {
+    const n = Number(row.uniques);
+    if (row.event_type === 'delivered') out.delivered = n;
+    else if (row.event_type === 'open') out.opened = n;
+    else if (row.event_type === 'click') out.clicked = n;
+    else if (row.event_type === 'bounce') out.bounced = n;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
