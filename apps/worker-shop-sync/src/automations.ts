@@ -29,8 +29,12 @@ export interface OrderContext {
   value: number;
   currency: string;
   trackingUrl?: string;
-  /** Raw order webhook payload, used to render the {{order_items}} list. */
-  rawPayload?: Record<string, unknown>;
+  /** Logistics tracking number, present on shipped orders. */
+  trackingNumber?: string;
+  /** Order line items, rendered into the `{{order_items}}` merge var. */
+  items?: LineItem[];
+  /** Shipping address as plain-text lines, rendered into `{{shipping_address}}`. */
+  addressLines?: string[];
 }
 
 export interface CheckoutContext {
@@ -173,17 +177,28 @@ ${rows}
             </table>`;
 }
 
+/**
+ * Render the shipping address lines into an email-safe HTML fragment (one line
+ * per row, joined by <br>). Dynamic text is escaped because worker-sender
+ * injects html-merge vars verbatim. Returns '' when there's no address.
+ */
+export function renderShippingAddressHtml(lines: string[]): string {
+  if (lines.length === 0) return '';
+  return lines.map((l) => escapeHtml(l)).join('<br>');
+}
+
 function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Record<string, string> {
-  const itemsHtml = ctx.rawPayload
-    ? renderOrderItemsHtml(mapLineItems(ctx.rawPayload))
-    : '';
+  const itemsHtml = renderOrderItemsHtml(ctx.items ?? []);
+  const addressHtml = renderShippingAddressHtml(ctx.addressLines ?? []);
   return {
     ...shopName,
     order_no: ctx.orderNo ?? ctx.externalOrderId,
     order_total: formatMoney(ctx.value, ctx.currency),
     order_currency: ctx.currency,
     ...(ctx.trackingUrl ? { tracking_url: ctx.trackingUrl } : {}),
+    ...(ctx.trackingNumber ? { tracking_number: ctx.trackingNumber } : {}),
     ...(itemsHtml ? { order_items: itemsHtml } : {}),
+    ...(addressHtml ? { shipping_address: addressHtml } : {}),
   };
 }
 

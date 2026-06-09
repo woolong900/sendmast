@@ -10,7 +10,7 @@ import {
   toClickHouseDateTime,
 } from '@sendmast/clickhouse';
 import { QUEUE_NAMES, type ShopEventJob } from '@sendmast/shared';
-import { mapCheckout, mapOrder } from './mapper.js';
+import { mapCheckout, mapLineItems, mapOrder, mapShippingAddressLines } from './mapper.js';
 import {
   runAbandonedFromOrder,
   runAbandonedRecovery,
@@ -163,7 +163,9 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
     value: order.value,
     currency: order.currency,
     trackingUrl: order.trackingUrl,
-    rawPayload: job.payload as Record<string, unknown>,
+    trackingNumber: order.trackingNumber,
+    items: mapLineItems(job.payload),
+    addressLines: mapShippingAddressLines(job.payload),
   };
   try {
     if (shipped) await triggerOrderShipped(deps, ctx);

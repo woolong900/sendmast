@@ -74,6 +74,8 @@ export interface NormalizedOrder {
   orderTime: Date;
   /** Logistics tracking URL, when present on a shipped/fulfilled payload. */
   trackingUrl?: string;
+  /** Logistics tracking number, when present on a shipped/fulfilled payload. */
+  trackingNumber?: string;
   /** Pay-now / view-order URL, used by the abandoned-order recall email. */
   payUrl?: string;
 }
@@ -89,6 +91,61 @@ function pickTrackingUrl(o: Json): string | undefined {
     asObject(o.logistics) ??
     asObject(o.shipping);
   return sub ? pickStr(sub, [...keys, 'url']) : undefined;
+}
+
+/** Tracking number — same nesting story as the tracking URL. */
+function pickTrackingNumber(o: Json): string | undefined {
+  const keys = [
+    'tracking_number',
+    'trackingNumber',
+    'tracking_no',
+    'trackingNo',
+    'track_number',
+    'waybill',
+    'waybill_no',
+    'logistics_no',
+    'express_no',
+    'shipment_number',
+  ];
+  const direct = pickStr(o, keys);
+  if (direct) return direct;
+  const sub =
+    asObject(o.fulfillment) ??
+    asObject(o.shipment) ??
+    asObject(o.logistics) ??
+    asObject(o.shipping);
+  return sub ? pickStr(sub, [...keys, 'number', 'no']) : undefined;
+}
+
+/**
+ * Extract the shipping address as plain-text lines (name / street / city,
+ * province, zip / country / phone). Reads candidate field names like the rest
+ * of the mapper; returns [] when no address object is present. The caller
+ * (automations) escapes + joins these into an HTML fragment.
+ */
+export function mapShippingAddressLines(payload: Json): string[] {
+  const o = unwrap(payload, ['order', 'data', 'resource']);
+  const addr =
+    asObject(o.shipping_address) ??
+    asObject(o.shippingAddress) ??
+    asObject(o.shipping) ??
+    asObject(o.address) ??
+    asObject(o.consignee) ??
+    asObject(o.receiver) ??
+    asObject(o.delivery_address);
+  if (!addr) return [];
+  const name = pickStr(addr, ['name', 'full_name', 'fullName', 'consignee', 'receiver', 'contact_name', 'recipient']);
+  const line1 = pickStr(addr, ['address1', 'address_1', 'address', 'addr', 'street', 'detail', 'line1', 'address_line1']);
+  const line2 = pickStr(addr, ['address2', 'address_2', 'line2', 'apt', 'suite', 'address_line2']);
+  const city = pickStr(addr, ['city', 'town']);
+  const province = pickStr(addr, ['province', 'state', 'region', 'area', 'prefecture']);
+  const zip = pickStr(addr, ['zip', 'postal_code', 'postalCode', 'postcode', 'zip_code']);
+  const country = pickStr(addr, ['country', 'country_name', 'countryName', 'country_code']);
+  const phone = pickStr(addr, ['phone', 'tel', 'mobile', 'telephone', 'phone_number']);
+  const cityLine = [city, province, zip].filter(Boolean).join(', ');
+  return [name, line1, line2, cityLine, country, phone].filter(
+    (l): l is string => !!l && l.length > 0,
+  );
 }
 
 export function mapOrder(payload: Json): NormalizedOrder | null {
@@ -124,6 +181,7 @@ export function mapOrder(payload: Json): NormalizedOrder | null {
       'updated_at',
     ]),
     trackingUrl: pickTrackingUrl(o),
+    trackingNumber: pickTrackingNumber(o),
     payUrl: pickStr(o, [
       'pay_url',
       'payment_url',
