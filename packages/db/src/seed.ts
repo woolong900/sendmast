@@ -5,6 +5,16 @@ import {
   abandonedCartHtml,
   abandonedCartMjml,
 } from './abandoned-cart-template';
+import {
+  orderConfirmationDesignJson,
+  orderConfirmationHtml,
+  orderConfirmationMjml,
+} from './order-confirmation-template';
+import {
+  orderShippedDesignJson,
+  orderShippedHtml,
+  orderShippedMjml,
+} from './order-shipped-template';
 
 const prisma = new PrismaClient();
 
@@ -33,6 +43,18 @@ const SYSTEM_TEMPLATES: Array<{
     mjml: abandonedCartMjml,
     html: abandonedCartHtml,
     designJson: abandonedCartDesignJson,
+  },
+  {
+    name: '订单确认通知（默认）',
+    mjml: orderConfirmationMjml,
+    html: orderConfirmationHtml,
+    designJson: orderConfirmationDesignJson,
+  },
+  {
+    name: '订单发货通知（默认）',
+    mjml: orderShippedMjml,
+    html: orderShippedHtml,
+    designJson: orderShippedDesignJson,
   },
 ];
 
@@ -65,6 +87,8 @@ function deterministicId(name: string): string {
     'Product Launch': '00000000-0000-4000-8000-000000000002',
     Newsletter: '00000000-0000-4000-8000-000000000003',
     '弃单召回（默认）': '00000000-0000-4000-8000-000000000004',
+    '订单确认通知（默认）': '00000000-0000-4000-8000-000000000005',
+    '订单发货通知（默认）': '00000000-0000-4000-8000-000000000006',
   };
   return map[name] ?? randomUUID();
 }
