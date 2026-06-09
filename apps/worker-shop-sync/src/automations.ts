@@ -93,7 +93,7 @@ const DEFAULT_SUBJECT: Record<ShopAutomationType, string> = {
 async function shopNameMergeVar(
   prisma: PrismaClient,
   shopConnectionId: string,
-): Promise<{ shop_name: string }> {
+): Promise<Record<string, string>> {
   const conn = await prisma.shopConnection.findUnique({
     where: { id: shopConnectionId },
     select: { shopName: true, shopDomain: true },
@@ -171,7 +171,7 @@ ${rows}
             </table>`;
 }
 
-function orderMergeVars(ctx: OrderContext, shopName: { shop_name: string }): Record<string, string> {
+function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Record<string, string> {
   return {
     ...shopName,
     order_no: ctx.orderNo ?? ctx.externalOrderId,
