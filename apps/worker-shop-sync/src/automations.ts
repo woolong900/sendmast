@@ -29,6 +29,8 @@ export interface OrderContext {
   value: number;
   currency: string;
   trackingUrl?: string;
+  /** Raw order webhook payload, used to render the {{order_items}} list. */
+  rawPayload?: Record<string, unknown>;
 }
 
 export interface CheckoutContext {
@@ -172,12 +174,16 @@ ${rows}
 }
 
 function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Record<string, string> {
+  const itemsHtml = ctx.rawPayload
+    ? renderOrderItemsHtml(mapLineItems(ctx.rawPayload))
+    : '';
   return {
     ...shopName,
     order_no: ctx.orderNo ?? ctx.externalOrderId,
     order_total: formatMoney(ctx.value, ctx.currency),
     order_currency: ctx.currency,
     ...(ctx.trackingUrl ? { tracking_url: ctx.trackingUrl } : {}),
+    ...(itemsHtml ? { order_items: itemsHtml } : {}),
   };
 }
 

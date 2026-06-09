@@ -163,6 +163,7 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
     value: order.value,
     currency: order.currency,
     trackingUrl: order.trackingUrl,
+    rawPayload: job.payload as Record<string, unknown>,
   };
   try {
     if (shipped) await triggerOrderShipped(deps, ctx);
