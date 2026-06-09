@@ -1134,11 +1134,11 @@ export function CampaignWizardPage() {
               // because their wrappers are not fixed.
               <div className="fixed inset-0 z-50 flex flex-col bg-background">
                 <div className="flex items-center gap-3 border-b bg-background py-2 pr-4">
-                  <Button variant="outline" size="sm" onClick={handleExit}>
+                  <Button variant="outline" onClick={handleExit}>
                     <LogOut className="mr-1.5 size-4" />
                     退出编辑
                   </Button>
-                  <VariablesHelper variant="button" />
+                  <VariablesHelper variant="button" size="default" />
                   {saveContentMut.isError && (
                     <div className="ml-auto mr-2 truncate text-xs text-destructive">
                       {apiErrMessage(saveContentMut.error)}
@@ -2054,11 +2054,11 @@ function HtmlEditorStep({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       <div className="flex items-center gap-3 border-b bg-background py-2 pr-4">
-        <Button variant="outline" size="sm" onClick={handleExit}>
+        <Button variant="outline" onClick={handleExit}>
           <LogOut className="mr-1.5 size-4" />
           退出编辑
         </Button>
-        <VariablesHelper variant="button" />
+        <VariablesHelper variant="button" size="default" />
         <span className="text-xs text-muted-foreground">HTML 模式</span>
         {saveError && (
           <div className="ml-auto mr-2 truncate text-xs text-destructive">{saveError}</div>

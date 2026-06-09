@@ -18,8 +18,10 @@ import { api } from '@/lib/api';
  */
 export function VariablesHelper({
   variant = 'link',
+  size = 'sm',
 }: {
   variant?: 'link' | 'button';
+  size?: 'sm' | 'default';
 }) {
   const [open, setOpen] = useState(false);
   const toast = useToast();
@@ -41,7 +43,7 @@ export function VariablesHelper({
 
   const trigger =
     variant === 'button' ? (
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <Button type="button" variant="outline" size={size} onClick={() => setOpen(true)}>
         <Braces className="mr-1.5 size-4" />
         插入变量
       </Button>
