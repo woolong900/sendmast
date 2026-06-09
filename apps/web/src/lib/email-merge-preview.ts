@@ -1,10 +1,8 @@
-import type { IEmailTemplate } from 'easy-email-editor';
-
 /**
  * Sample cart line-item HTML — mirrors worker-shop-sync's renderOrderItemsHtml
- * layout so the template editor shows a realistic product list. Never stored
- * in the DB; swapped in only for canvas/preview and restored to
- * `{{order_items}}` on save.
+ * layout so the "预览" modal shows a realistic product list. Never stored in
+ * the DB and never injected into the editing canvas — used only to render the
+ * preview HTML so the user can see how the merge tags will look when sent.
  */
 export const SAMPLE_ORDER_ITEMS_HTML = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-spacing:0; border-collapse:collapse; margin:0 0 24px;">
               <tr>
@@ -17,7 +15,7 @@ export const SAMPLE_ORDER_ITEMS_HTML = `<table role="presentation" width="100%" 
               </tr>
             </table>`;
 
-/** Preview values for automation merge tags (editor / preview only). */
+/** Preview values for automation merge tags (preview modal only). */
 export const MERGE_PREVIEW_SAMPLES: Record<string, string> = {
   shop_name: 'Acme Store',
   full_name: 'Jane Doe',
@@ -31,69 +29,6 @@ export const MERGE_PREVIEW_SAMPLES: Record<string, string> = {
 
 const ORDER_ITEMS_TAG = '{{order_items}}';
 
-type BlockNode = {
-  type?: string;
-  data?: { value?: { content?: string } };
-  attributes?: Record<string, string>;
-  children?: BlockNode[];
-};
-
-function walkBlocks(node: BlockNode, visit: (block: BlockNode) => void): void {
-  visit(node);
-  for (const child of node.children ?? []) walkBlocks(child, visit);
-}
-
-/** Inject sample merge values into designJson for canvas editing. */
-export function applyDesignJsonMergePreviews(template: IEmailTemplate): IEmailTemplate {
-  const cloned = structuredClone(template) as IEmailTemplate;
-  if (!cloned.content) return cloned;
-
-  walkBlocks(cloned.content as BlockNode, (block) => {
-    if (block.type === 'raw') return;
-
-    const content = block.data?.value?.content;
-    if (typeof content === 'string' && content.includes('{{')) {
-      block.data!.value!.content = applyMergePreviewSamples(content);
-    }
-
-    const href = block.attributes?.href;
-    if (typeof href === 'string' && href.startsWith('{{') && href.endsWith('}}')) {
-      block.attributes!.href = '#';
-    }
-  });
-
-  return cloned;
-}
-
-/** Restore merge-tag placeholders before persisting designJson. */
-export function stripDesignJsonMergePreviews(template: IEmailTemplate): IEmailTemplate {
-  const cloned = structuredClone(template) as IEmailTemplate;
-  if (!cloned.content) return cloned;
-
-  walkBlocks(cloned.content as BlockNode, (block) => {
-    if (block.type === 'raw') {
-      const content = block.data?.value?.content ?? '';
-      if (content.includes(SAMPLE_ORDER_ITEMS_HTML) || content.trim() === SAMPLE_ORDER_ITEMS_HTML.trim()) {
-        block.data!.value!.content = ORDER_ITEMS_TAG;
-      } else if (content.trim() === ORDER_ITEMS_TAG) {
-        block.data!.value!.content = ORDER_ITEMS_TAG;
-      }
-      return;
-    }
-
-    const content = block.data?.value?.content;
-    if (typeof content === 'string') {
-      block.data!.value!.content = stripMergePreviewSamples(content);
-    }
-
-    if (block.type === 'advanced_button' && block.attributes?.href === '#') {
-      block.attributes.href = '{{tracking_url}}';
-    }
-  });
-
-  return cloned;
-}
-
 /** Replace `{{tag}}` placeholders in compiled HTML/text with sample values. */
 export function applyMergePreviewSamples(source: string): string {
   let out = source;
@@ -102,20 +37,6 @@ export function applyMergePreviewSamples(source: string): string {
   for (const [name, sample] of Object.entries(MERGE_PREVIEW_SAMPLES)) {
     if (name === 'order_items') continue;
     out = out.split(`{{${name}}}`).join(sample);
-  }
-  return out;
-}
-
-/** Reverse {@link applyMergePreviewSamples} for save-safe HTML/text. */
-export function stripMergePreviewSamples(source: string): string {
-  let out = source;
-  out = out.split(SAMPLE_ORDER_ITEMS_HTML).join(ORDER_ITEMS_TAG);
-  // Longest samples first to avoid partial replacements.
-  const entries = Object.entries(MERGE_PREVIEW_SAMPLES)
-    .filter(([name]) => name !== 'order_items')
-    .sort((a, b) => b[1].length - a[1].length);
-  for (const [name, sample] of entries) {
-    out = out.split(sample).join(`{{${name}}}`);
   }
   return out;
 }

@@ -28,9 +28,7 @@ import { easyEmailZhCN } from '@/lib/easy-email-locale';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
 import { captureAndUploadThumbnail } from '@/lib/thumbnail';
 import {
-  applyDesignJsonMergePreviews,
   applyMergePreviewSamples,
-  stripDesignJsonMergePreviews,
 } from '@/lib/email-merge-preview';
 
 import 'easy-email-editor/lib/style.css';
@@ -178,7 +176,7 @@ export function TemplateEditorPage() {
     if (!id) return emptyEmailTemplate();
     if (!detail.data) return null;
     if (detail.data.designJson?.content) {
-      return applyDesignJsonMergePreviews(detail.data.designJson);
+      return detail.data.designJson;
     }
     return emptyEmailTemplate();
   }, [id, detail.data]);
@@ -191,11 +189,10 @@ export function TemplateEditorPage() {
 
   const saveMut = useMutation({
     mutationFn: async (values: IEmailTemplate) => {
-      const persisted = stripDesignJsonMergePreviews(values);
       const mjml = JsonToMjml({
-        data: persisted.content,
+        data: values.content,
         mode: 'production',
-        context: persisted.content,
+        context: values.content,
       });
       const html = mjml2html(mjml).html;
       // Generate the preview thumbnail off the freshly compiled HTML and
@@ -206,7 +203,7 @@ export function TemplateEditorPage() {
         name,
         html,
         mjml,
-        designJson: persisted,
+        designJson: values,
         ...(thumbnail ? { thumbnail } : {}),
       };
       if (id) return api.patch(`/api/templates/${id}`, payload);
