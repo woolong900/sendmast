@@ -34,6 +34,7 @@ interface AnalyticsView {
     unsubscribe: number;
   };
   funnel: Array<{ step: string; value: number; pct: number }>;
+  sales: { orders: number; revenue: number; currency: string; aov: number };
 }
 
 interface CampaignDetail {
@@ -63,6 +64,19 @@ const FUNNEL_COUNT_LABEL: Record<string, string> = {
 };
 
 const FUNNEL_ORDER = ['sent', 'delivered', 'opened', 'clicked', 'ordered'] as const;
+
+/** Format a money amount with its currency; falls back to a plain number. */
+function formatMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency || 'USD',
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${currency || 'USD'} ${amount.toFixed(2)}`;
+  }
+}
 
 export function CampaignAnalyticsPage() {
   const { id } = useParams<{ id: string }>();
@@ -120,10 +134,13 @@ export function CampaignAnalyticsPage() {
   }
   if (!analytics.data || !detail.data) return null;
 
-  const { totals, rates, funnel } = analytics.data;
+  const { totals, rates, funnel, sales } = analytics.data;
   // 发送失败率与其它各率分母统一为「送达 + 弹回 + 失败」(达到终态的消息)。
   const outcome = totals.delivered + totals.bounces + totals.failed;
   const failureRate = outcome > 0 ? totals.failed / outcome : 0;
+  // 转化率 = 下单人数 / 送达数（无送达时回退到发送数）。
+  const conversionBase = totals.delivered || totals.sent;
+  const conversionRate = conversionBase > 0 ? sales.orders / conversionBase : 0;
   const utmRows = collectUtm(detail.data);
 
   return (
@@ -173,9 +190,9 @@ export function CampaignAnalyticsPage() {
             送达率 = 送达 /（送达 + 弹回 + 失败），分母不含投递中；投递中 = 投递中 / 总投放。两者分母不同，不能直接相加。
           </p>
 
-          {/* Row 2 — commerce metrics. All four drill to the same `sales`
-              tab; the orders/attribution pipeline isn't wired yet so the
-              destination shows an "即将推出" placeholder. */}
+          {/* Row 2 — commerce metrics. The sales cards drill into the `sales`
+              tab (orders attributed to this campaign). Values come from the
+              connected shop's orders; zero when no shop is connected. */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               to={recipientLink(id, 'clicked')}
@@ -183,13 +200,21 @@ export function CampaignAnalyticsPage() {
               value={formatPercent(rates.uniqueClick)}
               hint={`(点击人数 ${formatNumber(totals.uniqueClicks)})`}
             />
-            <MetricCard to={recipientLink(id, 'sales')} label="销售额" value="US$0" />
-            <MetricCard to={recipientLink(id, 'sales')} label="订单数" value="0" />
+            <MetricCard
+              to={recipientLink(id, 'sales')}
+              label="销售额"
+              value={formatMoney(sales.revenue, sales.currency)}
+            />
+            <MetricCard
+              to={recipientLink(id, 'sales')}
+              label="订单数"
+              value={formatNumber(sales.orders)}
+            />
             <MetricCard
               to={recipientLink(id, 'sales')}
               label="转化率"
-              value="0%"
-              hint="(下单人数 0)"
+              value={formatPercent(conversionRate)}
+              hint={`(下单数 ${formatNumber(sales.orders)})`}
             />
           </div>
 

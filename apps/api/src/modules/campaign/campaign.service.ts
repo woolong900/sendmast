@@ -185,7 +185,7 @@ export class CampaignService {
   ) {}
 
   async list(accountId: string, query: ListCampaignsQuery) {
-    const where: Prisma.CampaignWhereInput = { accountId };
+    const where: Prisma.CampaignWhereInput = { accountId, isAutomation: false };
     if (query.status) where.status = query.status;
     if (query.search)
       where.OR = [
@@ -300,7 +300,7 @@ export class CampaignService {
   async statusCounts(accountId: string) {
     const groups = await this.prisma.campaign.groupBy({
       by: ['status'],
-      where: { accountId },
+      where: { accountId, isAutomation: false },
       _count: { _all: true },
     });
     const out: Record<string, number> = { sending: 0, scheduled: 0, sent: 0, draft: 0 };
@@ -344,9 +344,9 @@ export class CampaignService {
     });
     if (!campaign) throw new NotFoundException('活动不存在');
 
-    // sales 维度暂无订单系统接入,直接返回空表 + empty source so the UI knows.
+    // sales 维度 = 归因到本活动的店铺订单 (ClickHouse sendmast.orders)。
     if (query.dimension === 'sales') {
-      return { source: 'empty', rows: [], nextCursor: null, total: null };
+      return this.listSalesRecipients(accountId, campaignId, query);
     }
 
     // 投递中 = 尚未交给 ACS 的待发送收件人 (status pending|queued)。纯 PG 查询。
@@ -580,6 +580,92 @@ export class CampaignService {
       source: 'hot',
       rows: page.map((r) => toRecipientView(r, names.get(r.contactId))),
       nextCursor: hasMore ? page[page.length - 1].id : null,
+      total,
+    };
+  }
+
+  /**
+   * sales list: store orders attributed to this campaign (last-click). Served
+   * straight from ClickHouse `orders` (FINAL collapses re-ingest dupes). The
+   * order value is surfaced via `reason` so the existing recipient table can
+   * render it without a schema change; `eventTime` carries the order time.
+   */
+  private async listSalesRecipients(
+    accountId: string,
+    campaignId: string,
+    q: ListRecipientsQuery,
+  ): Promise<ListRecipientsResponse> {
+    const params: Record<string, unknown> = {
+      acc: accountId,
+      cid: campaignId,
+      lim: q.pageSize + 1,
+    };
+    let cursorClause = '';
+    if (q.cursor) {
+      cursorClause = 'AND order_time < parseDateTime64BestEffort({cursor:String}, 3)';
+      params.cursor = q.cursor;
+    }
+    let rows: Array<{
+      external_order_id: string;
+      customer_email: string;
+      value: string;
+      currency: string;
+      order_time: string;
+    }> = [];
+    let total: number | null = null;
+    try {
+      [rows, total] = await Promise.all([
+        this.ch.query<{
+          external_order_id: string;
+          customer_email: string;
+          value: string;
+          currency: string;
+          order_time: string;
+        }>(
+          `SELECT external_order_id, customer_email, toString(value) AS value,
+                  currency, toString(order_time) AS order_time
+           FROM sendmast.orders FINAL
+           WHERE account_id = {acc:UUID} AND attributed_campaign_id = {cid:UUID}
+           ${cursorClause}
+           ORDER BY order_time DESC
+           LIMIT {lim:UInt32}`,
+          params,
+        ),
+        this.ch
+          .query<{ n: string }>(
+            `SELECT toString(count()) AS n
+             FROM sendmast.orders FINAL
+             WHERE account_id = {acc:UUID} AND attributed_campaign_id = {cid:UUID}`,
+            { acc: accountId, cid: campaignId },
+          )
+          .then((r) => Number(r[0]?.n ?? 0)),
+      ]);
+    } catch (err) {
+      // CH unavailable / table missing in dev → behave like an empty list.
+      return { source: 'events', rows: [], nextCursor: null, total: 0 };
+    }
+    const hasMore = rows.length > q.pageSize;
+    const page = hasMore ? rows.slice(0, q.pageSize) : rows;
+    return {
+      source: 'events',
+      rows: page.map((r) => ({
+        id: r.external_order_id,
+        email: r.customer_email,
+        firstName: null,
+        lastName: null,
+        status: 'order',
+        messageId: null,
+        errorMessage: null,
+        sentAt: r.order_time,
+        createdAt: r.order_time,
+        eventTime: r.order_time,
+        userAgent: null,
+        linkUrl: null,
+        deliveredAt: null,
+        reason: `${r.currency} ${r.value}`,
+        bounceType: null,
+      })),
+      nextCursor: hasMore ? page[page.length - 1].order_time : null,
       total,
     };
   }

@@ -92,6 +92,155 @@ export async function insertEmailEvents(
 }
 
 // ---------------------------------------------------------------------------
+// Shop orders / attributions (e-commerce integration)
+// ---------------------------------------------------------------------------
+
+/** Format an ISO/epoch instant for CH DateTime64 (space sep, no `Z`). */
+export function toClickHouseDateTime(d: Date | string | number): string {
+  const date = d instanceof Date ? d : new Date(d);
+  return date.toISOString().replace('T', ' ').replace('Z', '');
+}
+
+export interface OrderRow {
+  account_id: string;
+  shop_id: string;
+  external_order_id: string;
+  customer_email: string;
+  /** Numeric string or number; CH Decimal(18,2). */
+  value: number | string;
+  currency: string;
+  /** CH DateTime64 string (use toClickHouseDateTime). */
+  order_time: string;
+  attributed_campaign_id?: string | null;
+  attributed_contact_id?: string | null;
+  attribution_model?: string;
+}
+
+export async function insertOrders(
+  client: ClickHouseClient,
+  rows: OrderRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  await client.insert({
+    table: 'sendmast.orders',
+    values: rows,
+    format: 'JSONEachRow',
+  });
+}
+
+export interface AttributionRow {
+  account_id: string;
+  campaign_id: string;
+  contact_id: string;
+  /** CH DateTime64 string. */
+  click_time: string;
+  order_id: string;
+  order_value: number | string;
+  model?: string;
+}
+
+export async function insertAttributions(
+  client: ClickHouseClient,
+  rows: AttributionRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  await client.insert({
+    table: 'sendmast.attributions',
+    values: rows,
+    format: 'JSONEachRow',
+  });
+}
+
+/**
+ * Last-click attribution: the most recent `click` event for `contactId` within
+ * `withinDays`. Returns the campaign that earned the click, or null.
+ */
+export async function findLastClick(
+  client: ClickHouseClient,
+  opts: { accountId: string; contactId: string; withinDays: number },
+): Promise<{ campaignId: string; clickTime: string } | null> {
+  const r = await client.query({
+    query: `SELECT campaign_id, event_time
+            FROM sendmast.email_events
+            WHERE account_id = {accountId:UUID}
+              AND contact_id = {contactId:UUID}
+              AND event_type = 'click'
+              AND event_time >= now() - INTERVAL {days:UInt16} DAY
+            ORDER BY event_time DESC
+            LIMIT 1`,
+    query_params: {
+      accountId: opts.accountId,
+      contactId: opts.contactId,
+      days: opts.withinDays,
+    },
+    format: 'JSONEachRow',
+  });
+  const rows = (await r.json()) as Array<{ campaign_id: string; event_time: string }>;
+  const row = rows[0];
+  return row ? { campaignId: row.campaign_id, clickTime: row.event_time } : null;
+}
+
+export interface SalesAggregate {
+  orders: number;
+  revenue: number;
+  currency: string;
+}
+
+/**
+ * Revenue + order count attributed to a single campaign. `FINAL` collapses the
+ * ReplacingMergeTree dupes so re-ingested orders aren't double-counted.
+ */
+export async function getCampaignSales(
+  client: ClickHouseClient,
+  campaignId: string,
+): Promise<SalesAggregate> {
+  const r = await client.query({
+    query: `SELECT count() AS orders,
+                   toFloat64(sum(value)) AS revenue,
+                   any(currency) AS currency
+            FROM sendmast.orders FINAL
+            WHERE attributed_campaign_id = {campaignId:UUID}`,
+    query_params: { campaignId },
+    format: 'JSONEachRow',
+  });
+  const rows = (await r.json()) as Array<{ orders: number; revenue: number; currency: string }>;
+  const row = rows[0];
+  return {
+    orders: Number(row?.orders ?? 0),
+    revenue: Number(row?.revenue ?? 0),
+    currency: row?.currency || 'USD',
+  };
+}
+
+/**
+ * Account-wide attributed sales over the last `sinceDays`. Counts only orders
+ * with an attributed campaign (i.e. email-driven revenue).
+ */
+export async function getAccountSales(
+  client: ClickHouseClient,
+  opts: { accountId: string; sinceDays: number },
+): Promise<SalesAggregate> {
+  const r = await client.query({
+    query: `SELECT count() AS orders,
+                   toFloat64(sum(value)) AS revenue,
+                   any(currency) AS currency
+            FROM sendmast.orders FINAL
+            WHERE account_id = {accountId:UUID}
+              AND attributed_campaign_id IS NOT NULL
+              AND order_time >= now() - INTERVAL {days:UInt16} DAY`,
+    query_params: { accountId: opts.accountId, days: opts.sinceDays },
+    format: 'JSONEachRow',
+  });
+  const rows = (await r.json()) as Array<{ orders: number; revenue: number; currency: string }>;
+  const row = rows[0];
+  return {
+    orders: Number(row?.orders ?? 0),
+    revenue: Number(row?.revenue ?? 0),
+    currency: row?.currency || 'USD',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // campaign_recipients_archive
 // ---------------------------------------------------------------------------
 

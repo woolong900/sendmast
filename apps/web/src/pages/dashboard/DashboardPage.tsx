@@ -120,18 +120,24 @@ export function DashboardPage() {
           <CardContent className="p-6">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-base font-semibold">销售概览</h2>
-              <Badge variant="muted">即将上线</Badge>
+              <Button asChild variant="ghost" size="sm">
+                <Link to="/settings/shop">店铺设置</Link>
+              </Button>
             </div>
             {data?.shopConnected ? (
-              <div>...</div>
+              <div className="grid grid-cols-3 gap-4">
+                <SalesStat label="近 30 日营收" value={formatUsd(data.sales.revenue)} />
+                <SalesStat label="订单数" value={formatNumber(data.sales.orders)} />
+                <SalesStat label="客单价" value={formatUsd(data.sales.aov)} />
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <ShoppingCart className="mb-2 size-8 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
-                  尚未关联店铺。在 v0.5 版本中可接入 Shopify / WooCommerce / 自建店铺，看到邮件带来的销售额。
+                  尚未关联店铺。连接 Shopyy 店铺后，即可看到邮件带来的销售额。
                 </p>
-                <Button variant="outline" size="sm" className="mt-4" disabled>
-                  关联店铺（即将开放）
+                <Button asChild variant="outline" size="sm" className="mt-4">
+                  <Link to="/settings/shop">关联店铺</Link>
                 </Button>
               </div>
             )}
@@ -177,6 +183,27 @@ function StatCard({
     </Card>
   );
   return link ? <Link to={link}>{inner}</Link> : inner;
+}
+
+function formatUsd(amount: number): string {
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `US$${amount.toFixed(2)}`;
+  }
+}
+
+function SalesStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-lg font-semibold">{value}</div>
+    </div>
+  );
 }
 
 function StatusItem({

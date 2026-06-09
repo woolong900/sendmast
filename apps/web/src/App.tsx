@@ -81,6 +81,16 @@ const QuotaPage = lazy(() =>
 const CustomTagsPage = lazy(() =>
   import('@/pages/settings/CustomTagsPage').then((m) => ({ default: m.CustomTagsPage })),
 );
+const ShopConnectionsPage = lazy(() =>
+  import('@/pages/settings/ShopConnectionsPage').then((m) => ({
+    default: m.ShopConnectionsPage,
+  })),
+);
+const ShopyyCallbackPage = lazy(() =>
+  import('@/pages/integrations/ShopyyCallbackPage').then((m) => ({
+    default: m.ShopyyCallbackPage,
+  })),
+);
 const AcsAccountListPage = lazy(() =>
   import('@/pages/admin/AcsAccountListPage').then((m) => ({ default: m.AcsAccountListPage })),
 );
@@ -179,6 +189,8 @@ export default function App() {
               <Route path="settings/quota" element={<QuotaPage />} />
               <Route path="settings/orders" element={<OrdersPage />} />
               <Route path="settings/custom-tags" element={<CustomTagsPage />} />
+              <Route path="settings/shop" element={<ShopConnectionsPage />} />
+              <Route path="integrations/shopyy/callback" element={<ShopyyCallbackPage />} />
 
               <Route
                 path="admin/acs-accounts"

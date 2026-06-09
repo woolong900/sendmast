@@ -611,6 +611,9 @@ async function runSend(job: Job<SendJobData>) {
     // segment or is a legacy pre-feature row.
     listName: r.listName ?? '',
     unsubscribeUrl: unsubUrl,
+    // Per-recipient transactional values (order_total, tracking_url, ...) for
+    // automation sends; null/absent for ordinary bulk campaigns.
+    mergeVars: (r.mergeVars as Record<string, string> | null) ?? null,
   };
 
   // Order matters: system tags first, custom tags second, then link rewrite.

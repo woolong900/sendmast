@@ -89,6 +89,9 @@ importers:
       '@sendmast/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@sendmast/shopyy':
+        specifier: workspace:*
+        version: link:../../packages/shopyy
       argon2:
         specifier: ^0.41.1
         version: 0.41.1
@@ -461,6 +464,49 @@ importers:
         specifier: ^5.5.4
         version: 5.9.3
 
+  apps/worker-shop-sync:
+    dependencies:
+      '@clickhouse/client':
+        specifier: ^1.8.1
+        version: 1.18.4
+      '@prisma/client':
+        specifier: ^5.22.0
+        version: 5.22.0(prisma@5.22.0)
+      '@sendmast/clickhouse':
+        specifier: workspace:*
+        version: link:../../packages/clickhouse
+      '@sendmast/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@sendmast/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@sendmast/shopyy':
+        specifier: workspace:*
+        version: link:../../packages/shopyy
+      bullmq:
+        specifier: ^5.21.2
+        version: 5.76.6
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      ioredis:
+        specifier: ^5.4.1
+        version: 5.10.1
+    devDependencies:
+      '@types/node':
+        specifier: ^20.12.7
+        version: 20.19.40
+      dotenv-cli:
+        specifier: ^7.4.4
+        version: 7.4.4
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+
   apps/worker-thumbnail:
     dependencies:
       '@aws-sdk/client-s3':
@@ -548,6 +594,15 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+
+  packages/shopyy:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.12.7
+        version: 20.19.40
       typescript:
         specifier: ^5.5.4
         version: 5.9.3
@@ -2806,8 +2861,8 @@ packages:
       react: '>=17.0.0'
       react-dom: '>=17.0.0'
 
-  '@unlayer/types@1.419.0':
-    resolution: {integrity: sha512-lv5BS9Mannt8vRIosH8C7u43IXV4HymIyFRQPsJI9iAX62YPQcIYhQajqMVvlOta0fDxDqzmbIwieSLlgjSmMA==}
+  '@unlayer/types@1.423.0':
+    resolution: {integrity: sha512-+u/PiMVIkbWZYknNtI9ljvaYmsoulFHf9eoBIwO5U59pK1eetwD0oRtKeSFJ28SObkVG1gihCxEjDxI5GdP8Dg==}
 
   '@vitejs/plugin-react@4.7.0':
     resolution: {integrity: sha512-gUu9hwfWvvEDBBmgtAowQCojwZmJ5mcLn3aufeCsitijs3+f2NsrPtlAWIR6OPiqljl96GVCUbLe0HyqIpVaoA==}
@@ -9286,7 +9341,7 @@ snapshots:
       - '@codemirror/lint'
       - '@codemirror/search'
 
-  '@unlayer/types@1.419.0': {}
+  '@unlayer/types@1.423.0': {}
 
   '@vitejs/plugin-react@4.7.0(vite@5.4.21(@types/node@20.19.40)(terser@5.47.1))':
     dependencies:
@@ -12518,7 +12573,7 @@ snapshots:
 
   react-email-editor@1.8.0(react@18.3.1):
     dependencies:
-      '@unlayer/types': 1.419.0
+      '@unlayer/types': 1.423.0
       react: 18.3.1
 
   react-final-form-arrays@3.1.4(final-form-arrays@3.1.0(final-form@4.20.10))(final-form@4.20.10)(react-final-form@6.5.9(final-form@4.20.10)(react@18.3.1))(react@18.3.1):

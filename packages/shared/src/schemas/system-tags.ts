@@ -87,7 +87,43 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
     label: '退订链接',
     description: '该收件人专属的退订 URL，建议放在 <a href="..."> 里',
   },
+  {
+    name: 'order_no',
+    placeholder: '{{order_no}}',
+    label: '订单号',
+    description: '电商自动化邮件专用：触发订单的订单号（仅订单/弃单自动化邮件中有值）',
+  },
+  {
+    name: 'order_total',
+    placeholder: '{{order_total}}',
+    label: '订单金额',
+    description: '电商自动化邮件专用：订单金额（含货币符号，如 US$59.00）',
+  },
+  {
+    name: 'order_currency',
+    placeholder: '{{order_currency}}',
+    label: '订单货币',
+    description: '电商自动化邮件专用：订单货币代码（如 USD）',
+  },
+  {
+    name: 'tracking_url',
+    placeholder: '{{tracking_url}}',
+    label: '物流追踪链接',
+    description: '电商自动化邮件专用：发货通知中的物流追踪 URL',
+  },
 ] as const;
 
 /** Whitelist tag names; used to build the substitution regex. */
 export const SYSTEM_TAG_NAMES = SYSTEM_TAGS.map((t) => t.name);
+
+/**
+ * System tags whose value is supplied per-recipient via `mergeVars` (rather
+ * than derived from contact/campaign). Used by the transactional automation
+ * path; always empty for ordinary bulk-campaign recipients.
+ */
+export const MERGE_VAR_TAG_NAMES = [
+  'order_no',
+  'order_total',
+  'order_currency',
+  'tracking_url',
+] as const;

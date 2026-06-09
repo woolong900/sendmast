@@ -31,7 +31,7 @@ export class DashboardService {
         }),
         this.prisma.campaign.groupBy({
           by: ['status'],
-          where: { accountId },
+          where: { accountId, isAutomation: false },
           _count: { _all: true },
         }),
         // The cohort for the open-rate card: campaigns SENT in the window.
@@ -67,13 +67,48 @@ export class DashboardService {
 
     const openRate30d = sent30d > 0 ? uniqueOpens30d / sent30d : 0;
 
+    const [shopConnected, sales] = await Promise.all([
+      this.prisma.shopConnection
+        .count({ where: { accountId, status: 'active' } })
+        .then((n) => n > 0),
+      this.querySales30d(accountId, since),
+    ]);
+
     return {
       contacts: { total: contactsTotal, subscribed: contactsSubscribed },
       campaigns,
       metrics30d: { sent: sent30d, uniqueOpens: uniqueOpens30d, openRate: openRate30d },
-      shopConnected: false, // v0.5
-      sales: { revenue: 0, orders: 0, aov: 0 },
+      shopConnected,
+      sales,
     };
+  }
+
+  /**
+   * Email-attributed sales over the last 30 days (orders with a non-null
+   * attributed_campaign_id). Returns zeros on CH outage / no shop.
+   */
+  private async querySales30d(
+    accountId: string,
+    since: Date,
+  ): Promise<{ revenue: number; orders: number; aov: number }> {
+    try {
+      const rows = await this.ch.query<{ orders: string; revenue: string }>(
+        `SELECT toString(count()) AS orders,
+                toString(toFloat64(sum(value))) AS revenue
+         FROM sendmast.orders FINAL
+         WHERE account_id = {aid:UUID}
+           AND attributed_campaign_id IS NOT NULL
+           AND order_time >= {since:DateTime64(3)}`,
+        { aid: accountId, since: since.toISOString().replace('T', ' ').replace('Z', '') },
+      );
+      const r = rows[0];
+      const orders = Number(r?.orders ?? 0);
+      const revenue = Number(r?.revenue ?? 0);
+      return { orders, revenue, aov: orders > 0 ? revenue / orders : 0 };
+    } catch (err) {
+      console.warn('Dashboard 30d sales query failed:', err);
+      return { revenue: 0, orders: 0, aov: 0 };
+    }
   }
 
   /**

@@ -31,6 +31,7 @@ import { QuotaBillingModule } from './modules/quota-billing/quota-billing.module
 import { FxModule } from './modules/fx/fx.module';
 import { TrackingDomainModule } from './modules/tracking-domain/tracking-domain.module';
 import { ReferralModule } from './modules/referral/referral.module';
+import { IntegrationsModule } from './modules/integrations/integrations.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { ReferralModule } from './modules/referral/referral.module';
     ReferralModule,
     QuotaBillingModule,
     TrackingDomainModule,
+    IntegrationsModule,
   ],
   providers: [
     // Global IP-level rate limit (default 240 req/min, see ThrottlerModule

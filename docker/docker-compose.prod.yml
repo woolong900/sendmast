@@ -142,6 +142,26 @@ services:
       minio:
         condition: service_started
 
+  # Shopyy e-commerce: consumes webhook events (order paid/shipped, abandoned
+  # checkout) → contacts/orders + last-click attribution (ClickHouse) + fires
+  # transactional automation emails via the shared send queue.
+  worker-shop-sync:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: worker-shop-sync
+    image: sendmast/worker-shop-sync:latest
+    container_name: sendmast-worker-shop-sync
+    restart: unless-stopped
+    env_file: ../.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
   worker-thumbnail:
     build:
       context: ..

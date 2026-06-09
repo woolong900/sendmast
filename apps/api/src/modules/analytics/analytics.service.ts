@@ -40,6 +40,9 @@ export interface CampaignAnalyticsView {
     unsubscribe: number;
   };
   funnel: Array<{ step: string; value: number; pct: number }>;
+  /** Store revenue attributed to this campaign (last-click). Zeros when no
+   *  shop is connected or ClickHouse is unavailable. */
+  sales: { orders: number; revenue: number; currency: string; aov: number };
 }
 
 @Injectable()
@@ -205,6 +208,33 @@ export class AnalyticsService {
       unsubscribe: safe(unsubscribes, outcome),
     };
 
+    // Sales attributed to this campaign (last-click). Degrades to zeros if CH
+    // is down or no shop is connected.
+    let sales = { orders: 0, revenue: 0, currency: 'USD', aov: 0 };
+    try {
+      const sr = await this.ch.query<{ orders: string; revenue: string; currency: string }>(
+        `SELECT toString(count()) AS orders,
+                toString(toFloat64(sum(value))) AS revenue,
+                any(currency) AS currency
+         FROM sendmast.orders FINAL
+         WHERE account_id = {acc:UUID} AND attributed_campaign_id = {cid:UUID}`,
+        { acc: accountId, cid: campaignId },
+      );
+      const r = sr[0];
+      if (r) {
+        const orders = Number(r.orders);
+        const revenue = Number(r.revenue);
+        sales = {
+          orders,
+          revenue,
+          currency: r.currency || 'USD',
+          aov: orders > 0 ? revenue / orders : 0,
+        };
+      }
+    } catch (err) {
+      console.warn('ClickHouse sales aggregation failed:', err);
+    }
+
     const sentBase = sent || c.totalRecipients;
     const funnel = [
       { step: 'sent', value: sent, pct: sentBase > 0 ? 1 : 0 },
@@ -216,7 +246,7 @@ export class AnalyticsService {
       { step: 'clicked', value: uniqueClicks, pct: rates.uniqueClick },
     ];
 
-    return { campaignId, totals, rates, funnel };
+    return { campaignId, totals, rates, funnel, sales };
   }
 
   /**

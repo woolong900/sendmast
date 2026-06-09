@@ -18,6 +18,7 @@ import {
   Coins,
   Radio,
   Handshake,
+  Store,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/BrandLogo';
 import { cn } from '@/lib/utils';
@@ -55,6 +56,7 @@ const BASE_NAV: NavGroup[] = [
       { to: '/settings/quota', label: '发送额度', icon: <Wallet className="size-4" /> },
       { to: '/settings/orders', label: '我的订单', icon: <Receipt className="size-4" /> },
       { to: '/settings/custom-tags', label: '自定义标签', icon: <Tags className="size-4" /> },
+      { to: '/settings/shop', label: '店铺连接', icon: <Store className="size-4" /> },
     ],
   },
 ];

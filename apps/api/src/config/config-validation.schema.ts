@@ -39,6 +39,19 @@ const ConfigSchema = z.object({
   // forged delivery/bounce/complaint events.
   EVENTGRID_WEBHOOK_KEY: z.string().optional(),
 
+  // Shopyy (OEMSAAS) e-commerce integration. ALL optional at boot — the
+  // integrations service checks `isConfigured()` (SHOPYY_APP_SECRET present)
+  // before letting a tenant connect a store, so a box without partner creds
+  // still starts and the settings page shows "未配置".
+  //
+  // APP_KEY/APP_SECRET are the partnership-issued application credentials used
+  // to SIGN the authorize-token exchange (the only call that uses the secret;
+  // everything after uses the per-store devToken). WEBHOOK_BASE_URL is where
+  // shopyy should deliver order/checkout webhooks — defaults to API_BASE_URL.
+  SHOPYY_APP_KEY: z.string().optional(),
+  SHOPYY_APP_SECRET: z.string().optional(),
+  SHOPYY_WEBHOOK_BASE_URL: z.string().url().optional(),
+
   // Shouqianba (收钱吧) for self-service quota top-up via 当面付/扫码支付.
   // ALL fields are optional at boot — QuotaBilling checks `isConfigured()`
   // before letting users place orders, so a fresh dev box without merchant

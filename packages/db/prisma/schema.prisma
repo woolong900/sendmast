@@ -311,6 +311,10 @@ model Account {
   quotaOrders        QuotaOrder[]
   commissionRecords  CommissionRecord[]
   acsAccounts        AccountAcsAccount[]
+  shopConnections        ShopConnection[]
+  shopOrders             ShopOrder[]
+  shopAutomations        ShopAutomation[]
+  shopAbandonedCheckouts ShopAbandonedCheckout[]
 
   referredByChannel ReferralChannel? @relation(fields: [referredByChannelId], references: [id], onDelete: SetNull)
 
@@ -705,6 +709,10 @@ model Campaign {
   thumbnail        String?
   thumbnailPending Boolean        @default(false) @map("thumbnail_pending")
   status           CampaignStatus @default(draft)
+  /// Hidden system campaign backing a transactional/automation send (one per
+  /// triggered email). Excluded from all tenant-facing campaign lists, status
+  /// counts and dashboard rollups. Normal campaigns are false.
+  isAutomation     Boolean        @default(false) @map("is_automation")
   scheduledAt      DateTime?      @map("scheduled_at")
   sendingStartedAt DateTime?      @map("sending_started_at")
   sentAt           DateTime?      @map("sent_at")
@@ -851,6 +859,10 @@ model CampaignRecipient {
   /// against later membership changes. NULL = matched only via a segment, or
   /// legacy pre-feature rows.
   listName     String?         @map("list_name")
+  /// Per-recipient merge values resolved into system tags at send time
+  /// (e.g. {{order_total}}, {{tracking_url}} for transactional automation
+  /// sends). NULL for ordinary bulk-campaign recipients.
+  mergeVars    Json?           @map("merge_vars")
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
 
@@ -1017,4 +1029,190 @@ model ReferralSetting {
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("referral_settings")
+}
+
+// ============================================================================
+// Shop Integrations (shopyy / OEMSAAS)
+//
+// A tenant connects an external e-commerce store via an OAuth-like flow. We
+// store the developer-app `devToken` used to call the OpenAPI gateway, ingest
+// order/checkout webhooks, attribute revenue back to email campaigns, and run
+// three fixed buyer-facing automations (paid / shipped / abandoned-cart).
+// ============================================================================
+
+enum ShopProvider {
+  shopyy
+
+  @@map("shop_provider")
+}
+
+enum ShopConnectionStatus {
+  active
+  expired
+  revoked
+
+  @@map("shop_connection_status")
+}
+
+/// One connected store per row. `devToken` is the developer-app token returned
+/// by the authorize exchange and used for every OpenAPI call; stored verbatim
+/// for the MVP (mirrors AcsAccount.azureClientSecret) — encrypt at rest later.
+/// `webhookSecret` is our own per-connection secret used to HMAC-verify inbound
+/// webhooks.
+model ShopConnection {
+  id              String               @id @default(uuid()) @db.Uuid
+  accountId       String               @map("account_id") @db.Uuid
+  provider        ShopProvider         @default(shopyy)
+  externalStoreId String               @map("external_store_id")
+  shopName        String?              @map("shop_name")
+  shopDomain      String?              @map("shop_domain")
+  mainDomain      String?              @map("main_domain")
+  brandId         String?              @map("brand_id")
+  timeZone        String?              @map("time_zone")
+  openapiDomain   String               @map("openapi_domain")
+  webhookBaseurl  String?              @map("webhook_baseurl")
+  appExternalId   String?              @map("app_external_id")
+  appKey          String?              @map("app_key")
+  appName         String?              @map("app_name")
+  devToken        String               @map("dev_token") @db.Text
+  webhookSecret   String?              @map("webhook_secret")
+  status          ShopConnectionStatus @default(active)
+  storeExpiredAt  DateTime?            @map("store_expired_at")
+  connectedAt     DateTime             @default(now()) @map("connected_at")
+  lastSyncAt      DateTime?            @map("last_sync_at")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  account            Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  orders             ShopOrder[]
+  automations        ShopAutomation[]
+  abandonedCheckouts ShopAbandonedCheckout[]
+
+  @@unique([provider, externalStoreId])
+  @@index([accountId])
+  @@map("shop_connections")
+}
+
+/// Ingested store order. `value`/`currency`/`status` are normalised; `raw`
+/// keeps the provider payload for debugging and future field needs. Revenue
+/// attribution is resolved at ingest (last-click within 7d) and snapshotted
+/// onto `attributed*`; the ClickHouse `orders`/`attributions` tables are the
+/// analytics source of truth, this PG row is the operational record.
+model ShopOrder {
+  id                   String   @id @default(uuid()) @db.Uuid
+  accountId            String   @map("account_id") @db.Uuid
+  shopConnectionId     String   @map("shop_connection_id") @db.Uuid
+  externalOrderId      String   @map("external_order_id")
+  orderNo              String?  @map("order_no")
+  customerEmail        String   @map("customer_email")
+  contactId            String?  @map("contact_id") @db.Uuid
+  value                Decimal  @db.Decimal(18, 2)
+  currency             String
+  status               String
+  orderTime            DateTime @map("order_time")
+  attributedCampaignId String?  @map("attributed_campaign_id") @db.Uuid
+  attributedContactId  String?  @map("attributed_contact_id") @db.Uuid
+  attributionModel     String?  @map("attribution_model")
+  raw                  Json?
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  account        Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  shopConnection ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+
+  @@unique([shopConnectionId, externalOrderId])
+  @@index([accountId, orderTime])
+  @@index([attributedCampaignId])
+  @@index([customerEmail])
+  @@map("shop_orders")
+}
+
+enum ShopAutomationType {
+  order_paid
+  order_shipped
+  abandoned_cart
+
+  @@map("shop_automation_type")
+}
+
+/// One configurable automation per (store, type). Each is backed by a hidden
+/// system Campaign so triggered 1:1 sends reuse the full campaign pipeline
+/// (quota, tracking, events, deliverability stats).
+model ShopAutomation {
+  id               String             @id @default(uuid()) @db.Uuid
+  accountId        String             @map("account_id") @db.Uuid
+  shopConnectionId String             @map("shop_connection_id") @db.Uuid
+  type             ShopAutomationType
+  enabled          Boolean            @default(false)
+  templateId       String?            @map("template_id") @db.Uuid
+  senderDomainId   String?            @map("sender_domain_id") @db.Uuid
+  fromEmail        String?            @map("from_email")
+  fromName         String?            @map("from_name")
+  subject          String?
+  /// abandoned_cart only: minutes to wait after abandonment before recovery.
+  delayMinutes     Int                @default(60) @map("delay_minutes")
+  /// Backing hidden system campaign id; recipients are attached to it so the
+  /// existing send/track/analytics stack applies unchanged.
+  systemCampaignId String?            @map("system_campaign_id") @db.Uuid
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  account        Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  shopConnection ShopConnection       @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+  sends          ShopAutomationSend[]
+
+  @@unique([shopConnectionId, type])
+  @@index([accountId])
+  @@map("shop_automations")
+}
+
+/// Idempotency + audit ledger for automation sends. `@@unique([automationId,
+/// dedupKey])` guarantees a re-delivered webhook (same order/checkout) never
+/// double-sends.
+model ShopAutomationSend {
+  id           String   @id @default(uuid()) @db.Uuid
+  accountId    String   @map("account_id") @db.Uuid
+  automationId String   @map("automation_id") @db.Uuid
+  dedupKey     String   @map("dedup_key")
+  email        String
+  contactId    String?  @map("contact_id") @db.Uuid
+  status       String   @default("sent")
+  recipientId  String?  @map("recipient_id") @db.Uuid
+  errorMessage String?  @map("error_message")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  automation ShopAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, dedupKey])
+  @@index([accountId, createdAt])
+  @@map("shop_automation_sends")
+}
+
+/// Abandoned checkout captured from shopyy (event or poll). Recovery send is
+/// scheduled `delayMinutes` after `abandonedAt`; before sending we re-check
+/// `shop_orders` for a matching purchase and skip if the buyer converted.
+model ShopAbandonedCheckout {
+  id                  String    @id @default(uuid()) @db.Uuid
+  accountId           String    @map("account_id") @db.Uuid
+  shopConnectionId    String    @map("shop_connection_id") @db.Uuid
+  externalCheckoutId  String    @map("external_checkout_id")
+  customerEmail       String    @map("customer_email")
+  contactId           String?   @map("contact_id") @db.Uuid
+  value               Decimal?  @db.Decimal(18, 2)
+  currency            String?
+  recoveryUrl         String?   @map("recovery_url")
+  abandonedAt         DateTime  @map("abandoned_at")
+  recoveredAt         DateTime? @map("recovered_at")
+  recoveryEmailSentAt DateTime? @map("recovery_email_sent_at")
+  status              String    @default("pending")
+  raw                 Json?
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  account        Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  shopConnection ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
+
+  @@unique([shopConnectionId, externalCheckoutId])
+  @@index([accountId, abandonedAt])
+  @@map("shop_abandoned_checkouts")
 }

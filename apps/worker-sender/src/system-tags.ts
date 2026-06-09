@@ -16,7 +16,7 @@
  *     `&` and `"` need encoding too.
  */
 
-import { SYSTEM_TAG_NAMES } from '@sendmast/shared';
+import { SYSTEM_TAG_NAMES, MERGE_VAR_TAG_NAMES } from '@sendmast/shared';
 
 export interface SystemTagContext {
   contact: {
@@ -32,6 +32,12 @@ export interface SystemTagContext {
   /** Target list name(s) for this campaign, joined by 「、」. Empty for segment-only sends. */
   listName: string;
   unsubscribeUrl: string;
+  /**
+   * Per-recipient merge values for transactional automation sends, keyed by
+   * system-tag name (e.g. order_total, tracking_url). Undefined for ordinary
+   * bulk-campaign recipients.
+   */
+  mergeVars?: Record<string, string> | null;
 }
 
 // Built dynamically from the shared whitelist so adding a new system tag
@@ -42,7 +48,17 @@ const SYS_TAG_RE = new RegExp(`\\{\\{(${SYSTEM_TAG_NAMES.join('|')})\\}\\}`, 'g'
 // Tags whose value may legitimately be empty — substitute to '' rather than
 // leaving the visible placeholder. Names: contacts often have no first/last
 // name; list_name is empty for segment-only sends.
-const MAY_BE_EMPTY = new Set(['first_name', 'last_name', 'full_name', 'list_name']);
+const MAY_BE_EMPTY = new Set([
+  'first_name',
+  'last_name',
+  'full_name',
+  'list_name',
+  // Merge-var tags are blank on ordinary bulk campaigns; render to '' rather
+  // than leaving a visible {{order_total}} placeholder in the inbox.
+  ...MERGE_VAR_TAG_NAMES,
+]);
+
+const MERGE_VAR_NAME_SET = new Set<string>(MERGE_VAR_TAG_NAMES);
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -62,6 +78,9 @@ function fullName(c: SystemTagContext['contact']): string {
 }
 
 function resolve(name: string, ctx: SystemTagContext): string {
+  if (MERGE_VAR_NAME_SET.has(name)) {
+    return (ctx.mergeVars?.[name] ?? '').trim();
+  }
   switch (name) {
     case 'first_name':
       return (ctx.contact.firstName ?? '').trim();

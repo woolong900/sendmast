@@ -52,9 +52,11 @@ COPY apps/worker-sender/package.json apps/worker-sender/
 COPY apps/worker-events/package.json apps/worker-events/
 COPY apps/worker-import/package.json apps/worker-import/
 COPY apps/worker-thumbnail/package.json apps/worker-thumbnail/
+COPY apps/worker-shop-sync/package.json apps/worker-shop-sync/
 COPY packages/db/package.json packages/db/
 COPY packages/shared/package.json packages/shared/
 COPY packages/clickhouse/package.json packages/clickhouse/
+COPY packages/shopyy/package.json packages/shopyy/
 COPY packages/email-tracking/package.json packages/email-tracking/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm config set store-dir /pnpm/store \
@@ -117,6 +119,17 @@ WORKDIR /app/apps/worker-events
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/packages /app/packages
 COPY --from=build /app/apps/worker-events /app/apps/worker-events
+COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml /app/
+USER node
+CMD ["node", "dist/main.js"]
+
+# ─── Runtime: worker-shop-sync (shopyy events → orders/attribution + automations) ─
+FROM base AS worker-shop-sync
+ENV NODE_ENV=production
+WORKDIR /app/apps/worker-shop-sync
+COPY --from=build /app/node_modules /app/node_modules
+COPY --from=build /app/packages /app/packages
+COPY --from=build /app/apps/worker-shop-sync /app/apps/worker-shop-sync
 COPY --from=build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml /app/
 USER node
 CMD ["node", "dist/main.js"]
