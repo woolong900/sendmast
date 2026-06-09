@@ -16,7 +16,11 @@
  *     `&` and `"` need encoding too.
  */
 
-import { SYSTEM_TAG_NAMES, MERGE_VAR_TAG_NAMES } from '@sendmast/shared';
+import {
+  SYSTEM_TAG_NAMES,
+  MERGE_VAR_TAG_NAMES,
+  HTML_MERGE_VAR_TAG_NAMES,
+} from '@sendmast/shared';
 
 export interface SystemTagContext {
   contact: {
@@ -56,9 +60,19 @@ const MAY_BE_EMPTY = new Set([
   // Merge-var tags are blank on ordinary bulk campaigns; render to '' rather
   // than leaving a visible {{order_total}} placeholder in the inbox.
   ...MERGE_VAR_TAG_NAMES,
+  ...HTML_MERGE_VAR_TAG_NAMES,
 ]);
 
-const MERGE_VAR_NAME_SET = new Set<string>(MERGE_VAR_TAG_NAMES);
+// Both escaped and html-fragment merge vars resolve from ctx.mergeVars.
+const MERGE_VAR_NAME_SET = new Set<string>([
+  ...MERGE_VAR_TAG_NAMES,
+  ...HTML_MERGE_VAR_TAG_NAMES,
+]);
+
+// Merge vars whose value is a pre-rendered, trusted HTML fragment — injected
+// verbatim (the renderer already escaped its dynamic text). Escaping these
+// would turn the markup into literal text in the inbox.
+const HTML_MERGE_NAME_SET = new Set<string>(HTML_MERGE_VAR_TAG_NAMES);
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -124,6 +138,10 @@ export function applySystemTags(
       // place so it's visible in the inbox rather than silently disappearing.
       return match;
     }
+    // Pre-rendered HTML fragments (e.g. order_items) go in untouched; their
+    // dynamic text was escaped at render time. Everything else is escaped in
+    // html context to keep contact-supplied values from breaking markup.
+    if (HTML_MERGE_NAME_SET.has(name)) return v;
     return renderCtx === 'html' ? escapeHtml(v) : v;
   });
 }

@@ -135,6 +135,41 @@ export function mapOrder(payload: Json): NormalizedOrder | null {
   };
 }
 
+export interface LineItem {
+  title: string;
+  quantity: number;
+  /** Variant/spec label, e.g. "Format: 1 Roll". Empty when not present. */
+  variant?: string;
+  /** Product image URL, when the payload carries one. */
+  imageUrl?: string;
+}
+
+/**
+ * Extract cart/order line items for the abandoned-cart product list. Reads the
+ * shopyy `products` array (also tolerates Shopify-style `line_items` / `items`).
+ * Returns [] when none are present — caller then omits the `{{order_items}}`
+ * block. Adjust ONLY the candidate field names here if the payload shape moves.
+ */
+export function mapLineItems(payload: Json): LineItem[] {
+  const o = unwrap(payload, ['order', 'checkout', 'cart', 'data', 'resource']);
+  const arr = o.products ?? o.line_items ?? o.lineItems ?? o.items;
+  if (!Array.isArray(arr)) return [];
+  const items: LineItem[] = [];
+  for (const raw of arr) {
+    const it = asObject(raw);
+    if (!it) continue;
+    const title = pickStr(it, ['product_title', 'title', 'name', 'product_name', 'variant_title']);
+    if (!title) continue;
+    items.push({
+      title,
+      quantity: pickNum(it, ['quantity', 'qty', 'num', 'count']) ?? 1,
+      variant: pickStr(it, ['sku_value', 'variant_title', 'spec', 'variant']),
+      imageUrl: pickStr(it, ['src', 'image', 'image_url', 'imageUrl', 'img', 'thumbnail', 'picture']),
+    });
+  }
+  return items;
+}
+
 export interface NormalizedCheckout {
   externalCheckoutId: string;
   email: string;

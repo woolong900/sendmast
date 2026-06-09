@@ -137,6 +137,8 @@ function abandonedCartInner(): string {
                 <h2 style="font-weight:600; font-size:24px; color:#111827; margin:0 0 12px;">You left items in your cart</h2>
                 <p style="color:#555555; line-height:1.6; font-size:16px; margin:0 0 24px;">Hi {{full_name}}, you added items to your shopping cart but haven&rsquo;t completed your purchase yet. Complete it now while they&rsquo;re still available.</p>
 
+                {{order_items}}
+
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-spacing:0; border-collapse:collapse; background:#f9fafb; border:1px solid #eceff3; border-radius:8px; margin:0 0 28px;">
                   <tr>
                     <td style="padding:16px 18px 6px; font-size:14px; color:#6b7280;">Order</td>

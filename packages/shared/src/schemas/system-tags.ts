@@ -111,6 +111,13 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
     label: '物流追踪链接',
     description: '电商自动化邮件专用：发货通知中的物流追踪 URL',
   },
+  {
+    name: 'order_items',
+    placeholder: '{{order_items}}',
+    label: '商品列表',
+    description:
+      '电商自动化邮件专用：订单内商品列表（图片+名称+数量），由系统渲染为 HTML 整段插入（仅订单/弃单自动化邮件中有值）',
+  },
 ] as const;
 
 /** Whitelist tag names; used to build the substitution regex. */
@@ -127,3 +134,12 @@ export const MERGE_VAR_TAG_NAMES = [
   'order_currency',
   'tracking_url',
 ] as const;
+
+/**
+ * Merge-var tags whose value is a pre-rendered, trusted HTML fragment (built
+ * server-side with its dynamic text already escaped). worker-sender injects
+ * these verbatim instead of HTML-escaping them — otherwise the markup would
+ * render as literal text in the inbox. Treated as a merge var (per-recipient,
+ * blank on bulk campaigns) like MERGE_VAR_TAG_NAMES.
+ */
+export const HTML_MERGE_VAR_TAG_NAMES = ['order_items'] as const;

@@ -1,6 +1,7 @@
 import type { PrismaClient, ShopAutomationType } from '@prisma/client';
 import type { Queue } from 'bullmq';
 import { enqueueTransactional, formatMoney } from './transactional.js';
+import { mapLineItems, type LineItem } from './mapper.js';
 
 /**
  * Automation triggers. order_paid / order_shipped fire an immediate
@@ -117,6 +118,44 @@ async function loadAutomation(
     html: tpl.html,
     delayMinutes: a.delayMinutes,
   };
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+}
+
+/**
+ * Render cart line items into an email-safe HTML fragment (one row per item:
+ * thumbnail + title × qty), to inject via the `{{order_items}}` merge var.
+ * Dynamic text is escaped here because worker-sender injects html-merge vars
+ * verbatim. Returns '' when there are no items so the block disappears.
+ * Inline styles + <table> layout for Outlook/Gmail reliability; matches the
+ * default abandoned-cart template's palette.
+ */
+export function renderOrderItemsHtml(items: LineItem[]): string {
+  if (items.length === 0) return '';
+  const rows = items
+    .map((it) => {
+      const title = escapeHtml(it.title);
+      const qty = Math.max(1, Math.round(it.quantity));
+      const variant = it.variant ? escapeHtml(it.variant) : '';
+      const thumb = it.imageUrl
+        ? `<img src="${escapeHtml(it.imageUrl)}" width="56" height="56" alt="" style="display:block;width:56px;height:56px;border-radius:8px;border:1px solid #eceff3;object-fit:cover;">`
+        : `<div style="width:56px;height:56px;border-radius:8px;border:1px solid #eceff3;background:#f1f3f5;"></div>`;
+      const variantLine = variant
+        ? `<div style="font-size:13px;color:#9ca3af;margin-top:3px;">${variant}</div>`
+        : '';
+      return `              <tr>
+                <td width="72" valign="top" style="padding:14px 0;border-top:1px solid #eceff3;">${thumb}</td>
+                <td valign="middle" style="padding:14px 0 14px 14px;border-top:1px solid #eceff3;font-size:16px;color:#111827;line-height:1.4;"><strong style="font-weight:600;">${title}</strong> &times; ${qty}${variantLine}</td>
+              </tr>`;
+    })
+    .join('\n');
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-spacing:0; border-collapse:collapse; margin:0 0 24px;">
+${rows}
+            </table>`;
 }
 
 function orderMergeVars(ctx: OrderContext): Record<string, string> {
@@ -323,10 +362,16 @@ export async function runAbandonedFromOrder(
         externalOrderId: job.externalOrderId,
       },
     },
-    select: { status: true },
+    select: { status: true, raw: true },
   });
   // Only recall while still unpaid; paid/shipped/cancelled → buyer is done.
   if (!order || order.status !== 'pending') return;
+
+  // Render the cart product list from the stored payload (kept off the BullMQ
+  // job to keep it small). Empty string when the payload has no line items.
+  const itemsHtml = renderOrderItemsHtml(
+    mapLineItems((order.raw ?? {}) as Record<string, unknown>),
+  );
 
   const mergeVars: Record<string, string> = {
     order_no: job.orderNo ?? job.externalOrderId,
@@ -335,6 +380,7 @@ export async function runAbandonedFromOrder(
       ? { order_total: formatMoney(job.value, job.currency) }
       : {}),
     ...(job.recoveryUrl ? { tracking_url: job.recoveryUrl } : {}),
+    ...(itemsHtml ? { order_items: itemsHtml } : {}),
   };
 
   await enqueueTransactional(deps, {
