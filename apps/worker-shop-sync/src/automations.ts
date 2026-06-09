@@ -41,16 +41,35 @@ export interface CheckoutContext {
   recoveryUrl?: string;
 }
 
-/** Payload for a delayed abandoned-cart recovery job (`shop-abandoned`). */
+/**
+ * Payload for a delayed abandoned-cart recovery job (`shop-abandoned`). Two
+ * sources: checkout-based (provider abandoned-checkout event → `externalCheckoutId`)
+ * and order-based (shopyy `orders/create` still unpaid → `externalOrderId`).
+ * Exactly one of the two ids is set; the worker routes on `externalOrderId`.
+ */
 export interface AbandonedJob {
   accountId: string;
   shopConnectionId: string;
   automationId: string;
-  externalCheckoutId: string;
+  externalCheckoutId?: string;
+  externalOrderId?: string;
+  orderNo?: string;
   email: string;
   contactId: string;
   value?: number;
   currency?: string;
+  recoveryUrl?: string;
+}
+
+export interface OrderAbandonContext {
+  accountId: string;
+  shopConnectionId: string;
+  externalOrderId: string;
+  orderNo?: string;
+  email: string;
+  contactId: string;
+  value: number;
+  currency: string;
   recoveryUrl?: string;
 }
 
@@ -186,7 +205,7 @@ export async function runAbandonedRecovery(
   job: AbandonedJob,
 ): Promise<void> {
   const a = await loadAutomation(deps.prisma, job.shopConnectionId, 'abandoned_cart');
-  if (!a) return;
+  if (!a || !job.externalCheckoutId) return;
 
   const checkout = await deps.prisma.shopAbandonedCheckout.findUnique({
     where: {
@@ -249,4 +268,84 @@ export async function runAbandonedRecovery(
       data: { status: 'recovery_sent', recoveryEmailSentAt: new Date() },
     });
   }
+}
+
+/**
+ * Schedule an order-based abandoned recall. Fired on shopyy `orders/create`:
+ * the order is recorded as `pending`, then re-checked `delayMinutes` later. The
+ * jobId dedupes re-delivered create webhooks to a single scheduled recall.
+ */
+export async function scheduleAbandonedFromOrder(
+  deps: AutomationDeps,
+  ctx: OrderAbandonContext,
+): Promise<void> {
+  const a = await loadAutomation(deps.prisma, ctx.shopConnectionId, 'abandoned_cart');
+  if (!a) return;
+
+  const job: AbandonedJob = {
+    accountId: ctx.accountId,
+    shopConnectionId: ctx.shopConnectionId,
+    automationId: a.id,
+    externalOrderId: ctx.externalOrderId,
+    orderNo: ctx.orderNo,
+    email: ctx.email,
+    contactId: ctx.contactId,
+    value: ctx.value,
+    currency: ctx.currency,
+    recoveryUrl: ctx.recoveryUrl,
+  };
+  await deps.abandonedQueue.add('recover-order', job, {
+    delay: a.delayMinutes * 60_000,
+    jobId: `ab-order-${ctx.shopConnectionId}-${ctx.externalOrderId}`,
+    removeOnComplete: true,
+    removeOnFail: { age: 86400 * 7 },
+  });
+}
+
+/**
+ * Fire an order-based abandoned recall unless the order has since been paid.
+ * The `orders/paid` webhook canonicalises `shop_orders.status` to 'paid' (and
+ * 'shipped' on fulfillment), so anything other than 'pending' means the buyer
+ * converted (or the order was cancelled) → no recall. Idempotency is enforced
+ * by the `ShopAutomationSend` unique key on (automationId, dedupKey).
+ */
+export async function runAbandonedFromOrder(
+  deps: AutomationDeps,
+  job: AbandonedJob,
+): Promise<void> {
+  const a = await loadAutomation(deps.prisma, job.shopConnectionId, 'abandoned_cart');
+  if (!a || !job.externalOrderId) return;
+
+  const order = await deps.prisma.shopOrder.findUnique({
+    where: {
+      shopConnectionId_externalOrderId: {
+        shopConnectionId: job.shopConnectionId,
+        externalOrderId: job.externalOrderId,
+      },
+    },
+    select: { status: true },
+  });
+  // Only recall while still unpaid; paid/shipped/cancelled → buyer is done.
+  if (!order || order.status !== 'pending') return;
+
+  const mergeVars: Record<string, string> = {
+    order_no: job.orderNo ?? job.externalOrderId,
+    order_currency: job.currency ?? '',
+    ...(job.value != null && job.currency
+      ? { order_total: formatMoney(job.value, job.currency) }
+      : {}),
+    ...(job.recoveryUrl ? { tracking_url: job.recoveryUrl } : {}),
+  };
+
+  await enqueueTransactional(deps, {
+    accountId: job.accountId,
+    automationId: a.id,
+    dedupKey: `abandoned:order:${job.externalOrderId}`,
+    contactId: job.contactId,
+    email: job.email,
+    subject: a.subject,
+    fromEmail: a.fromEmail,
+    fromName: a.fromName,
+    mergeVars,
+  });
 }

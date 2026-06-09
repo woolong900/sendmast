@@ -74,6 +74,8 @@ export interface NormalizedOrder {
   orderTime: Date;
   /** Logistics tracking URL, when present on a shipped/fulfilled payload. */
   trackingUrl?: string;
+  /** Pay-now / view-order URL, used by the abandoned-order recall email. */
+  payUrl?: string;
 }
 
 /** Tracking URL can live on the order or a nested fulfillment/shipment object. */
@@ -122,6 +124,14 @@ export function mapOrder(payload: Json): NormalizedOrder | null {
       'updated_at',
     ]),
     trackingUrl: pickTrackingUrl(o),
+    payUrl: pickStr(o, [
+      'pay_url',
+      'payment_url',
+      'cashier_url',
+      'checkout_url',
+      'order_url',
+      'detail_url',
+    ]),
   };
 }
 

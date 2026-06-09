@@ -12,7 +12,9 @@ import {
 import { QUEUE_NAMES, type ShopEventJob } from '@sendmast/shared';
 import { mapCheckout, mapOrder } from './mapper.js';
 import {
+  runAbandonedFromOrder,
   runAbandonedRecovery,
+  scheduleAbandonedFromOrder,
   scheduleAbandonedRecovery,
   triggerOrderPaid,
   triggerOrderShipped,
@@ -89,7 +91,10 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       contactId,
       value: order.value,
       currency: order.currency,
-      status: shipped ? 'shipped' : order.status,
+      // This handler runs for the paid/shipped events, so the status is known —
+      // canonicalise it so the abandoned-order recall can reliably tell a paid
+      // order from a still-pending one.
+      status: shipped ? 'shipped' : 'paid',
       orderTime: order.orderTime,
       attributedCampaignId: attribution?.campaignId ?? null,
       attributedContactId: attribution ? contactId : null,
@@ -102,7 +107,7 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       contactId,
       value: order.value,
       currency: order.currency,
-      status: shipped ? 'shipped' : order.status,
+      status: shipped ? 'shipped' : 'paid',
       orderTime: order.orderTime,
       // Don't overwrite an existing attribution on a later (e.g. shipped) event.
       ...(attribution
@@ -167,6 +172,72 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
   }
 }
 
+/**
+ * `orders/create`: record the order as `pending` and schedule an abandoned
+ * recall `delayMinutes` later. The recall fires only if the order is still
+ * unpaid then (the `orders/paid` webhook flips status to 'paid'). This is the
+ * shopyy substitute for a native abandoned-checkout event and avoids polling.
+ */
+async function handleOrderCreated(job: ShopEventJob): Promise<void> {
+  const order = mapOrder(job.payload);
+  if (!order) {
+    console.warn(`[shop-sync] created-order payload missing id/email (store conn ${job.connectionId})`);
+    return;
+  }
+  const contactId = await upsertContact(job.accountId, order.email);
+
+  await prisma.shopOrder.upsert({
+    where: {
+      shopConnectionId_externalOrderId: {
+        shopConnectionId: job.connectionId,
+        externalOrderId: order.externalOrderId,
+      },
+    },
+    create: {
+      accountId: job.accountId,
+      shopConnectionId: job.connectionId,
+      externalOrderId: order.externalOrderId,
+      orderNo: order.orderNo ?? null,
+      customerEmail: order.email,
+      contactId,
+      value: order.value,
+      currency: order.currency,
+      status: 'pending',
+      orderTime: order.orderTime,
+      raw: job.payload as object,
+    },
+    // Never overwrite `status` here: a paid/shipped webhook may have raced ahead
+    // and we must not downgrade a converted order back to 'pending'.
+    update: {
+      orderNo: order.orderNo ?? null,
+      customerEmail: order.email,
+      contactId,
+      value: order.value,
+      currency: order.currency,
+      orderTime: order.orderTime,
+      raw: job.payload as object,
+    },
+  });
+
+  await touchSync(job.connectionId);
+
+  try {
+    await scheduleAbandonedFromOrder(deps, {
+      accountId: job.accountId,
+      shopConnectionId: job.connectionId,
+      externalOrderId: order.externalOrderId,
+      orderNo: order.orderNo,
+      email: order.email,
+      contactId,
+      value: order.value,
+      currency: order.currency,
+      recoveryUrl: order.payUrl,
+    });
+  } catch (e) {
+    console.error('[shop-sync] abandoned-from-order schedule failed:', e);
+  }
+}
+
 async function handleAbandoned(job: ShopEventJob): Promise<void> {
   const checkout = mapCheckout(job.payload);
   if (!checkout) {
@@ -227,6 +298,8 @@ async function handleAbandoned(job: ShopEventJob): Promise<void> {
 async function runJob(job: Job<ShopEventJob>): Promise<void> {
   const data = job.data;
   switch (data.topic) {
+    case 'order_created':
+      return handleOrderCreated(data);
     case 'order_paid':
       return handleOrder(data, false);
     case 'order_shipped':
@@ -247,7 +320,10 @@ new Worker<ShopEventJob>(QUEUE_NAMES.SHOP_EVENTS, runJob, {
 // checkout was abandoned; the handler re-checks for conversion before sending.
 new Worker<AbandonedJob>(
   QUEUE_NAMES.SHOP_ABANDONED,
-  async (job: Job<AbandonedJob>) => runAbandonedRecovery(deps, job.data),
+  async (job: Job<AbandonedJob>) =>
+    job.data.externalOrderId
+      ? runAbandonedFromOrder(deps, job.data)
+      : runAbandonedRecovery(deps, job.data),
   { connection, concurrency: 4 },
 );
 

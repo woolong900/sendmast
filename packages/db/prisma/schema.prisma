@@ -1141,7 +1141,8 @@ model ShopAutomation {
   fromEmail        String?            @map("from_email")
   fromName         String?            @map("from_name")
   subject          String?
-  /// abandoned_cart only: minutes to wait after abandonment before recovery.
+  /// abandoned_cart only: minutes to wait after an order is created before the
+  /// recall fires (skipped if the order has been paid by then).
   delayMinutes     Int                @default(60) @map("delay_minutes")
   /// Backing hidden system campaign id; recipients are attached to it so the
   /// existing send/track/analytics stack applies unchanged.

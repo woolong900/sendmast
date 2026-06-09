@@ -77,7 +77,8 @@ export interface ShopAutomationView {
 
 /**
  * Editable automation fields. `delayMinutes` only meaningful for
- * `abandoned_cart` but accepted for all to keep the form uniform.
+ * `abandoned_cart` (minutes to wait after an order is created before sending
+ * the recall, if still unpaid) but accepted for all to keep the form uniform.
  */
 export const UpdateShopAutomationSchema = z.object({
   enabled: z.boolean().optional(),
@@ -93,9 +94,16 @@ export type UpdateShopAutomationInput = z.infer<typeof UpdateShopAutomationSchem
 /**
  * Normalised inbound topics. shopyy's raw topic strings vary
  * (`order.paid` / `orders/paid` / `order_paid` ...) so the webhook normalises
- * to these before enqueueing.
+ * to these before enqueueing. `order_created` is how we drive abandoned-cart
+ * recovery on shopyy (which has no native abandoned-checkout event): every
+ * created order is recorded, then re-checked `delayMinutes` later — if still
+ * unpaid, the recall fires.
  */
-export type ShopEventTopic = 'order_paid' | 'order_shipped' | 'checkout_abandoned';
+export type ShopEventTopic =
+  | 'order_paid'
+  | 'order_shipped'
+  | 'checkout_abandoned'
+  | 'order_created';
 
 /** Map a raw provider topic string to our normalised topic (null = ignore). */
 export function normalizeShopTopic(raw: string | undefined | null): ShopEventTopic | null {
@@ -105,6 +113,9 @@ export function normalizeShopTopic(raw: string | undefined | null): ShopEventTop
   if (t.includes('ship') || t.includes('fulfill') || t.includes('deliver'))
     return 'order_shipped';
   if (t.includes('abandon') || t.includes('checkout')) return 'checkout_abandoned';
+  // `orders/create` + `orderonepeges/create` (single-page flow).
+  if (t.includes('create') && (t.includes('order') || t.includes('peg')))
+    return 'order_created';
   return null;
 }
 

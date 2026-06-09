@@ -30,14 +30,19 @@ import { PrismaService } from '../../common/prisma/prisma.service';
  * Webhook events we subscribe the store to. `eventId` is the shopyy event id
  * (from `GET /webhooks/events`); `topic` is the value we encode in the callback
  * URL (`?topic=`) so the receiver knows the event without relying on shopyy's
- * inbound headers/body. shopyy has no abandoned-cart event, so `abandoned_cart`
- * automations can't be webhook-driven on this platform.
+ * inbound headers/body. shopyy has no abandoned-checkout event, so we instead
+ * subscribe to order creation (standard + single-page flows): every created
+ * order is recorded, and the `abandoned_cart` automation re-checks it
+ * `delayMinutes` later — if still unpaid, the recall fires. This avoids polling
+ * the order list via the OpenAPI.
  */
 const SHOPYY_WEBHOOK_EVENTS: ReadonlyArray<{
   eventId: number;
   topic: string;
   name: string;
 }> = [
+  { eventId: 4, topic: 'orders/create', name: 'SendMast 订单创建' },
+  { eventId: 36, topic: 'orders/create', name: 'SendMast 订单创建（单页）' },
   { eventId: 5, topic: 'orders/paid', name: 'SendMast 订单支付' },
   { eventId: 7, topic: 'orders/fulfilled', name: 'SendMast 订单发货' },
 ];
