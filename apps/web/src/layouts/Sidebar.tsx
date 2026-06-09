@@ -19,6 +19,7 @@ import {
   Radio,
   Handshake,
   Store,
+  Workflow,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/BrandLogo';
 import { cn } from '@/lib/utils';
@@ -44,6 +45,7 @@ const BASE_NAV: NavGroup[] = [
     label: '营销',
     items: [
       { to: '/campaigns', label: '营销活动', icon: <Send className="size-4" /> },
+      { to: '/automations', label: '自动化', icon: <Workflow className="size-4" /> },
       { to: '/contacts', label: '联系人', icon: <Users className="size-4" /> },
       { to: '/segments', label: '动态分群', icon: <Filter className="size-4" /> },
       { to: '/templates', label: '模板库', icon: <FileText className="size-4" /> },

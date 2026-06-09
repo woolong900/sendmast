@@ -5,9 +5,9 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
+import { Link } from 'react-router-dom';
 import { api, apiErrMessage } from '@/lib/api';
 import type { ShopConnectionView } from '@sendmast/shared';
-import { ShopAutomationCards } from './ShopAutomationCards';
 
 interface ShopConnectionsResponse {
   configured: boolean;
@@ -50,7 +50,11 @@ export function ShopConnectionsPage() {
       <div>
         <h1 className="text-xl font-semibold">店铺连接</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          连接 Shopyy（OEMSAAS）店铺后，可统计邮件带来的订单与销售额，并启用订单/发货/弃单自动化邮件。
+          连接 Shopyy（OEMSAAS）店铺后，可统计邮件带来的订单与销售额。订单/发货/弃单等自动化邮件请在
+          <Link to="/automations" className="mx-1 font-medium text-primary hover:underline">
+            自动化
+          </Link>
+          菜单中配置。
         </p>
       </div>
 
@@ -87,8 +91,7 @@ export function ShopConnectionsPage() {
         {active.map((c) => {
           const badge = STATUS_BADGE[c.status];
           return (
-            <div key={c.id} className="space-y-3">
-            <Card>
+            <Card key={c.id}>
               <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
@@ -123,8 +126,6 @@ export function ShopConnectionsPage() {
                 </Button>
               </CardContent>
             </Card>
-            {c.status === 'active' && <ShopAutomationCards connectionId={c.id} />}
-            </div>
           );
         })}
       </div>
