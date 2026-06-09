@@ -143,7 +143,6 @@ const HTML_STARTER = `<!doctype html>
 </html>
 `;
 
-const STEPS = ['基本信息', '选择模板', '编辑内容', '预览发送'];
 const SUBJECT_MAX = 150;
 const PREHEADER_MAX = 100;
 
@@ -281,6 +280,10 @@ export function CampaignWizardPage() {
   const [scheduleAt, setScheduleAt] = useState('');
 
   const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [templateReplacePending, setTemplateReplacePending] = useState<
+    { kind: 'template'; id: string } | { kind: 'blank' } | null
+  >(null);
 
   const prefilled = useRef(false);
 
@@ -442,11 +445,11 @@ export function CampaignWizardPage() {
   }, [lists.data, segments.data, selectedListIds, selectedSegmentIds]);
 
   // Resolve the Easy Email IEmailTemplate to feed <EmailEditorProvider data>
-  // on step-2 entry. Priority: user-edited design > picked template's designJson
+  // on editor-step entry. Priority: user-edited design > picked template's designJson
   // > empty. Cleared on step exit so re-entry re-resolves fresh — important
   // when the user changes selectedTemplateId between visits.
   useEffect(() => {
-    if (step !== 2) {
+    if (step !== 1 || editorMode !== 'visual') {
       setStep2Initial(null);
       return;
     }
@@ -492,22 +495,6 @@ export function CampaignWizardPage() {
     utmMedium: utmCustomized && utmMedium ? utmMedium : undefined,
     utmCampaign: utmCustomized && utmCampaign ? utmCampaign : undefined,
     trackClicks,
-  });
-
-  const createMut = useMutation({
-    mutationFn: () => api.post('/api/campaigns', payload()),
-    onSuccess: (r) => {
-      setCreatedId(r.data.id);
-      qc.invalidateQueries({ queryKey: ['campaigns'] });
-    },
-  });
-
-  const updateMut = useMutation({
-    mutationFn: () => api.patch(`/api/campaigns/${editingId}`, payload()),
-    onSuccess: () => {
-      setSavedEdit(true);
-      qc.invalidateQueries({ queryKey: ['campaigns'] });
-    },
   });
 
   const saveDraftMut = useMutation({
@@ -560,13 +547,6 @@ export function CampaignWizardPage() {
   });
 
   const sendableId = isEdit ? (savedEdit ? editingId! : null) : createdId;
-  const sendMut = useMutation({
-    mutationFn: (id: string) => api.post(`/api/campaigns/${id}/send`),
-    onSuccess: (_data, id) => {
-      void qc.invalidateQueries({ queryKey: ['campaigns'] });
-      navigate(`/campaigns/${id}`);
-    },
-  });
 
   // Finalize send: persist scheduledAt (if scheduling) then send. Wrapping
   // both into one mutation gives a single isPending/isError surface for the UI.
@@ -589,24 +569,7 @@ export function CampaignWizardPage() {
 
   function next() {
     if (step === 0 && !canNextFromStep0()) return;
-    // Skip template picker when in raw-HTML mode (templates are stored as
-    // designJson trees that only Easy Email can render), or if the campaign
-    // already has saved content (no need to re-pick).
-    if (step === 0 && (editorMode === 'html' || editorHtml)) {
-      setStep(2);
-      return;
-    }
-    if (step === 1 && !canNextFromStep1()) return;
-    setStep((s) => Math.min(STEPS.length - 1, s + 1));
-  }
-
-  function prev() {
-    // From step 2 in HTML mode, hop back over the (skipped) step-1 picker.
-    if (step === 2 && editorMode === 'html') {
-      setStep(0);
-      return;
-    }
-    setStep((s) => Math.max(0, s - 1));
+    setStep((s) => Math.min(2, s + 1));
   }
 
   /**
@@ -649,8 +612,46 @@ export function CampaignWizardPage() {
     );
   }
 
-  function canNextFromStep1() {
-    return blankSelected || !!selectedTemplateId;
+  function needsTemplateReplaceConfirm(isEditorDirty?: boolean): boolean {
+    return !!(
+      isEditorDirty ||
+      editorHtml ||
+      editorMjml ||
+      editorDesign ||
+      selectedTemplateId ||
+      blankSelected
+    );
+  }
+
+  function commitTemplatePick(pick: { kind: 'template'; id: string } | { kind: 'blank' }) {
+    if (pick.kind === 'blank') {
+      pickBlank();
+    } else {
+      pickTemplate(pick.id);
+    }
+    setEditorDesign(null);
+    setStep2Initial(null);
+    setTemplatePickerOpen(false);
+    setTemplateReplacePending(null);
+  }
+
+  function requestTemplatePick(
+    pick: { kind: 'template'; id: string } | { kind: 'blank' },
+    isEditorDirty?: boolean,
+  ) {
+    if (pick.kind === 'template' && pick.id === selectedTemplateId) {
+      setTemplatePickerOpen(false);
+      return;
+    }
+    if (pick.kind === 'blank' && blankSelected && !selectedTemplateId && !editorDesign) {
+      setTemplatePickerOpen(false);
+      return;
+    }
+    if (needsTemplateReplaceConfirm(isEditorDirty)) {
+      setTemplateReplacePending(pick);
+      return;
+    }
+    commitTemplatePick(pick);
   }
 
   // Compile an Easy Email IEmailTemplate to MJML + HTML for persistence.
@@ -971,7 +972,7 @@ export function CampaignWizardPage() {
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
                 选择「拖放编辑器」可视化搭建邮件，或选择「HTML」直接粘贴/编写代码。
-                选择 HTML 将跳过模板选择步骤。
+                拖放模式下可在编辑器内随时选择模板。
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -1020,8 +1021,8 @@ export function CampaignWizardPage() {
     );
   }
 
-  // Step 2 — full-screen editor (Easy Email visual / CodeMirror HTML).
-  if (step === 2) {
+  // Step 1 — full-screen editor (Easy Email visual / CodeMirror HTML).
+  if (step === 1) {
     // Mobile blocker — both editors (Easy Email visual + side-by-side HTML)
     // are desktop-only flows. Easy Email mounts a fixed 100vh canvas with
     // a left sidebar of block categories; the HTML editor splits the screen
@@ -1054,7 +1055,7 @@ export function CampaignWizardPage() {
               { html },
               {
                 onSuccess: () => {
-                  if (intent === 'advance') setStep(3);
+                  if (intent === 'advance') setStep(2);
                   else setStep(0);
                 },
               },
@@ -1111,7 +1112,7 @@ export function CampaignWizardPage() {
                 { html, mjml, designJson: values },
                 {
                   onSuccess: () => {
-                    if (intent === 'advance') setStep(3);
+                    if (intent === 'advance') setStep(2);
                     else exitToBasic();
                   },
                 },
@@ -1143,7 +1144,20 @@ export function CampaignWizardPage() {
                       {apiErrMessage(saveContentMut.error)}
                     </div>
                   )}
-                  <div className={saveContentMut.isError ? '' : 'ml-auto'}>
+                  <div
+                    className={
+                      'flex items-center gap-3 ' +
+                      (saveContentMut.isError ? '' : 'ml-auto')
+                    }
+                  >
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setTemplatePickerOpen(true)}
+                    >
+                      <LayoutTemplate className="mr-1.5 size-4" />
+                      选择模板
+                    </Button>
                     <Button
                       onClick={() => persist('advance')}
                       disabled={saveContentMut.isPending}
@@ -1174,6 +1188,24 @@ export function CampaignWizardPage() {
                   onDiscard={exitToBasic}
                   onSave={() => persist('exit')}
                 />
+                <TemplatePickerDialog
+                  open={templatePickerOpen}
+                  templates={templates.data ?? []}
+                  selectedTemplateId={selectedTemplateId}
+                  blankSelected={blankSelected}
+                  loading={templates.isLoading}
+                  onClose={() => setTemplatePickerOpen(false)}
+                  onPick={(pick) =>
+                    requestTemplatePick(pick, !helper.getState().pristine)
+                  }
+                />
+                <TemplateReplaceConfirmDialog
+                  open={!!templateReplacePending}
+                  onCancel={() => setTemplateReplacePending(null)}
+                  onConfirm={() => {
+                    if (templateReplacePending) commitTemplatePick(templateReplacePending);
+                  }}
+                />
               </div>
             );
           }}
@@ -1182,8 +1214,8 @@ export function CampaignWizardPage() {
     );
   }
 
-  // Step 3 — preview & send (no stepper, two-column summary + schedule card).
-  if (step === 3) {
+  // Step 2 — preview & send (no stepper, two-column summary + schedule card).
+  if (step === 2) {
     const selectedLists = (lists.data ?? []).filter((l) =>
       selectedListIds.includes(l.id),
     );
@@ -1291,7 +1323,7 @@ export function CampaignWizardPage() {
             <CardContent className="space-y-3 p-6">
               <div className="flex items-start justify-between">
                 <h2 className="text-base font-semibold">邮件内容</h2>
-                <Button variant="outline" size="sm" onClick={() => setStep(2)}>
+                <Button variant="outline" size="sm" onClick={() => setStep(1)}>
                   编辑
                 </Button>
               </div>
@@ -1405,83 +1437,7 @@ export function CampaignWizardPage() {
     );
   }
 
-  // Step 1 (template picker) — stepper card layout.
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Button variant="outline" size="icon" asChild className="shrink-0">
-          <Link to="/campaigns" aria-label="返回列表">
-            <ArrowLeft className="size-5" />
-          </Link>
-        </Button>
-        <h1 className="text-xl font-semibold">
-          {isEdit ? '编辑营销活动' : '新建营销活动'}
-        </h1>
-      </div>
-
-      <Card>
-        <CardContent className="p-6">
-          <Stepper step={step} steps={STEPS} />
-
-          {step === 1 && (
-            <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-3">
-              <button
-                type="button"
-                onClick={pickBlank}
-                className={
-                  'flex aspect-[4/3] flex-col items-center justify-center gap-2 rounded-md border border-dashed p-3 text-center transition-colors ' +
-                  (blankSelected
-                    ? 'border-primary bg-primary/5'
-                    : 'border-input hover:border-primary/50 hover:bg-muted/40')
-                }
-              >
-                <div className="flex size-10 items-center justify-center rounded-full bg-muted text-2xl text-muted-foreground">
-                  +
-                </div>
-                <div className="text-sm font-medium">空白模板</div>
-                <div className="text-xs text-muted-foreground">从零开始设计</div>
-              </button>
-              {(templates.data ?? []).map((t) => {
-                const selected = selectedTemplateId === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => pickTemplate(t.id)}
-                    className={
-                      'rounded-md border p-3 text-left transition-colors ' +
-                      (selected
-                        ? 'border-primary bg-primary/5'
-                        : 'hover:border-primary/50 hover:bg-muted/40')
-                    }
-                  >
-                    <div className="text-sm font-medium">{t.name}</div>
-                    <Badge
-                      variant={t.scope === 'system' ? 'muted' : 'default'}
-                      className="mt-1"
-                    >
-                      {t.scope === 'system' ? '系统' : '我的'}
-                    </Badge>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="mt-6 flex items-center justify-between">
-            <Button variant="ghost" onClick={prev}>
-              <ArrowLeft className="mr-1 size-4" />
-              上一步
-            </Button>
-            <Button onClick={next} disabled={!canNextFromStep1()}>
-              下一步
-              <ArrowRight className="ml-1 size-4" />
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
+  return null;
 }
 
 function SummarySection({
@@ -1509,50 +1465,6 @@ function SummarySection({
         {empty ? <span className="text-destructive">{empty}</span> : children}
       </div>
     </div>
-  );
-}
-
-function Stepper({ step, steps }: { step: number; steps: string[] }) {
-  return (
-    <ol className="flex flex-wrap items-center gap-2">
-      {steps.map((label, i) => {
-        const active = step === i;
-        const done = step > i;
-        return (
-          <li key={label} className="flex items-center gap-2">
-            <div
-              className={
-                'flex size-7 items-center justify-center rounded-full text-xs font-medium ' +
-                (done
-                  ? 'bg-primary text-primary-foreground'
-                  : active
-                    ? 'bg-primary/15 text-primary border border-primary'
-                    : 'bg-muted text-muted-foreground')
-              }
-            >
-              {done ? <Check className="size-3.5" /> : i + 1}
-            </div>
-            {/* Hide step labels below sm — at 360px three labels with
-                connecting lines push the stepper past the viewport. The
-                circled number alone is enough wayfinding on phones; the
-                active step still shows its label only (so the user knows
-                where they are). */}
-            <span
-              className={
-                (active ? 'font-medium ' : 'text-muted-foreground ') +
-                (active ? '' : 'hidden ') +
-                'sm:inline'
-              }
-            >
-              {label}
-            </span>
-            {i < steps.length - 1 && (
-              <div className="mx-1 h-px w-4 bg-border sm:mx-2 sm:w-10" />
-            )}
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 
@@ -1899,6 +1811,148 @@ function EditorModeCard({
         </div>
       )}
     </button>
+  );
+}
+
+function TemplatePickerDialog({
+  open,
+  templates,
+  selectedTemplateId,
+  blankSelected,
+  loading,
+  onClose,
+  onPick,
+}: {
+  open: boolean;
+  templates: Template[];
+  selectedTemplateId: string | null;
+  blankSelected: boolean;
+  loading: boolean;
+  onClose: () => void;
+  onPick: (pick: { kind: 'template'; id: string } | { kind: 'blank' }) => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl bg-card shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold">选择模板</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              从空白开始，或选用系统/自定义模板作为起点
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-muted-foreground hover:bg-muted/40"
+            aria-label="关闭"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="overflow-auto p-5">
+          {loading ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">加载模板…</div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => onPick({ kind: 'blank' })}
+                className={
+                  'flex aspect-[4/3] flex-col items-center justify-center gap-2 rounded-md border border-dashed p-3 text-center transition-colors ' +
+                  (blankSelected && !selectedTemplateId
+                    ? 'border-primary bg-primary/5'
+                    : 'border-input hover:border-primary/50 hover:bg-muted/40')
+                }
+              >
+                <div className="flex size-10 items-center justify-center rounded-full bg-muted text-2xl text-muted-foreground">
+                  +
+                </div>
+                <div className="text-sm font-medium">空白模板</div>
+                <div className="text-xs text-muted-foreground">从零开始设计</div>
+              </button>
+              {templates.map((t) => {
+                const selected = selectedTemplateId === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => onPick({ kind: 'template', id: t.id })}
+                    className={
+                      'flex aspect-[4/3] flex-col justify-between rounded-md border p-3 text-left transition-colors ' +
+                      (selected
+                        ? 'border-primary bg-primary/5'
+                        : 'hover:border-primary/50 hover:bg-muted/40')
+                    }
+                  >
+                    <div className="text-sm font-medium">{t.name}</div>
+                    <Badge variant={t.scope === 'system' ? 'muted' : 'default'} className="w-fit">
+                      {t.scope === 'system' ? '系统' : '我的'}
+                    </Badge>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TemplateReplaceConfirmDialog({
+  open,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/30 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md rounded-lg bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between px-5 pt-5">
+          <div className="flex items-center gap-3">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white">
+              <AlertTriangle className="size-4" />
+            </div>
+            <h2 className="text-base font-semibold">更换模板将清空当前内容</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded p-1 text-muted-foreground hover:bg-muted/40"
+            aria-label="关闭"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="px-5 pb-1 pt-3 text-sm text-muted-foreground">
+          重新选择模板会清除编辑器中的现有邮件正文，此操作无法撤销。
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 pb-5 pt-6">
+          <Button variant="outline" onClick={onCancel}>
+            取消
+          </Button>
+          <Button onClick={onConfirm}>确认更换</Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
