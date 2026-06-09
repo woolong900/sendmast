@@ -32,6 +32,16 @@ import {
   getNodeTypeClassName,
   type IBlock,
 } from 'easy-email-core';
+import { SAMPLE_ORDER_ITEMS_HTML } from '@/lib/email-merge-preview';
+
+const ORDER_ITEMS_TAG = '{{order_items}}';
+
+function rawContentForCanvas(rawContent: string, mode: string | undefined): string {
+  if (mode === 'testing' && rawContent.trim() === ORDER_ITEMS_TAG) {
+    return SAMPLE_ORDER_ITEMS_HTML;
+  }
+  return rawContent;
+}
 
 const originalRaw = BlockManager.getBlockByType(BasicType.RAW);
 
@@ -41,10 +51,12 @@ if (originalRaw) {
     const rawContent: string =
       (params.data?.data?.value as { content?: string } | undefined)?.content ?? '';
 
+    const displayContent = rawContentForCanvas(rawContent, mode);
+
     const wrappedContent =
       mode === 'testing' && idx
-        ? `<div class="${EMAIL_BLOCK_CLASS_NAME} ${getNodeIdxClassName(idx)} ${getNodeTypeClassName(BasicType.RAW)}">${rawContent}</div>`
-        : rawContent;
+        ? `<div class="${EMAIL_BLOCK_CLASS_NAME} ${getNodeIdxClassName(idx)} ${getNodeTypeClassName(BasicType.RAW)}">${displayContent}</div>`
+        : displayContent;
 
     return React.createElement(
       React.Fragment,

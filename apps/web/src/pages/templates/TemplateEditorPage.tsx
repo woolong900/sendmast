@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Eye, Save, X } from 'lucide-react';
 import { ConfigProvider } from '@arco-design/web-react';
 import zhCN from '@arco-design/web-react/es/locale/zh-CN';
 import {
@@ -27,6 +27,11 @@ import { api, apiErrMessage } from '@/lib/api';
 import { easyEmailZhCN } from '@/lib/easy-email-locale';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
 import { captureAndUploadThumbnail } from '@/lib/thumbnail';
+import {
+  applyDesignJsonMergePreviews,
+  applyMergePreviewSamples,
+  stripDesignJsonMergePreviews,
+} from '@/lib/email-merge-preview';
 
 import 'easy-email-editor/lib/style.css';
 import 'easy-email-extensions/lib/style.css';
@@ -84,6 +89,17 @@ const blockCategories = [
           },
         },
       },
+      {
+        title: '商品列表',
+        type: BasicType.RAW,
+        payload: {
+          data: {
+            value: {
+              content: '{{order_items}}',
+            },
+          },
+        },
+      },
       // Footer-style unsubscribe text. `{{unsubscribe_url}}` is one of our
       // system tags (see packages/shared/src/schemas/system-tags.ts) — at
       // send time worker-sender substitutes it with the recipient-specific
@@ -127,6 +143,19 @@ function emptyEmailTemplate(): IEmailTemplate {
   return { content: page, subject: '', subTitle: '' };
 }
 
+function compileTemplateHtml(values: IEmailTemplate): string {
+  const mjml = JsonToMjml({
+    data: values.content,
+    mode: 'production',
+    context: values.content,
+  });
+  return mjml2html(mjml).html;
+}
+
+function compilePreviewHtml(values: IEmailTemplate): string {
+  return applyMergePreviewSamples(compileTemplateHtml(values));
+}
+
 export function TemplateEditorPage() {
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
@@ -134,6 +163,7 @@ export function TemplateEditorPage() {
   const [name, setName] = useState('未命名模板');
   const [category, setCategory] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
 
   const detail = useQuery<TemplateView>({
     queryKey: ['templates', id],
@@ -149,7 +179,9 @@ export function TemplateEditorPage() {
   const initialData = useMemo<IEmailTemplate | null>(() => {
     if (!id) return emptyEmailTemplate();
     if (!detail.data) return null;
-    if (detail.data.designJson?.content) return detail.data.designJson;
+    if (detail.data.designJson?.content) {
+      return applyDesignJsonMergePreviews(detail.data.designJson);
+    }
     return emptyEmailTemplate();
   }, [id, detail.data]);
 
@@ -162,10 +194,11 @@ export function TemplateEditorPage() {
 
   const saveMut = useMutation({
     mutationFn: async (values: IEmailTemplate) => {
+      const persisted = stripDesignJsonMergePreviews(values);
       const mjml = JsonToMjml({
-        data: values.content,
+        data: persisted.content,
         mode: 'production',
-        context: values.content,
+        context: persisted.content,
       });
       const html = mjml2html(mjml).html;
       // Generate the preview thumbnail off the freshly compiled HTML and
@@ -177,7 +210,7 @@ export function TemplateEditorPage() {
         category: category || undefined,
         html,
         mjml,
-        designJson: values,
+        designJson: persisted,
         ...(thumbnail ? { thumbnail } : {}),
       };
       if (id) return api.patch(`/api/templates/${id}`, payload);
@@ -225,6 +258,17 @@ export function TemplateEditorPage() {
                 返回
               </Button>
               <VariablesHelper variant="button" />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const values = helper.getState().values as IEmailTemplate;
+                  setPreviewHtml(compilePreviewHtml(values));
+                }}
+              >
+                <Eye className="mr-1 size-4" />
+                预览
+              </Button>
               <div className="flex-1" />
               <Input
                 value={name}
@@ -247,6 +291,37 @@ export function TemplateEditorPage() {
                 {saveMut.isPending ? '保存中...' : '保存'}
               </Button>
             </div>
+            {previewHtml && (
+              <div
+                className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+                onClick={() => setPreviewHtml(null)}
+              >
+                <div
+                  className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-xl bg-card shadow-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between border-b px-4 py-3">
+                    <div>
+                      <h3 className="text-sm font-semibold">邮件预览</h3>
+                      <p className="text-xs text-muted-foreground">
+                        商品列表与变量为示例数据，实际发送时由系统自动填充
+                      </p>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => setPreviewHtml(null)}>
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                  <div className="overflow-auto bg-muted/30 p-4">
+                    <iframe
+                      title="template-preview"
+                      srcDoc={previewHtml}
+                      className="mx-auto min-h-[640px] w-full max-w-[640px] rounded-lg border bg-white shadow-sm"
+                      sandbox=""
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
             {error && (
               <div className="border-b bg-destructive/5 px-4 py-2 text-xs text-destructive">
                 {error}
