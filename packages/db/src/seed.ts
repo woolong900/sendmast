@@ -10,7 +10,6 @@ const prisma = new PrismaClient();
 
 const SYSTEM_TEMPLATES: Array<{
   name: string;
-  category: string;
   mjml?: string;
   /** Pre-rendered HTML (for templates authored directly as HTML, not MJML). */
   html?: string;
@@ -19,22 +18,18 @@ const SYSTEM_TEMPLATES: Array<{
 }> = [
   {
     name: 'Welcome',
-    category: 'basic',
     mjml: welcomeMjml(),
   },
   {
     name: 'Product Launch',
-    category: 'promotion',
     mjml: launchMjml(),
   },
   {
     name: 'Newsletter',
-    category: 'basic',
     mjml: newsletterMjml(),
   },
   {
     name: '弃单召回（默认）',
-    category: 'promotion',
     mjml: abandonedCartMjml,
     html: abandonedCartHtml,
     designJson: abandonedCartDesignJson,
@@ -48,12 +43,11 @@ async function main() {
     const designJson = (tpl.designJson ?? null) as never;
     await prisma.emailTemplate.upsert({
       where: { id: deterministicId(tpl.name) },
-      update: { mjml, html, designJson, category: tpl.category },
+      update: { mjml, html, designJson },
       create: {
         id: deterministicId(tpl.name),
         scope: 'system',
         name: tpl.name,
-        category: tpl.category,
         mjml,
         html,
         designJson,

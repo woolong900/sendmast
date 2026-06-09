@@ -12,7 +12,6 @@ export class TemplateService {
     if (query.scope === 'system') where.scope = 'system';
     else if (query.scope === 'user') where.scope = 'user';
     else where.OR = [{ scope: 'system' }, { accountId }];
-    if (query.category) where.category = query.category;
     return this.prisma.emailTemplate.findMany({
       where,
       orderBy: [{ scope: 'asc' }, { createdAt: 'desc' }],
@@ -34,7 +33,6 @@ export class TemplateService {
         accountId,
         scope: 'user',
         name: input.name,
-        category: input.category,
         thumbnail: input.thumbnail,
         mjml,
         html,
@@ -48,7 +46,6 @@ export class TemplateService {
     if (!t) throw new NotFoundException('模板不存在');
     const data: any = {};
     if (input.name !== undefined) data.name = input.name;
-    if (input.category !== undefined) data.category = input.category;
     if (input.thumbnail !== undefined) data.thumbnail = input.thumbnail;
     // Easy Email path sends both `html` (already rendered client-side via
     // mjml-browser) AND `mjml` (so admins can audit / re-render later).

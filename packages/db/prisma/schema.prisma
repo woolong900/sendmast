@@ -648,7 +648,6 @@ model EmailTemplate {
   accountId  String?       @map("account_id") @db.Uuid
   scope      TemplateScope @default(user)
   name       String
-  category   String?
   thumbnail  String?
   mjml       String?       @db.Text
   html       String        @db.Text
@@ -660,7 +659,6 @@ model EmailTemplate {
   campaigns Campaign[]
 
   @@index([accountId])
-  @@index([scope, category])
   @@map("email_templates")
 }
 

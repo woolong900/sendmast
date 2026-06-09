@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
@@ -13,7 +12,6 @@ import { EmptyState } from '@/components/ui/empty-state';
 interface TemplateRow {
   id: string;
   name: string;
-  category: string | null;
   scope: 'system' | 'user';
   thumbnail: string | null;
   updatedAt: string;
@@ -129,11 +127,6 @@ function TemplateGrid({
                 <Link to={`/templates/${t.id}/edit`} className="block truncate text-sm font-medium hover:underline">
                   {t.name}
                 </Link>
-                {t.category && (
-                  <Badge variant="muted" className="mt-1">
-                    {t.category}
-                  </Badge>
-                )}
               </div>
               {deletable && onDelete && (
                 <Button

@@ -45,7 +45,6 @@ import '@/lib/easy-email-raw-block-fix';
 interface TemplateView {
   id: string;
   name: string;
-  category: string | null;
   html: string;
   mjml: string | null;
   designJson: IEmailTemplate | null;
@@ -161,7 +160,6 @@ export function TemplateEditorPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState('未命名模板');
-  const [category, setCategory] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
 
@@ -188,7 +186,6 @@ export function TemplateEditorPage() {
   useEffect(() => {
     if (detail.data) {
       setName(detail.data.name);
-      setCategory(detail.data.category ?? '');
     }
   }, [detail.data]);
 
@@ -207,7 +204,6 @@ export function TemplateEditorPage() {
       const thumbnail = await captureAndUploadThumbnail(html);
       const payload = {
         name,
-        category: category || undefined,
         html,
         mjml,
         designJson: persisted,
@@ -275,12 +271,6 @@ export function TemplateEditorPage() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="模板名称"
                 className="h-8 w-[220px]"
-              />
-              <Input
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                placeholder="分类（可选）"
-                className="h-8 w-[180px]"
               />
               <Button
                 size="sm"
