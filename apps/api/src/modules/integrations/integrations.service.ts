@@ -27,11 +27,20 @@ import {
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 /**
- * Topics we ask shopyy to push. Names are best-effort against the documented
- * conventions; if the real catalogue differs, only this list + the webhook
- * field-mapper need updating — the rest of the pipeline is topic-agnostic.
+ * Webhook events we subscribe the store to. `eventId` is the shopyy event id
+ * (from `GET /webhooks/events`); `topic` is the value we encode in the callback
+ * URL (`?topic=`) so the receiver knows the event without relying on shopyy's
+ * inbound headers/body. shopyy has no abandoned-cart event, so `abandoned_cart`
+ * automations can't be webhook-driven on this platform.
  */
-const SHOPYY_WEBHOOK_TOPICS = ['order.paid', 'order.shipped', 'checkout.abandoned'];
+const SHOPYY_WEBHOOK_EVENTS: ReadonlyArray<{
+  eventId: number;
+  topic: string;
+  name: string;
+}> = [
+  { eventId: 5, topic: 'orders/paid', name: 'SendMast 订单支付' },
+  { eventId: 7, topic: 'orders/fulfilled', name: 'SendMast 订单发货' },
+];
 
 /** shopyy `expired_at` may be Unix seconds, ms, or an ISO string. */
 function parseExpiredAt(v: string | number | undefined): Date | null {
@@ -191,24 +200,39 @@ export class IntegrationsService {
       this.config.get<string>('SHOPYY_WEBHOOK_BASE_URL') ??
       `${this.config.getOrThrow<string>('API_BASE_URL')}/api`;
     const base = rawBase.replace(/\/+$/, '');
-    // Per-store opaque key authenticates inbound webhooks without depending on
-    // shopyy's (undocumented) inbound signing — mirrors the Event Grid ?key=.
-    const address =
-      `${base}/webhooks/shopyy` +
-      `?store=${encodeURIComponent(conn.externalStoreId)}` +
-      `&key=${conn.webhookSecret}`;
     const client = new ShopyyClient({
       openapiDomain: conn.openapiDomain,
       token: conn.devToken,
     });
-    for (const topic of SHOPYY_WEBHOOK_TOPICS) {
-      await client.installWebhook({
-        topic,
-        address,
-        fromId: conn.appExternalId ?? '',
-        fromName: conn.appName ?? 'SendMast',
-      });
-    }
+
+    // Reuse an existing webhook row for the same event when it already points at
+    // our receiver, so re-connecting edits in place instead of duplicating
+    // (duplicates would double-send the transactional emails).
+    const existing = await client.listWebhooks().catch(() => [] as Awaited<
+      ReturnType<typeof client.listWebhooks>
+    >);
+    const ourPrefix = `${base}/webhooks/shopyy`;
+
+    const items = SHOPYY_WEBHOOK_EVENTS.map((e) => {
+      // Per-store opaque key authenticates inbound webhooks; topic is encoded so
+      // the receiver knows the event without trusting shopyy's inbound shape.
+      const url =
+        `${ourPrefix}` +
+        `?store=${encodeURIComponent(conn.externalStoreId)}` +
+        `&key=${conn.webhookSecret}` +
+        `&topic=${encodeURIComponent(e.topic)}`;
+      const prior = existing.find(
+        (w) => w.event_id === e.eventId && typeof w.url === 'string' && w.url.startsWith(ourPrefix),
+      );
+      return {
+        ...(prior ? { id: prior.id } : {}),
+        webhookName: e.name,
+        url,
+        eventId: e.eventId,
+      };
+    });
+
+    await client.batchSaveWebhooks(items);
   }
 
   /** PG sent count + ClickHouse engagement for one flow. Best-effort on CH outage. */

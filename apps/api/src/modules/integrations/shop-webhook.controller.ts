@@ -39,6 +39,7 @@ export class ShopWebhookController {
     @Query('store') store: string | undefined,
     @Query('key') key: string | undefined,
     @Query('challenge') challenge: string | undefined,
+    @Query('topic') topicQuery: string | undefined,
     @Headers('x-shopyy-topic') topicHeader: string | undefined,
     @Body() body: Record<string, unknown> | undefined,
   ) {
@@ -60,10 +61,14 @@ export class ShopWebhookController {
       return { accepted: false };
     }
 
+    // shopyy doesn't send a reliable topic header/field, so we encode it in the
+    // registered webhook URL (`?topic=orders/paid`). Fall back to header/body.
     const rawTopic =
+      topicQuery ??
       topicHeader ??
       (typeof body?.topic === 'string' ? body.topic : undefined) ??
-      (typeof body?.event === 'string' ? body.event : undefined);
+      (typeof body?.event === 'string' ? body.event : undefined) ??
+      (typeof body?.event_code === 'string' ? body.event_code : undefined);
     const topic = normalizeShopTopic(rawTopic);
     if (!topic) return { accepted: true, ignored: true };
 

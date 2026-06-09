@@ -23,7 +23,7 @@ export interface ShopyyDeveloperApp {
   name?: string;
   /** Token used as the credential for every OpenAPI call. */
   token: string;
-  /** Always `https://openapi.oemsaas.cn` per the doc; persisted per-connection. */
+  /** e.g. `https://openapi.oemsaas.shop`; persisted per-connection. */
   openapi_domain: string;
   webhook_baseurl?: string;
 }

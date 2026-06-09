@@ -2,7 +2,6 @@ import { buildSignedQuery } from './sign.js';
 import type {
   ShopyyAuthorizeResult,
   ShopyyEnvelope,
-  ShopyyRawCheckout,
   ShopyyRawOrder,
 } from './types.js';
 
@@ -169,38 +168,51 @@ export class ShopyyClient {
     return this.request<T>('POST', path, { body });
   }
 
-  // ── Domain helpers (adapter layer; endpoint paths are best-effort) ──────────
+  // ── Domain helpers ──────────────────────────────────────────────────────────
+
+  /** List the store's currently-registered webhooks. */
+  listWebhooks(): Promise<ShopyyWebhook[]> {
+    return this.get<ShopyyWebhook[]>('/webhooks');
+  }
 
   /**
-   * Register a webhook so the store pushes order/checkout events to us.
-   * `fromId`/`fromName` are the installed app's id/name per the doc.
-   * Returns the raw response so callers can persist any provider handle.
+   * Create/update webhooks in one call (`POST /webhooks/batchsave`). Each item
+   * without an `id` is created; with an `id` it edits the existing webhook.
+   * `eventId` is the shopyy event id (e.g. 5 = orders/paid, 7 = orders/fulfilled).
    */
-  installWebhook(input: {
-    topic: string;
-    address: string;
-    fromId: string;
-    fromName: string;
-  }): Promise<unknown> {
-    return this.post('/webhook/install', {
-      topic: input.topic,
-      address: input.address,
-      from_id: input.fromId,
-      from_name: input.fromName,
+  batchSaveWebhooks(items: ShopyyWebhookUpsert[]): Promise<unknown> {
+    return this.post('/webhooks/batchsave', {
+      data: items.map((w) => ({
+        ...(w.id != null ? { id: w.id } : {}),
+        webhook_name: w.webhookName,
+        url: w.url,
+        event_id: w.eventId,
+        delay_time: w.delayTime ?? 0,
+      })),
     });
   }
 
   /** Fetch a single order's full detail by the store's order id. */
   getOrder(externalOrderId: string): Promise<ShopyyRawOrder> {
-    return this.get<ShopyyRawOrder>(`/order/detail`, { order_id: externalOrderId });
+    return this.get<ShopyyRawOrder>(`/orders/${encodeURIComponent(externalOrderId)}`);
   }
+}
 
-  /** List abandoned checkouts updated since `since` (Unix seconds). */
-  listAbandonedCheckouts(since: number, page = 1, pageSize = 50): Promise<ShopyyRawCheckout[]> {
-    return this.get<ShopyyRawCheckout[]>(`/checkout/abandoned`, {
-      updated_at_min: since,
-      page,
-      page_size: pageSize,
-    });
-  }
+/** A webhook row as returned by `GET /webhooks`. */
+export interface ShopyyWebhook {
+  id: number;
+  webhook_name?: string;
+  url: string;
+  event_id: number;
+  event_code?: string;
+}
+
+/** Create (no `id`) or edit (with `id`) payload for `POST /webhooks/batchsave`. */
+export interface ShopyyWebhookUpsert {
+  id?: number;
+  webhookName: string;
+  url: string;
+  /** shopyy event id (5 = orders/paid, 7 = orders/fulfilled, …). */
+  eventId: number;
+  delayTime?: number;
 }
