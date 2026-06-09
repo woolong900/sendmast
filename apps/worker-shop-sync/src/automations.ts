@@ -86,8 +86,21 @@ interface ResolvedAutomation {
 const DEFAULT_SUBJECT: Record<ShopAutomationType, string> = {
   order_paid: '您的订单已支付成功',
   order_shipped: '您的订单已发货',
-  abandoned_cart: '您的购物车还在等您',
+  abandoned_cart: 'Complete your purchase',
 };
+
+/** Resolve {{shop_name}} from the connected store record. */
+async function shopNameMergeVar(
+  prisma: PrismaClient,
+  shopConnectionId: string,
+): Promise<{ shop_name: string }> {
+  const conn = await prisma.shopConnection.findUnique({
+    where: { id: shopConnectionId },
+    select: { shopName: true, shopDomain: true },
+  });
+  const name = conn?.shopName?.trim() || conn?.shopDomain?.trim() || '';
+  return name ? { shop_name: name } : {};
+}
 
 /**
  * Load a configured + enabled automation and its template body. Returns null
@@ -158,8 +171,9 @@ ${rows}
             </table>`;
 }
 
-function orderMergeVars(ctx: OrderContext): Record<string, string> {
+function orderMergeVars(ctx: OrderContext, shopName: { shop_name: string }): Record<string, string> {
   return {
+    ...shopName,
     order_no: ctx.orderNo ?? ctx.externalOrderId,
     order_total: formatMoney(ctx.value, ctx.currency),
     order_currency: ctx.currency,
@@ -173,6 +187,7 @@ export async function triggerOrderPaid(
 ): Promise<void> {
   const a = await loadAutomation(deps.prisma, ctx.shopConnectionId, 'order_paid');
   if (!a) return;
+  const shopName = await shopNameMergeVar(deps.prisma, ctx.shopConnectionId);
   await enqueueTransactional(deps, {
     accountId: ctx.accountId,
     automationId: a.id,
@@ -182,7 +197,7 @@ export async function triggerOrderPaid(
     subject: a.subject,
     fromEmail: a.fromEmail,
     fromName: a.fromName,
-    mergeVars: orderMergeVars(ctx),
+    mergeVars: orderMergeVars(ctx, shopName),
   });
 }
 
@@ -192,6 +207,7 @@ export async function triggerOrderShipped(
 ): Promise<void> {
   const a = await loadAutomation(deps.prisma, ctx.shopConnectionId, 'order_shipped');
   if (!a) return;
+  const shopName = await shopNameMergeVar(deps.prisma, ctx.shopConnectionId);
   await enqueueTransactional(deps, {
     accountId: ctx.accountId,
     automationId: a.id,
@@ -201,7 +217,7 @@ export async function triggerOrderShipped(
     subject: a.subject,
     fromEmail: a.fromEmail,
     fromName: a.fromName,
-    mergeVars: orderMergeVars(ctx),
+    mergeVars: orderMergeVars(ctx, shopName),
   });
 }
 
@@ -277,7 +293,9 @@ export async function runAbandonedRecovery(
     return;
   }
 
+  const shopName = await shopNameMergeVar(deps.prisma, job.shopConnectionId);
   const mergeVars: Record<string, string> = {
+    ...shopName,
     order_no: job.externalCheckoutId,
     order_currency: job.currency ?? '',
     ...(job.value != null && job.currency
@@ -373,7 +391,9 @@ export async function runAbandonedFromOrder(
     mapLineItems((order.raw ?? {}) as Record<string, unknown>),
   );
 
+  const shopName = await shopNameMergeVar(deps.prisma, job.shopConnectionId);
   const mergeVars: Record<string, string> = {
+    ...shopName,
     order_no: job.orderNo ?? job.externalOrderId,
     order_currency: job.currency ?? '',
     ...(job.value != null && job.currency

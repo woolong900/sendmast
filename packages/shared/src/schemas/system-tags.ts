@@ -88,6 +88,12 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
     description: '该收件人专属的退订 URL，建议放在 <a href="..."> 里',
   },
   {
+    name: 'shop_name',
+    placeholder: '{{shop_name}}',
+    label: '店铺名称',
+    description: '电商自动化邮件专用：触发店铺的名称（仅订单/弃单自动化邮件中有值）',
+  },
+  {
     name: 'order_no',
     placeholder: '{{order_no}}',
     label: '订单号',
@@ -129,6 +135,7 @@ export const SYSTEM_TAG_NAMES = SYSTEM_TAGS.map((t) => t.name);
  * path; always empty for ordinary bulk-campaign recipients.
  */
 export const MERGE_VAR_TAG_NAMES = [
+  'shop_name',
   'order_no',
   'order_total',
   'order_currency',
