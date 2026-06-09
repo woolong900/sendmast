@@ -43,6 +43,7 @@ import '@/lib/easy-email-raw-block-fix';
 interface TemplateView {
   id: string;
   name: string;
+  scope: 'system' | 'user';
   html: string;
   mjml: string | null;
   designJson: IEmailTemplate | null;
@@ -222,6 +223,33 @@ export function TemplateEditorPage() {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-background text-sm text-muted-foreground">
         加载中…
+      </div>
+    );
+  }
+
+  // System templates are shared, read-only starting points — they can only be
+  // previewed, not edited. (The API also rejects PATCH on system-scoped rows.)
+  if (detail.data?.scope === 'system') {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        <div className="flex items-center gap-3 border-b bg-background px-4 py-2">
+          <Button variant="outline" size="sm" onClick={() => navigate('/templates')}>
+            <ArrowLeft className="mr-1 size-4" />
+            返回
+          </Button>
+          <div className="truncate text-sm font-medium">{detail.data.name}</div>
+          <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+            系统模板 · 仅预览
+          </span>
+        </div>
+        <div className="flex-1 overflow-auto bg-muted/30 p-4">
+          <iframe
+            title="template-preview"
+            srcDoc={applyMergePreviewSamples(detail.data.html)}
+            className="mx-auto min-h-[640px] w-full max-w-[640px] rounded-lg border bg-white shadow-sm"
+            sandbox=""
+          />
+        </div>
       </div>
     );
   }
