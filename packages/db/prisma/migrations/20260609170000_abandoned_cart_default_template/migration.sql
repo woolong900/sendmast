@@ -1,89 +1,17 @@
-import { PrismaClient } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
-
-const prisma = new PrismaClient();
-
-const SYSTEM_TEMPLATES: Array<{
-  name: string;
-  category: string;
-  mjml?: string;
-  /** Pre-rendered HTML (for templates authored directly as HTML, not MJML). */
-  html?: string;
-}> = [
-  {
-    name: 'Welcome',
-    category: 'basic',
-    mjml: welcomeMjml(),
-  },
-  {
-    name: 'Product Launch',
-    category: 'promotion',
-    mjml: launchMjml(),
-  },
-  {
-    name: 'Newsletter',
-    category: 'basic',
-    mjml: newsletterMjml(),
-  },
-  {
-    name: '弃单召回（默认）',
-    category: 'promotion',
-    html: abandonedCartHtml(),
-  },
-];
-
-async function main() {
-  for (const tpl of SYSTEM_TEMPLATES) {
-    const html = tpl.html ?? '';
-    const mjml = tpl.mjml ?? null;
-    await prisma.emailTemplate.upsert({
-      where: { id: deterministicId(tpl.name) },
-      update: { mjml, html, category: tpl.category },
-      create: {
-        id: deterministicId(tpl.name),
-        scope: 'system',
-        name: tpl.name,
-        category: tpl.category,
-        mjml,
-        html,
-      },
-    });
-  }
-  console.log(`Seeded ${SYSTEM_TEMPLATES.length} system templates.`);
-}
-
-function deterministicId(name: string): string {
-  // Stable UUIDv5-ish using a fixed namespace; avoids drift across reseeds.
-  // For seed simplicity we just hand-pick UUIDs by name.
-  const map: Record<string, string> = {
-    Welcome: '00000000-0000-4000-8000-000000000001',
-    'Product Launch': '00000000-0000-4000-8000-000000000002',
-    Newsletter: '00000000-0000-4000-8000-000000000003',
-    '弃单召回（默认）': '00000000-0000-4000-8000-000000000004',
-  };
-  return map[name] ?? randomUUID();
-}
-
-function welcomeMjml(): string {
-  return `<mjml><mj-body><mj-section><mj-column><mj-text font-size="20px">Welcome to {{company_name}}!</mj-text><mj-text>Thanks for subscribing. We are excited to have you on board.</mj-text></mj-column></mj-section></mj-body></mjml>`;
-}
-
-function launchMjml(): string {
-  return `<mjml><mj-body><mj-section><mj-column><mj-text font-size="24px">Introducing our new product</mj-text><mj-button href="{{cta_url}}">Shop now</mj-button></mj-column></mj-section></mj-body></mjml>`;
-}
-
-function newsletterMjml(): string {
-  return `<mjml><mj-body><mj-section><mj-column><mj-text font-size="20px">Monthly Newsletter</mj-text><mj-text>Here are this month highlights.</mj-text></mj-column></mj-section></mj-body></mjml>`;
-}
-
-/**
- * System default abandoned-cart recovery template (adapted from the Shopify
- * abandoned-checkout email). Authored as HTML; uses SendMast merge variables
- * resolved by worker-sender's flow send path. Keep in sync with the
- * `abandoned_cart_default_template` migration.
- */
-function abandonedCartHtml(): string {
-  return `<!DOCTYPE html>
+-- Seed the system default abandoned-cart recovery template (adapted from the
+-- Shopify abandoned-checkout email). Uses SendMast merge variables resolved by
+-- worker-sender's flow send path: {{full_name}}, {{sender_domain}},
+-- {{order_no}}, {{order_total}}, {{tracking_url}}, {{unsubscribe_url}}.
+-- Deterministic id so re-running is idempotent and the API can default the
+-- abandoned_cart automation to it. Dollar-quoted to avoid escaping the HTML.
+INSERT INTO "email_templates" ("id", "scope", "name", "category", "mjml", "html", "created_at", "updated_at")
+VALUES (
+  '00000000-0000-4000-8000-000000000004',
+  'system'::"template_scope",
+  '弃单召回（默认）',
+  'promotion',
+  NULL,
+  $html$<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
@@ -157,14 +85,20 @@ function abandonedCartHtml(): string {
     </tr>
   </table>
 </body>
-</html>`;
-}
+</html>$html$,
+  now(),
+  now()
+)
+ON CONFLICT ("id") DO UPDATE SET
+  "name" = EXCLUDED."name",
+  "category" = EXCLUDED."category",
+  "scope" = EXCLUDED."scope",
+  "html" = EXCLUDED."html",
+  "updated_at" = now();
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+-- Point existing abandoned_cart automations that have no template at the new
+-- default, so the flow is ready to enable out of the box. Only fills blanks.
+UPDATE "shop_automations"
+SET "template_id" = '00000000-0000-4000-8000-000000000004',
+    "subject" = COALESCE("subject", 'Complete your purchase')
+WHERE "type" = 'abandoned_cart' AND "template_id" IS NULL;

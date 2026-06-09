@@ -47,6 +47,15 @@ const SHOPYY_WEBHOOK_EVENTS: ReadonlyArray<{
   { eventId: 7, topic: 'orders/fulfilled', name: 'SendMast 订单发货' },
 ];
 
+/**
+ * System default template the abandoned-cart flow is pre-pointed at (seeded by
+ * the `abandoned_cart_default_template` migration). New abandoned_cart
+ * automations adopt it so the flow is ready to enable without first authoring a
+ * template.
+ */
+const ABANDONED_CART_DEFAULT_TEMPLATE_ID = '00000000-0000-4000-8000-000000000004';
+const ABANDONED_CART_DEFAULT_SUBJECT = 'Complete your purchase';
+
 /** shopyy `expired_at` may be Unix seconds, ms, or an ISO string. */
 function parseExpiredAt(v: string | number | undefined): Date | null {
   if (v === undefined || v === null || v === '') return null;
@@ -291,6 +300,14 @@ export class IntegrationsService {
           accountId,
           shopConnectionId: connectionId,
           type: type as ShopAutomationType,
+          // Pre-point the abandoned-cart flow at the system default template so
+          // it only needs a verified sender before it can be enabled.
+          ...(type === 'abandoned_cart'
+            ? {
+                templateId: ABANDONED_CART_DEFAULT_TEMPLATE_ID,
+                subject: ABANDONED_CART_DEFAULT_SUBJECT,
+              }
+            : {}),
         })),
         skipDuplicates: true,
       });
