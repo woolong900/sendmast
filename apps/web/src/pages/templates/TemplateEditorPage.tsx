@@ -242,11 +242,11 @@ export function TemplateEditorPage() {
             系统模板 · 仅预览
           </span>
         </div>
-        <div className="flex-1 overflow-auto bg-muted/30 p-4">
+        <div className="flex-1 overflow-hidden bg-muted/30 p-4">
           <iframe
             title="template-preview"
             srcDoc={applyMergePreviewSamples(detail.data.html)}
-            className="mx-auto min-h-[640px] w-full max-w-[640px] rounded-lg border bg-white shadow-sm"
+            className="mx-auto block h-full w-full max-w-[640px] rounded-lg border bg-white shadow-sm"
             sandbox=""
           />
         </div>
