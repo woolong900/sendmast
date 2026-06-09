@@ -263,6 +263,12 @@ export function CampaignWizardPage() {
   // Resolved Easy Email template handed to <EmailEditorProvider data> on
   // step 2 entry. null = still loading / not yet resolved.
   const [step2Initial, setStep2Initial] = useState<IEmailTemplate | null>(null);
+  // Bumped on every explicit template pick so the resolve effect always
+  // re-runs — even when the pick leaves editorDesign/selectedTemplateId
+  // unchanged (e.g. re-selecting "blank" only flips blankSelected). Without
+  // this the effect wouldn't fire and step2Initial would stay null, stranding
+  // the editor on its "加载编辑器…" loading state.
+  const [pickNonce, setPickNonce] = useState(0);
   // True when the campaign was authored with the legacy react-email-editor
   // (its design_json was wiped in the easy-email migration, but `html`
   // remains so existing sends keep working). Surfaces a banner in step 2.
@@ -469,7 +475,7 @@ export function CampaignWizardPage() {
     return () => {
       cancelled = true;
     };
-  }, [step, editorDesign, selectedTemplateId]);
+  }, [step, editorDesign, selectedTemplateId, pickNonce]);
 
   const payload = () => ({
     name,
@@ -631,6 +637,7 @@ export function CampaignWizardPage() {
     }
     setEditorDesign(null);
     setStep2Initial(null);
+    setPickNonce((n) => n + 1);
     setTemplatePickerOpen(false);
     setTemplateReplacePending(null);
   }
