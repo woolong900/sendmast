@@ -118,33 +118,33 @@ export function AutomationEmailEditor({
       >
         {(_props, helper) => (
           <div className="fixed inset-0 z-50 flex flex-col bg-background">
-            <div className="flex items-center gap-3 border-b bg-background px-4 py-2">
-              <Button variant="outline" size="sm" onClick={onClose}>
-                <ArrowLeft className="mr-1 size-4" />
+            <div className="flex items-center gap-3 border-b bg-background py-2 pr-4">
+              <Button variant="outline" onClick={onClose}>
+                <ArrowLeft className="mr-1.5 size-4" />
                 返回
               </Button>
               <span className="truncate text-sm font-medium">{title}</span>
-              <VariablesHelper variant="button" />
-              <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
-                <LayoutTemplate className="mr-1 size-4" />
-                选择模板
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const values = helper.getState().values as IEmailTemplate;
-                  setPreviewHtml(compilePreviewHtml(values));
-                }}
-              >
-                <Eye className="mr-1 size-4" />
-                预览
-              </Button>
-              <div className="flex-1" />
-              <Button size="sm" disabled={saving} onClick={() => helper.submit()}>
-                <Save className="mr-1 size-4" />
-                {saving ? '保存中...' : '保存'}
-              </Button>
+              <VariablesHelper variant="button" size="default" />
+              <div className="ml-auto flex items-center gap-3">
+                <Button variant="outline" onClick={() => setPickerOpen(true)}>
+                  <LayoutTemplate className="mr-1.5 size-4" />
+                  选择模板
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const values = helper.getState().values as IEmailTemplate;
+                    setPreviewHtml(compilePreviewHtml(values));
+                  }}
+                >
+                  <Eye className="mr-1.5 size-4" />
+                  预览
+                </Button>
+                <Button disabled={saving} onClick={() => helper.submit()}>
+                  <Save className="mr-1.5 size-4" />
+                  {saving ? '保存中...' : '保存'}
+                </Button>
+              </div>
             </div>
 
             {previewHtml && (

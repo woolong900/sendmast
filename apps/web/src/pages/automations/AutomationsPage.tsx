@@ -21,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { FilterSelect } from '@/components/ui/filter-select';
 import { useToast } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import { api, apiErrMessage } from '@/lib/api';
@@ -62,8 +63,8 @@ const STRIPES: Record<ShopAutomationType, string> = {
   abandoned_cart: 'bg-amber-400',
 };
 
-/** Shared input/select styling across the settings panel. */
-const FIELD = 'h-10 w-full rounded-lg border border-input bg-background px-3 text-sm';
+/** Shared input styling across the settings panel — matches FilterSelect's trigger. */
+const FIELD = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm';
 
 const TRIGGERS: Record<ShopAutomationType, string> = {
   order_paid: '当买家完成支付时立即发送',
@@ -121,20 +122,18 @@ export function AutomationsPage() {
       {!isLoading && active.length > 0 && selected && (
         <div className="space-y-4">
           {active.length > 1 && (
-            <label className="flex items-center gap-2 text-sm">
+            <div className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">店铺</span>
-              <select
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              <FilterSelect
+                className="w-56"
                 value={selected.id}
-                onChange={(e) => setStoreId(e.target.value)}
-              >
-                {active.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.shopName ?? c.shopDomain ?? `店铺 #${c.externalStoreId}`}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={setStoreId}
+                options={active.map((c) => ({
+                  value: c.id,
+                  label: c.shopName ?? c.shopDomain ?? `店铺 #${c.externalStoreId}`,
+                }))}
+              />
+            </div>
           )}
           <FlowList connectionId={selected.id} />
         </div>
@@ -342,17 +341,18 @@ function EmailContentBlock({
         </div>
       </div>
       <div className="min-w-0 space-y-3">
-        <label className="block">
+        <div>
           <FieldLabel>发件人</FieldLabel>
-          <select className={FIELD} value={fromEmail} onChange={(e) => onFromEmail(e.target.value)}>
-            <option value="">未选择</option>
-            {senderOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
+          <FilterSelect
+            value={fromEmail}
+            onChange={onFromEmail}
+            placeholder="未选择"
+            options={[
+              { value: '', label: '未选择' },
+              ...senderOptions.map((o) => ({ value: o.value, label: o.label })),
+            ]}
+          />
+        </div>
         <label className="block">
           <FieldLabel>邮件主题</FieldLabel>
           <input
@@ -663,15 +663,6 @@ function FlowCard({
                 <span className="truncate">{TRIGGERS[automation.type]}</span>
               </span>
             </button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="hidden sm:inline-flex"
-              onClick={() => setOpen(true)}
-            >
-              <Pencil className="mr-1 size-3.5" />
-              编辑
-            </Button>
             <Switch checked={enabled} onCheckedChange={setEnabled} />
             <button
               type="button"
@@ -766,11 +757,10 @@ function FlowCard({
                           <FieldLabel>
                             优惠券 <span className="font-normal text-muted-foreground">（选填，展示在邮件中）</span>
                           </FieldLabel>
-                          <select
-                            className={FIELD}
+                          <FilterSelect
                             value={r.couponCode}
-                            onChange={(e) => {
-                              const code = e.target.value;
+                            placeholder="不使用优惠券"
+                            onChange={(code) => {
                               const c = (coupons.data ?? []).find((x) => x.code === code);
                               updateRound(i, {
                                 couponCode: code,
@@ -788,19 +778,19 @@ function FlowCard({
                                     : null,
                               });
                             }}
-                          >
-                            <option value="">不使用优惠券</option>
-                            {/* Keep a saved code selectable even if it's not in the live list. */}
-                            {r.couponCode &&
-                              !(coupons.data ?? []).some((c) => c.code === r.couponCode) && (
-                                <option value={r.couponCode}>{r.couponCode}</option>
-                              )}
-                            {(coupons.data ?? []).map((c) => (
-                              <option key={c.code} value={c.code}>
-                                {couponOptionLabel(c)}
-                              </option>
-                            ))}
-                          </select>
+                            options={[
+                              { value: '', label: '不使用优惠券' },
+                              // Keep a saved code selectable even if it's not in the live list.
+                              ...(r.couponCode &&
+                              !(coupons.data ?? []).some((c) => c.code === r.couponCode)
+                                ? [{ value: r.couponCode, label: r.couponCode }]
+                                : []),
+                              ...(coupons.data ?? []).map((c) => ({
+                                value: c.code,
+                                label: couponOptionLabel(c),
+                              })),
+                            ]}
+                          />
                           {coupons.isError && (
                             <span className="mt-1 block text-xs text-amber-600">
                               无法拉取店铺优惠券：请在 Shopyy 开发者后台为应用开通「优惠券」接口权限后重试。
