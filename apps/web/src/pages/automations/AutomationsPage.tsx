@@ -7,14 +7,13 @@ import {
   ShoppingCart,
   Save,
   Store,
-  ChevronDown,
-  Workflow,
+  ArrowLeft,
   CheckCircle2,
   Pencil,
   Plus,
   Trash2,
-  Zap,
   Clock,
+  Workflow,
 } from 'lucide-react';
 import { type IEmailTemplate } from 'easy-email-editor';
 import { Button } from '@/components/ui/button';
@@ -23,7 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { FilterSelect } from '@/components/ui/filter-select';
 import { useToast } from '@/components/ui/toast';
-import { cn } from '@/lib/utils';
+import { cn, formatNumber } from '@/lib/utils';
 import { api, apiErrMessage } from '@/lib/api';
 import {
   SHOP_AUTOMATION_LABELS,
@@ -56,13 +55,6 @@ const ACCENTS: Record<ShopAutomationType, string> = {
   abandoned_cart: 'bg-amber-50 text-amber-600',
 };
 
-/** Left accent stripe colour per flow. */
-const STRIPES: Record<ShopAutomationType, string> = {
-  order_paid: 'bg-emerald-400',
-  order_shipped: 'bg-sky-400',
-  abandoned_cart: 'bg-amber-400',
-};
-
 /** Shared input styling across the settings panel — matches FilterSelect's trigger. */
 const FIELD = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm';
 
@@ -89,7 +81,7 @@ export function AutomationsPage() {
           <Workflow className="size-5" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">自动化</h1>
+          <h1 className="text-xl font-semibold sm:text-2xl">自动化</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             为店铺事件配置自动化邮件流程：买家下单、支付、发货时自动触发，无需手动发送。
           </p>
@@ -135,7 +127,7 @@ export function AutomationsPage() {
               />
             </div>
           )}
-          <FlowList connectionId={selected.id} />
+          <FlowList key={selected.id} connectionId={selected.id} />
         </div>
       )}
     </div>
@@ -143,6 +135,7 @@ export function AutomationsPage() {
 }
 
 function FlowList({ connectionId }: { connectionId: string }) {
+  const [editingType, setEditingType] = useState<ShopAutomationType | null>(null);
   const automations = useQuery<ShopAutomationView[]>({
     queryKey: ['shop-automations', connectionId],
     queryFn: async () =>
@@ -170,35 +163,77 @@ function FlowList({ connectionId }: { connectionId: string }) {
 
   const flows = automations.data ?? [];
   const enabledCount = flows.filter((a) => a.enabled).length;
+  const editing = editingType ? flows.find((a) => a.type === editingType) : null;
+
+  if (editing) {
+    return (
+      <FlowEditor
+        connectionId={connectionId}
+        automation={editing}
+        senderOptions={senderOptions}
+        onBack={() => setEditingType(null)}
+      />
+    );
+  }
 
   return (
-    <div className="space-y-3">
-      {flows.length > 0 && (
-        <div className="flex justify-end">
-          <span className="inline-flex items-center gap-2 rounded-full border bg-card px-3.5 py-1.5 text-xs font-medium text-muted-foreground">
-            <span
-              className={cn(
-                'size-2 rounded-full',
-                enabledCount > 0 ? 'bg-emerald-500' : 'bg-muted-foreground/40',
-              )}
-            />
-            {flows.length} 个流程 · {enabledCount} 已启用
-          </span>
-        </div>
-      )}
+    <div className="space-y-4">
       {senderOptions.length === 0 && (
         <p className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-700">
           尚无已验证的发件邮箱，启用流程前请先在「发件域名」中完成验证。
         </p>
       )}
-      {(automations.data ?? []).map((a) => (
-        <FlowCard
-          key={a.id}
-          connectionId={connectionId}
-          automation={a}
-          senderOptions={senderOptions}
-        />
-      ))}
+      <Card>
+        <CardContent className="p-5">
+          <div className="grid grid-cols-3 divide-x divide-border text-center">
+            <SummaryStat label="流程" value={String(flows.length)} />
+            <SummaryStat label="已启用" value={String(enabledCount)} highlight />
+            <SummaryStat
+              label="近 30 日发送"
+              value={formatNumber(flows.reduce((sum, a) => sum + a.stats.sent, 0))}
+            />
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="p-0">
+          <div className="flex items-center justify-between border-b px-5 py-4">
+            <h2 className="text-base font-semibold">店铺自动化</h2>
+            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+              {flows.length} 个流程
+            </span>
+          </div>
+          <div className="divide-y divide-border">
+            {flows.map((a) => (
+              <FlowSummaryRow
+                key={a.id}
+                connectionId={connectionId}
+                automation={a}
+                onEdit={() => setEditingType(a.type)}
+              />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function SummaryStat({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div>
+      <div className={cn('text-2xl font-semibold tabular-nums', highlight && 'text-emerald-600')}>
+        {value}
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -471,18 +506,91 @@ function initialRounds(a: ShopAutomationView): Round[] {
   ];
 }
 
-function FlowCard({
+function FlowSummaryRow({
   connectionId,
   automation,
-  senderOptions,
+  onEdit,
 }: {
   connectionId: string;
   automation: ShopAutomationView;
-  senderOptions: { value: string; label: string; name: string }[];
+  onEdit: () => void;
 }) {
   const qc = useQueryClient();
   const toast = useToast();
   const Icon = ICONS[automation.type];
+  const isAbandoned = automation.type === 'abandoned_cart';
+  const configured = isAbandoned
+    ? automation.steps.length >= 1 && automation.steps.every((r) => !!r.html) && !!automation.fromEmail
+    : !!automation.html && !!automation.fromEmail;
+
+  const toggle = useMutation({
+    mutationFn: async (enabled: boolean) =>
+      api.patch(`/api/integrations/shopyy/${connectionId}/automations/${automation.type}`, {
+        enabled,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['shop-automations', connectionId] });
+      toast(automation.enabled ? '已关闭自动化流程' : '已启用自动化流程', 'success');
+    },
+    onError: (err) => toast(apiErrMessage(err), 'error'),
+  });
+
+  return (
+    <div className="p-4 sm:p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div
+            className={cn(
+              'flex size-9 shrink-0 items-center justify-center rounded-lg',
+              ACCENTS[automation.type],
+            )}
+          >
+            <Icon className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold">{SHOP_AUTOMATION_LABELS[automation.type]}</h3>
+              {automation.enabled ? (
+                <Badge variant="success">已启用</Badge>
+              ) : configured ? (
+                <Badge variant="muted">已关闭</Badge>
+              ) : (
+                <Badge variant="warning">待配置</Badge>
+              )}
+              {isAbandoned && <Badge variant="muted">{automation.steps.length || 1} 轮</Badge>}
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">{TRIGGERS[automation.type]}</p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <Switch
+            checked={automation.enabled}
+            onCheckedChange={(next) => toggle.mutate(next)}
+            disabled={toggle.isPending}
+          />
+          <Button variant={configured ? 'ghost' : 'outline'} size="sm" onClick={onEdit}>
+            {configured ? '编辑' : '配置'}
+          </Button>
+        </div>
+      </div>
+      <FlowStats stats={automation.stats} />
+    </div>
+  );
+}
+
+function FlowEditor({
+  connectionId,
+  automation,
+  senderOptions,
+  onBack,
+}: {
+  connectionId: string;
+  automation: ShopAutomationView;
+  senderOptions: { value: string; label: string; name: string }[];
+  onBack: () => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
   const isAbandoned = automation.type === 'abandoned_cart';
 
   // Coupons are fetched live from the store (only for the abandoned flow). The
@@ -510,8 +618,6 @@ function FlowCard({
   // Which email is being edited: 'single' for non-abandoned, a round index
   // otherwise; null when the editor is closed.
   const [editing, setEditing] = useState<number | 'single' | null>(null);
-  // Configured flows start collapsed; unconfigured ones expand to guide setup.
-  const [open, setOpen] = useState(!automation.html);
 
   const delaysIncreasing = rounds.every(
     (r, i) => i === 0 || r.delayMinutes > rounds[i - 1]!.delayMinutes,
@@ -584,6 +690,7 @@ function FlowCard({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['shop-automations', connectionId] });
       toast('已保存自动化流程', 'success');
+      onBack();
     },
     onError: (err) => toast(apiErrMessage(err), 'error'),
   });
@@ -621,58 +728,30 @@ function FlowCard({
           onApply={applyContent}
         />
       )}
-      <Card className="relative overflow-hidden transition-shadow hover:shadow-md">
-        <span
-          className={cn('absolute inset-y-0 left-0 w-1.5', STRIPES[automation.type])}
-          aria-hidden
-        />
-        <CardContent className="p-0">
-          <div className="flex items-center gap-3 p-4 pl-5">
-            <div
-              className={cn(
-                'flex size-11 shrink-0 items-center justify-center rounded-xl',
-                ACCENTS[automation.type],
-              )}
-            >
-              <Icon className="size-5" />
-            </div>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
             <button
               type="button"
-              onClick={() => setOpen((v) => !v)}
-              className="flex min-w-0 flex-1 flex-col text-left"
+              onClick={onBack}
+              className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
-              <span className="flex flex-wrap items-center gap-2">
-                <span className="truncate text-[15px] font-semibold">
-                  {SHOP_AUTOMATION_LABELS[automation.type]}
-                </span>
-                {automation.enabled ? (
-                  <Badge variant="success">已启用</Badge>
-                ) : (
-                  <Badge variant="muted">已关闭</Badge>
-                )}
-                {isAbandoned && <Badge variant="muted">{automation.steps.length || 1} 轮</Badge>}
-                {!configured && <Badge variant="warning">待配置</Badge>}
-              </span>
-              <span className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground">
-                <Zap className="size-3 shrink-0" />
-                <span className="truncate">{TRIGGERS[automation.type]}</span>
-              </span>
+              <ArrowLeft className="size-4" />
+              返回自动化
             </button>
-            <Switch checked={enabled} onCheckedChange={setEnabled} />
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted/60"
-              aria-label={open ? '收起' : '展开'}
-            >
-              <ChevronDown className={cn('size-4 transition-transform', open && 'rotate-180')} />
-            </button>
+            <h2 className="text-xl font-semibold tracking-tight">
+              编辑{SHOP_AUTOMATION_LABELS[automation.type]}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">{TRIGGERS[automation.type]}</p>
           </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">{enabled ? '已启用' : '已关闭'}</span>
+            <Switch checked={enabled} onCheckedChange={setEnabled} />
+          </div>
+        </div>
 
-          <FlowStats stats={automation.stats} />
-
-          {open && (
-            <div className="space-y-6 bg-muted/20 p-5">
+        <Card>
+          <CardContent className="space-y-6 p-5">
               {!isAbandoned && (
                 <EmailContentBlock
                   thumbnail={content.thumbnail}
@@ -821,10 +900,9 @@ function FlowCard({
                   保存流程
                 </Button>
               </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </>
   );
 }
