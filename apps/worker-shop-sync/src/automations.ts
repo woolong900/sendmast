@@ -154,6 +154,24 @@ function escapeHtml(s: string): string {
 }
 
 /**
+ * Pre-apply the round's coupon to the recovery link so the recovered checkout
+ * keeps the discount — Shopyy reads `?email_coupon_code` on the checkout URL.
+ * Replaces any coupon the order already carried. No-ops on an empty code or a
+ * url we can't parse (left as-is rather than corrupting the link).
+ */
+function withCouponCode(url: string, code: string | null | undefined): string {
+  const c = (code ?? '').trim();
+  if (!c) return url;
+  try {
+    const u = new URL(url);
+    u.searchParams.set('email_coupon_code', c);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+/**
  * Render cart line items into an email-safe HTML fragment (one row per item:
  * thumbnail + title × qty), to inject via the `{{order_items}}` merge var.
  * Dynamic text is escaped here because worker-sender injects html-merge vars
@@ -471,6 +489,12 @@ export async function runAbandonedFromOrder(
     mapLineItems((order.raw ?? {}) as Record<string, unknown>),
   );
 
+  // Apply the round's coupon to the CTA link so clicking through re-applies the
+  // discount at checkout (and the coupon card shows the code to type manually).
+  const recoveryUrl = job.recoveryUrl
+    ? withCouponCode(job.recoveryUrl, job.couponCode)
+    : undefined;
+
   const shopName = await shopNameMergeVar(deps.prisma, job.shopConnectionId);
   const mergeVars: Record<string, string> = {
     ...shopName,
@@ -479,7 +503,7 @@ export async function runAbandonedFromOrder(
     ...(job.value != null && job.currency
       ? { order_total: formatMoney(job.value, job.currency) }
       : {}),
-    ...(job.recoveryUrl ? { tracking_url: job.recoveryUrl } : {}),
+    ...(recoveryUrl ? { tracking_url: recoveryUrl } : {}),
     ...(itemsHtml ? { order_items: itemsHtml } : {}),
     ...(job.couponCode ? { coupon_block: renderCouponHtml(job.couponCode) } : {}),
   };
