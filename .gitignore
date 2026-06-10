@@ -40,3 +40,6 @@ docker/data/
 *.local
 
 .dev-logs/
+
+# Local Shopyy webhook sim payloads (contain real PII / payment secrets)
+scripts/shopyy-webhook-sim/payloads/

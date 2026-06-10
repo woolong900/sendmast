@@ -72,6 +72,8 @@ export interface AbandonedJob {
   templateId?: string | null;
   /** Round's subject, snapshotted at schedule time. */
   subject?: string | null;
+  /** Round's coupon code, snapshotted at schedule time; rendered into the email. */
+  couponCode?: string | null;
 }
 
 export interface OrderAbandonContext {
@@ -191,6 +193,28 @@ ${rows}
 export function renderShippingAddressHtml(lines: string[]): string {
   if (lines.length === 0) return '';
   return lines.map((l) => escapeHtml(l)).join('<br>');
+}
+
+/**
+ * Render the abandoned-cart coupon card into the `{{coupon_block}}` merge var.
+ * Returns '' when the round has no coupon so the block disappears. Markup +
+ * palette mirror the approved style (dashed amber card, monospace code).
+ */
+export function renderCouponHtml(code: string | null | undefined): string {
+  const c = (code ?? '').trim();
+  if (!c) return '';
+  const safe = escapeHtml(c);
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-spacing:0;border-collapse:collapse;margin:0;">
+  <tr><td align="center" style="padding:0;">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-spacing:0;border-collapse:separate;background:#fff7ed;border:2px dashed #f59e0b;border-radius:12px;">
+      <tr><td align="center" style="padding:22px 24px;">
+        <div style="font-size:14px;color:#92400e;font-weight:600;margin:0 0 12px;">A discount just for you</div>
+        <div style="display:inline-block;background:#ffffff;border:1px dashed #f59e0b;border-radius:8px;padding:11px 24px;font-size:24px;font-weight:700;letter-spacing:3px;color:#111827;font-family:'Courier New',Courier,monospace;">${safe}</div>
+        <div style="font-size:12px;color:#b45309;margin:12px 0 0;">Apply this code at checkout</div>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>`;
 }
 
 function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Record<string, string> {
@@ -382,7 +406,7 @@ export async function scheduleAbandonedFromOrder(
   });
   const rounds = steps.length
     ? steps
-    : [{ stepIndex: 1, templateId: a.templateId, subject: a.subject, delayMinutes: a.delayMinutes }];
+    : [{ stepIndex: 1, templateId: a.templateId, subject: a.subject, couponCode: null, delayMinutes: a.delayMinutes }];
 
   for (const s of rounds) {
     if (!s.templateId) continue; // round not configured → nothing to send
@@ -400,6 +424,7 @@ export async function scheduleAbandonedFromOrder(
       round: s.stepIndex,
       templateId: s.templateId,
       subject: s.subject,
+      couponCode: s.couponCode,
     };
     await deps.abandonedQueue.add('recover-order', job, {
       delay: s.delayMinutes * 60_000,
@@ -456,6 +481,7 @@ export async function runAbandonedFromOrder(
       : {}),
     ...(job.recoveryUrl ? { tracking_url: job.recoveryUrl } : {}),
     ...(itemsHtml ? { order_items: itemsHtml } : {}),
+    ...(job.couponCode ? { coupon_block: renderCouponHtml(job.couponCode) } : {}),
   };
 
   const round = job.round ?? 1;

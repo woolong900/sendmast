@@ -70,7 +70,17 @@ export interface ShopAutomationStepView {
   stepIndex: number;
   templateId: string | null;
   subject: string | null;
+  /** Store coupon code shown in this round's email; null = no coupon. */
+  couponCode: string | null;
   delayMinutes: number;
+}
+
+/** A store coupon offered in the per-round coupon picker. */
+export interface ShopCouponView {
+  /** Code the buyer enters at checkout (the value we persist + render). */
+  code: string;
+  /** Human label for the picker (falls back to the code). */
+  name: string;
 }
 
 export interface ShopAutomationView {
@@ -97,6 +107,7 @@ export interface ShopAutomationView {
 export const ShopAutomationStepSchema = z.object({
   templateId: z.string().uuid().nullable().optional(),
   subject: z.string().max(255).nullable().optional(),
+  couponCode: z.string().max(100).nullable().optional(),
   delayMinutes: z.number().int().min(5).max(10080),
 });
 export type ShopAutomationStepInput = z.infer<typeof ShopAutomationStepSchema>;

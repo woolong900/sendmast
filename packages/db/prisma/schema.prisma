@@ -1170,6 +1170,8 @@ model ShopAutomationStep {
   stepIndex    Int      @map("step_index")
   templateId   String?  @map("template_id") @db.Uuid
   subject      String?
+  /// Store coupon code shown in this round's recall email; null = no coupon.
+  couponCode   String?  @map("coupon_code")
   /// Minutes after order creation this round fires (absolute, not incremental).
   delayMinutes Int      @map("delay_minutes")
   createdAt    DateTime @default(now()) @map("created_at")

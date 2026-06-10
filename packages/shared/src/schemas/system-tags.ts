@@ -137,6 +137,13 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
     description:
       '电商自动化邮件专用：订单内商品列表（图片+名称+数量），由系统渲染为 HTML 整段插入（仅订单/弃单自动化邮件中有值）',
   },
+  {
+    name: 'coupon_block',
+    placeholder: '{{coupon_block}}',
+    label: '优惠券',
+    description:
+      '电商自动化邮件专用：弃单召回优惠券卡片，由系统渲染为 HTML 整段插入；该轮未选择优惠券时为空（不展示）',
+  },
 ] as const;
 
 /** Whitelist tag names; used to build the substitution regex. */
@@ -163,4 +170,4 @@ export const MERGE_VAR_TAG_NAMES = [
  * render as literal text in the inbox. Treated as a merge var (per-recipient,
  * blank on bulk campaigns) like MERGE_VAR_TAG_NAMES.
  */
-export const HTML_MERGE_VAR_TAG_NAMES = ['order_items', 'shipping_address'] as const;
+export const HTML_MERGE_VAR_TAG_NAMES = ['order_items', 'shipping_address', 'coupon_block'] as const;

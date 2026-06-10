@@ -196,6 +196,25 @@ export class ShopyyClient {
   getOrder(externalOrderId: string): Promise<ShopyyRawOrder> {
     return this.get<ShopyyRawOrder>(`/orders/${encodeURIComponent(externalOrderId)}`);
   }
+
+  /**
+   * List the store's coupons (`GET /coupons`). The gateway returns either a
+   * bare array or a paginated `{ list: [...] }` envelope depending on endpoint,
+   * so we normalise both shapes. Requires the app's coupon API scope — without
+   * it the gateway answers `503 权限验证失败`, surfaced as a {@link ShopyyError}.
+   */
+  async listCoupons(): Promise<ShopyyCoupon[]> {
+    const data = await this.get<ShopyyCoupon[] | { list?: ShopyyCoupon[] }>('/coupons');
+    if (Array.isArray(data)) return data;
+    return Array.isArray(data?.list) ? data.list : [];
+  }
+}
+
+/** A coupon row as returned by `GET /coupons` (only fields we rely on). */
+export interface ShopyyCoupon {
+  id?: number;
+  coupon_code?: string;
+  coupon_name?: string;
 }
 
 /** A webhook row as returned by `GET /webhooks`. */

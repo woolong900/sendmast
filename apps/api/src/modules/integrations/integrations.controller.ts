@@ -56,6 +56,15 @@ export class IntegrationsController {
     return this.svc.listAutomations(user.accountId, id);
   }
 
+  /** Store coupons for the abandoned-cart per-round coupon picker. */
+  @Get(':id/coupons')
+  listCoupons(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.svc.listCoupons(user.accountId, id);
+  }
+
   @Patch(':id/automations/:type')
   updateAutomation(
     @CurrentUser() user: AuthenticatedUser,

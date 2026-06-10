@@ -17,6 +17,7 @@ import {
   exchangeAuthorizeToken,
   ShopyyAuthError,
   ShopyyClient,
+  ShopyyError,
 } from '@sendmast/shopyy';
 import { getAutomationEngagement } from '@sendmast/clickhouse';
 import { ClickHouseService } from '../../common/clickhouse/clickhouse.service';
@@ -27,6 +28,7 @@ import {
   type ShopAutomationType as ShopAutomationTypeDto,
   type ShopAutomationView,
   type ShopConnectionView,
+  type ShopCouponView,
   type UpdateShopAutomationInput,
 } from '@sendmast/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -95,6 +97,7 @@ function toAutomationView(
         stepIndex: s.stepIndex,
         templateId: s.templateId,
         subject: s.subject,
+        couponCode: s.couponCode,
         delayMinutes: s.delayMinutes,
       })),
     stats,
@@ -499,6 +502,7 @@ export class IntegrationsService {
             stepIndex: i + 1,
             templateId: s.templateId ?? null,
             subject: s.subject ?? null,
+            couponCode: s.couponCode?.trim() || null,
             delayMinutes: s.delayMinutes,
           })),
         });
@@ -517,6 +521,44 @@ export class IntegrationsService {
       stepRows,
       await this.automationStats(accountId, updated.id),
     );
+  }
+
+  /**
+   * List the connected store's coupons for the per-round coupon picker. Hits
+   * the OpenAPI live (coupons change often, not worth caching). De-dupes by
+   * code and drops codeless rows. Requires the app's coupon API scope — without
+   * it shopyy answers `503 权限验证失败`, surfaced here as a clear 400.
+   */
+  async listCoupons(accountId: string, connectionId: string): Promise<ShopCouponView[]> {
+    const conn = await this.assertConnection(accountId, connectionId);
+    if (!conn.openapiDomain || !conn.devToken) {
+      throw new BadRequestException('店铺连接缺少 API 凭证，请重新授权店铺');
+    }
+    const client = new ShopyyClient({
+      openapiDomain: conn.openapiDomain,
+      token: conn.devToken,
+    });
+    let coupons;
+    try {
+      coupons = await client.listCoupons();
+    } catch (err) {
+      if (err instanceof ShopyyAuthError) {
+        throw new BadRequestException('店铺授权已失效，请重新授权后再拉取优惠券');
+      }
+      const msg = err instanceof ShopyyError ? err.message : String(err);
+      throw new BadRequestException(
+        `拉取优惠券失败：${msg}。若提示权限验证失败，请在 Shopyy 开发者后台为应用开通「优惠券」接口权限。`,
+      );
+    }
+    const seen = new Set<string>();
+    const out: ShopCouponView[] = [];
+    for (const c of coupons) {
+      const code = c.coupon_code?.trim();
+      if (!code || seen.has(code)) continue;
+      seen.add(code);
+      out.push({ code, name: c.coupon_name?.trim() || code });
+    }
+    return out;
   }
 
   async disconnect(accountId: string, id: string): Promise<{ ok: true }> {

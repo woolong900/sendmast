@@ -27,6 +27,7 @@ import {
   type ShopAutomationType,
   type ShopAutomationView,
   type ShopConnectionView,
+  type ShopCouponView,
   type SenderDomainView,
 } from '@sendmast/shared';
 
@@ -213,6 +214,7 @@ function FlowStats({ stats }: { stats: FlowStatsView }) {
 interface Round {
   templateId: string;
   subject: string;
+  couponCode: string;
   delayMinutes: number;
 }
 
@@ -275,10 +277,13 @@ function initialRounds(a: ShopAutomationView): Round[] {
     return a.steps.map((s) => ({
       templateId: s.templateId ?? '',
       subject: s.subject ?? '',
+      couponCode: s.couponCode ?? '',
       delayMinutes: s.delayMinutes,
     }));
   }
-  return [{ templateId: a.templateId ?? '', subject: a.subject ?? '', delayMinutes: a.delayMinutes }];
+  return [
+    { templateId: a.templateId ?? '', subject: a.subject ?? '', couponCode: '', delayMinutes: a.delayMinutes },
+  ];
 }
 
 function FlowCard({
@@ -296,6 +301,16 @@ function FlowCard({
   const toast = useToast();
   const Icon = ICONS[automation.type];
   const isAbandoned = automation.type === 'abandoned_cart';
+
+  // Coupons are fetched live from the store (only for the abandoned flow). The
+  // query 400s when the app lacks the coupon API scope; we surface a hint then.
+  const coupons = useQuery<ShopCouponView[]>({
+    queryKey: ['shop-coupons', connectionId],
+    queryFn: async () => (await api.get(`/api/integrations/shopyy/${connectionId}/coupons`)).data,
+    enabled: isAbandoned,
+    retry: false,
+    staleTime: 60_000,
+  });
 
   const [enabled, setEnabled] = useState(automation.enabled);
   const [templateId, setTemplateId] = useState(automation.templateId ?? '');
@@ -322,6 +337,7 @@ function FlowCard({
         {
           templateId: rs[rs.length - 1]?.templateId ?? '',
           subject: '',
+          couponCode: '',
           // Keep strictly increasing even if earlier rounds were edited large.
           delayMinutes: Math.min(MAX_DELAY_MINUTES, Math.max(def, last + 5)),
         },
@@ -341,6 +357,7 @@ function FlowCard({
         body.steps = rounds.map((r) => ({
           templateId: r.templateId || null,
           subject: r.subject.trim() || null,
+          couponCode: r.couponCode || null,
           delayMinutes: r.delayMinutes,
         }));
       } else {
@@ -518,6 +535,31 @@ function FlowCard({
                             placeholder="留空使用默认主题"
                             onChange={(e) => updateRound(i, { subject: e.target.value })}
                           />
+                        </label>
+                        <label className="space-y-1 text-xs sm:col-span-2">
+                          <span className="text-muted-foreground">优惠券（可选，选择后展示在邮件中）</span>
+                          <select
+                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                            value={r.couponCode}
+                            onChange={(e) => updateRound(i, { couponCode: e.target.value })}
+                          >
+                            <option value="">不使用优惠券</option>
+                            {/* Keep a saved code selectable even if it's not in the live list. */}
+                            {r.couponCode &&
+                              !(coupons.data ?? []).some((c) => c.code === r.couponCode) && (
+                                <option value={r.couponCode}>{r.couponCode}</option>
+                              )}
+                            {(coupons.data ?? []).map((c) => (
+                              <option key={c.code} value={c.code}>
+                                {c.name === c.code ? c.code : `${c.name}（${c.code}）`}
+                              </option>
+                            ))}
+                          </select>
+                          {coupons.isError && (
+                            <span className="text-amber-600">
+                              无法拉取店铺优惠券：请在 Shopyy 开发者后台为应用开通「优惠券」接口权限后重试。
+                            </span>
+                          )}
                         </label>
                         <div className="space-y-1 text-xs sm:col-span-2">
                           <span className="text-muted-foreground">下单后延迟</span>
