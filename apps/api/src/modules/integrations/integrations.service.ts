@@ -31,10 +31,9 @@ import { PrismaService } from '../../common/prisma/prisma.service';
  * (from `GET /webhooks/events`); `topic` is the value we encode in the callback
  * URL (`?topic=`) so the receiver knows the event without relying on shopyy's
  * inbound headers/body. shopyy has no abandoned-checkout event, so we instead
- * subscribe to order creation (standard + single-page flows): every created
- * order is recorded, and the `abandoned_cart` automation re-checks it
- * `delayMinutes` later — if still unpaid, the recall fires. This avoids polling
- * the order list via the OpenAPI.
+ * subscribe to order creation: every created order is recorded, and the
+ * `abandoned_cart` automation re-checks it `delayMinutes` later — if still
+ * unpaid, the recall fires. This avoids polling the order list via the OpenAPI.
  */
 const SHOPYY_WEBHOOK_EVENTS: ReadonlyArray<{
   eventId: number;
@@ -42,7 +41,6 @@ const SHOPYY_WEBHOOK_EVENTS: ReadonlyArray<{
   name: string;
 }> = [
   { eventId: 4, topic: 'orders/create', name: 'SendMast 订单创建' },
-  { eventId: 36, topic: 'orders/create', name: 'SendMast 订单创建（单页）' },
   { eventId: 5, topic: 'orders/paid', name: 'SendMast 订单支付' },
   { eventId: 7, topic: 'orders/fulfilled', name: 'SendMast 订单发货' },
 ];
@@ -184,6 +182,25 @@ export class IntegrationsService {
       storeExpiredAt: parseExpiredAt(result.store.expired_at),
     };
 
+    // Webhooks are the whole point of the integration — a store with none isn't
+    // usable — so treat install failure as a bind failure rather than silently
+    // persisting a misleading "active" connection. Install first using the
+    // freshly-exchanged credentials; only persist once webhooks are in place.
+    try {
+      await this.installWebhooks({
+        externalStoreId,
+        openapiDomain: data.openapiDomain,
+        devToken: data.devToken,
+        webhookSecret,
+      });
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`Shopyy webhook install failed for store ${externalStoreId}: ${reason}`);
+      throw new BadRequestException(
+        `店铺授权成功，但创建 Webhook 失败：${reason}。请稍后重试，或检查应用的事件授权与 API IP 白名单。`,
+      );
+    }
+
     const conn = await this.prisma.shopConnection.upsert({
       where: { provider_externalStoreId: { provider: 'shopyy', externalStoreId } },
       create: {
@@ -196,20 +213,15 @@ export class IntegrationsService {
       update: { ...data, connectedAt: new Date() },
     });
 
-    // Best-effort: failing to install push webhooks shouldn't block binding —
-    // we can fall back to polling and the operator can re-trigger install.
-    await this.installWebhooks(conn).catch((e) =>
-      this.logger.warn(
-        `Shopyy webhook install failed for store ${externalStoreId}: ${
-          e instanceof Error ? e.message : e
-        }`,
-      ),
-    );
-
     return toView(conn);
   }
 
-  private async installWebhooks(conn: ShopConnection): Promise<void> {
+  private async installWebhooks(conn: {
+    externalStoreId: string;
+    openapiDomain: string;
+    devToken: string;
+    webhookSecret: string;
+  }): Promise<void> {
     const rawBase =
       this.config.get<string>('SHOPYY_WEBHOOK_BASE_URL') ??
       `${this.config.getOrThrow<string>('API_BASE_URL')}/api`;
