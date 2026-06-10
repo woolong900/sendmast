@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import type {
   ShopAutomation,
   ShopAutomationStep,
@@ -62,6 +63,17 @@ const SHOPYY_WEBHOOK_EVENTS: ReadonlyArray<{
 const ABANDONED_CART_DEFAULT_TEMPLATE_ID = '00000000-0000-4000-8000-000000000004';
 const ABANDONED_CART_DEFAULT_SUBJECT = 'Complete your purchase';
 
+/**
+ * System default template per flow type (seeded by migrations). The first time
+ * an automation/round is rendered for the UI we copy this template's content
+ * inline so each flow becomes self-contained and editable in place.
+ */
+const DEFAULT_TEMPLATE_ID: Record<ShopAutomationType, string> = {
+  order_paid: '00000000-0000-4000-8000-000000000005',
+  order_shipped: '00000000-0000-4000-8000-000000000006',
+  abandoned_cart: ABANDONED_CART_DEFAULT_TEMPLATE_ID,
+};
+
 /** shopyy `expired_at` may be Unix seconds, ms, or an ISO string. */
 function parseExpiredAt(v: string | number | undefined): Date | null {
   if (v === undefined || v === null || v === '') return null;
@@ -85,6 +97,10 @@ function toAutomationView(
     type: a.type,
     enabled: a.enabled,
     templateId: a.templateId,
+    html: a.html,
+    designJson: a.designJson ?? null,
+    thumbnail: a.thumbnail,
+    preheader: a.preheader,
     senderDomainId: a.senderDomainId,
     fromEmail: a.fromEmail,
     fromName: a.fromName,
@@ -97,6 +113,10 @@ function toAutomationView(
         id: s.id,
         stepIndex: s.stepIndex,
         templateId: s.templateId,
+        html: s.html,
+        designJson: s.designJson ?? null,
+        thumbnail: s.thumbnail,
+        preheader: s.preheader,
         subject: s.subject,
         couponCode: s.couponCode,
         couponDiscountKind: (s.couponDiscountKind as CouponDiscountKind | null) ?? null,
@@ -420,6 +440,10 @@ export class IntegrationsService {
         })
       : [];
 
+    // Copy each flow/round's template content inline (once) so the UI can show
+    // a thumbnail + open the editor with the existing design.
+    await this.materializeContent(rows, stepsByAutomation);
+
     return Promise.all(
       rows.map(async (a) =>
         toAutomationView(
@@ -429,6 +453,58 @@ export class IntegrationsService {
         ),
       ),
     );
+  }
+
+  /**
+   * Make each automation/round self-contained by copying its source template's
+   * content inline the first time it's listed (html still null). Mutates the
+   * passed rows in place so the freshly-materialised content is returned without
+   * a re-read. Idempotent: rows already carrying html are skipped.
+   */
+  private async materializeContent(
+    automations: ShopAutomation[],
+    steps: ShopAutomationStep[],
+  ): Promise<void> {
+    const cache = new Map<
+      string,
+      { html: string; mjml: string | null; designJson: Prisma.JsonValue; thumbnail: string | null } | null
+    >();
+    const load = async (id: string) => {
+      if (cache.has(id)) return cache.get(id)!;
+      const t = await this.prisma.emailTemplate.findUnique({
+        where: { id },
+        select: { html: true, mjml: true, designJson: true, thumbnail: true },
+      });
+      const v = t?.html
+        ? { html: t.html, mjml: t.mjml, designJson: t.designJson, thumbnail: t.thumbnail }
+        : null;
+      cache.set(id, v);
+      return v;
+    };
+    const json = (v: Prisma.JsonValue): Prisma.InputJsonValue | typeof Prisma.DbNull =>
+      v === null || v === undefined ? Prisma.DbNull : (v as Prisma.InputJsonValue);
+
+    for (const a of automations) {
+      if (a.html != null) continue;
+      const c = await load(a.templateId ?? DEFAULT_TEMPLATE_ID[a.type]);
+      if (!c) continue;
+      const upd = await this.prisma.shopAutomation.update({
+        where: { id: a.id },
+        data: { html: c.html, mjml: c.mjml, designJson: json(c.designJson), thumbnail: c.thumbnail },
+      });
+      Object.assign(a, upd);
+    }
+    for (const s of steps) {
+      if (s.html != null) continue;
+      const parent = automations.find((a) => a.id === s.automationId);
+      const c = await load(s.templateId ?? parent?.templateId ?? DEFAULT_TEMPLATE_ID.abandoned_cart);
+      if (!c) continue;
+      const upd = await this.prisma.shopAutomationStep.update({
+        where: { id: s.id },
+        data: { html: c.html, mjml: c.mjml, designJson: json(c.designJson), thumbnail: c.thumbnail },
+      });
+      Object.assign(s, upd);
+    }
   }
 
   /** Seed round 1 from the automation's own config when it has no steps yet. */
@@ -457,7 +533,9 @@ export class IntegrationsService {
   ): Promise<ShopAutomationView> {
     const conn = await this.assertConnection(accountId, connectionId);
     const isAbandoned = type === 'abandoned_cart';
-    const { steps, ...rest } = input;
+    const { steps, designJson, ...rest } = input;
+    const toJson = (v: unknown): Prisma.InputJsonValue | typeof Prisma.DbNull =>
+      v === null || v === undefined ? Prisma.DbNull : (v as Prisma.InputJsonValue);
 
     const existing = await this.prisma.shopAutomation.findUnique({
       where: {
@@ -478,6 +556,7 @@ export class IntegrationsService {
       });
       effectiveSteps = cur.map((s) => ({
         templateId: s.templateId,
+        html: s.html,
         subject: s.subject,
         delayMinutes: s.delayMinutes,
       }));
@@ -498,16 +577,16 @@ export class IntegrationsService {
       const fromEmail = rest.fromEmail ?? existing?.fromEmail;
       if (!fromEmail) throw new BadRequestException('启用前请先选择发件邮箱');
       if (isAbandoned) {
-        if (!effectiveSteps?.length || effectiveSteps.some((s) => !s.templateId)) {
-          throw new BadRequestException('启用前请为每一轮选择邮件模板');
+        if (!effectiveSteps?.length || effectiveSteps.some((s) => !(s.html ?? s.templateId))) {
+          throw new BadRequestException('启用前请为每一轮设置邮件内容');
         }
-      } else if (!(rest.templateId ?? existing?.templateId)) {
-        throw new BadRequestException('启用前请先选择邮件模板');
+      } else if (!(rest.html ?? existing?.html ?? rest.templateId ?? existing?.templateId)) {
+        throw new BadRequestException('启用前请先设置邮件内容');
       }
     }
 
     // For abandoned_cart, mirror round 1 onto the parent so legacy reads and
-    // the worker's fallback path keep resolving a sensible template/subject.
+    // the worker's fallback path keep resolving sensible content/subject.
     const first = isAbandoned ? steps?.[0] : undefined;
     const parentData = first
       ? {
@@ -515,8 +594,13 @@ export class IntegrationsService {
           templateId: first.templateId ?? null,
           subject: first.subject ?? null,
           delayMinutes: first.delayMinutes,
+          html: first.html ?? null,
+          mjml: first.mjml ?? null,
+          designJson: toJson(first.designJson),
+          thumbnail: first.thumbnail ?? null,
+          preheader: first.preheader ?? null,
         }
-      : rest;
+      : { ...rest, designJson: toJson(designJson) };
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const a = await tx.shopAutomation.upsert({
@@ -543,6 +627,11 @@ export class IntegrationsService {
               automationId: a.id,
               stepIndex: i + 1,
               templateId: s.templateId ?? null,
+              html: s.html ?? null,
+              mjml: s.mjml ?? null,
+              designJson: toJson(s.designJson),
+              thumbnail: s.thumbnail ?? null,
+              preheader: s.preheader ?? null,
               subject: s.subject ?? null,
               couponCode,
               // Only keep the discount snapshot when a coupon is actually set.

@@ -10,7 +10,7 @@ import { getTransportForAccount } from './transport';
 import { QuotaManager } from './quota';
 import { runArchiveJob } from './archive';
 import { applyCustomTags, indexCustomTags } from './custom-tags';
-import { applySystemTags, ensureUnsubscribeFooter } from './system-tags';
+import { applySystemTags, ensureUnsubscribeFooter, injectPreheader } from './system-tags';
 import { getActiveTrackingDomains, pickTrackingHost } from './tracking-pool';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
@@ -832,13 +832,12 @@ async function runFlowSend(job: Job<SendJobData>) {
       data: { status: terminal, errorMessage: terminal === 'failed' ? msg : null },
     });
 
-  // Multi-round abandoned cart snapshots each round's template onto the send;
-  // fall back to the automation's template for single-template flows.
-  const templateId = send.templateId ?? automation.templateId;
-  if (!automation.enabled || !templateId) {
-    await fail('自动化已停用或未配置模板', 'skipped');
+  if (!automation.enabled) {
+    await fail('自动化已停用', 'skipped');
     return;
   }
+  // Legacy linked template, used only when no inline content was snapshotted.
+  const templateId = send.templateId ?? automation.templateId;
   const fromEmail = send.fromEmail ?? automation.fromEmail;
   const fromName = send.fromName ?? automation.fromName ?? fromEmail?.split('@')[0] ?? 'Store';
   if (!fromEmail) {
@@ -857,12 +856,18 @@ async function runFlowSend(job: Job<SendJobData>) {
     return;
   }
 
-  const tpl = await prisma.emailTemplate.findUnique({
-    where: { id: templateId },
-    select: { html: true },
-  });
-  if (!tpl?.html) {
-    await fail('自动化邮件模板不存在或为空');
+  // Content is stored inline on the send (snapshotted at enqueue) or on the
+  // automation; fall back to the legacy linked template for old rows.
+  let bodyHtmlRaw = send.html ?? automation.html ?? null;
+  if (!bodyHtmlRaw && templateId) {
+    const tpl = await prisma.emailTemplate.findUnique({
+      where: { id: templateId },
+      select: { html: true },
+    });
+    bodyHtmlRaw = tpl?.html ?? null;
+  }
+  if (!bodyHtmlRaw) {
+    await fail('自动化邮件内容为空', 'skipped');
     return;
   }
 
@@ -910,9 +915,17 @@ async function runFlowSend(job: Job<SendJobData>) {
   const tagIndex = await loadCustomTagIndex(send.accountId);
   const subjectOut = applyCustomTags(applySystemTags(subject, sysCtx, 'text'), tagIndex, 'text');
   // Marketing emails get the unsubscribe footer; transactional ones never do.
-  const bodyBase = transactional ? tpl.html : ensureUnsubscribeFooter(tpl.html);
+  const bodyBase = transactional ? bodyHtmlRaw : ensureUnsubscribeFooter(bodyHtmlRaw);
   const bodyHtmlSys = applySystemTags(bodyBase, sysCtx, 'html');
-  const bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
+  let bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
+
+  // Inbox preview text (preheader): resolve tags, then inject a hidden span at
+  // the top of the body so clients show it as the preview snippet.
+  const preheaderRaw = (send.preheader ?? automation.preheader ?? '').trim();
+  if (preheaderRaw) {
+    const ph = applyCustomTags(applySystemTags(preheaderRaw, sysCtx, 'text'), tagIndex, 'text');
+    bodyHtml = injectPreheader(bodyHtml, ph);
+  }
 
   const { html } = rewriteHtml(bodyHtml, {
     baseUrl: trackingBaseUrl,

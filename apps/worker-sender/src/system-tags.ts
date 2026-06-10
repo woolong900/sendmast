@@ -183,3 +183,25 @@ export function ensureUnsubscribeFooter(html: string): string {
   if (idx === -1) return html + DEFAULT_UNSUBSCRIBE_FOOTER;
   return html.slice(0, idx) + DEFAULT_UNSUBSCRIBE_FOOTER + html.slice(idx);
 }
+
+/**
+ * Inject inbox preview text (preheader) as a hidden block at the very top of the
+ * body. Email clients surface the first visible text as the preview snippet;
+ * the trailing zero-width/non-breaking spacers push the real content out of the
+ * preview so it isn't appended. `text` must already be tag-resolved + plain.
+ */
+export function injectPreheader(html: string, text: string): string {
+  const t = text.trim();
+  if (!t) return html;
+  const esc = t.replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+  // Spacer hides the following body content from the preview snippet.
+  const spacer = '&#847;&zwnj;&nbsp;'.repeat(60);
+  const span =
+    `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;` +
+    `font-size:1px;line-height:1px;color:#ffffff;opacity:0;">${esc}${spacer}</div>`;
+  const m = html.match(/<body[^>]*>/i);
+  if (m) return html.replace(m[0], `${m[0]}${span}`);
+  return span + html;
+}

@@ -1139,7 +1139,18 @@ model ShopAutomation {
   shopConnectionId String             @map("shop_connection_id") @db.Uuid
   type             ShopAutomationType
   enabled          Boolean            @default(false)
+  /// Legacy link to a source template; content is now stored inline below.
+  /// Kept so existing rows can backfill their content and the worker can fall
+  /// back to a template when inline html is missing.
   templateId       String?            @map("template_id") @db.Uuid
+  /// Inline email content (seeded from a system template, then editable in
+  /// place). `html` is what gets sent; `designJson` re-opens the block editor.
+  html             String?            @db.Text
+  mjml             String?            @db.Text
+  designJson       Json?              @map("design_json")
+  thumbnail        String?
+  /// Optional inbox preview text (preheader), injected as a hidden span on send.
+  preheader        String?
   senderDomainId   String?            @map("sender_domain_id") @db.Uuid
   fromEmail        String?            @map("from_email")
   fromName         String?            @map("from_name")
@@ -1173,7 +1184,15 @@ model ShopAutomationStep {
   automationId String   @map("automation_id") @db.Uuid
   /// 1-based round order; delays must strictly increase with stepIndex.
   stepIndex    Int      @map("step_index")
+  /// Legacy link to a source template; content is now stored inline below.
   templateId   String?  @map("template_id") @db.Uuid
+  /// Inline email content for this round (seeded from a template, then editable).
+  html         String?  @db.Text
+  mjml         String?  @db.Text
+  designJson   Json?    @map("design_json")
+  thumbnail    String?
+  /// Optional inbox preview text (preheader) for this round.
+  preheader    String?
   subject      String?
   /// Store coupon code shown in this round's recall email; null = no coupon.
   couponCode   String?  @map("coupon_code")
@@ -1208,6 +1227,10 @@ model ShopAutomationSend {
   /// Template this send renders. Snapshots the round's template for multi-round
   /// abandoned-cart (where each round has its own); null = use automation's.
   templateId   String?   @map("template_id") @db.Uuid
+  /// Inline email content snapshotted at enqueue time (preferred over template).
+  html         String?   @db.Text
+  /// Inbox preview text snapshotted at enqueue time; injected as a hidden span.
+  preheader    String?
   /// Lifecycle: pending → queued → sent | failed | skipped.
   status       String    @default("pending")
   /// ACS operationId, echoed back as messageId on delivery/bounce reports.

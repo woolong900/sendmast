@@ -75,7 +75,14 @@ export type CouponDiscountKind = 'percent' | 'amount';
 export interface ShopAutomationStepView {
   id: string;
   stepIndex: number;
+  /** Legacy source template; content is now inline below. */
   templateId: string | null;
+  /** Inline email content for this round (sent html + editor design tree). */
+  html: string | null;
+  designJson: unknown | null;
+  thumbnail: string | null;
+  /** Optional inbox preview text (preheader). */
+  preheader: string | null;
   subject: string | null;
   /** Store coupon code shown in this round's email; null = no coupon. */
   couponCode: string | null;
@@ -101,7 +108,14 @@ export interface ShopAutomationView {
   id: string;
   type: ShopAutomationType;
   enabled: boolean;
+  /** Legacy source template; content is now inline below (single-template flows). */
   templateId: string | null;
+  /** Inline email content (single-template flows; abandoned_cart uses steps[]). */
+  html: string | null;
+  designJson: unknown | null;
+  thumbnail: string | null;
+  /** Optional inbox preview text (preheader). */
+  preheader: string | null;
   senderDomainId: string | null;
   fromEmail: string | null;
   fromName: string | null;
@@ -120,6 +134,12 @@ export interface ShopAutomationView {
  */
 export const ShopAutomationStepSchema = z.object({
   templateId: z.string().uuid().nullable().optional(),
+  /** Inline email content for this round. */
+  html: z.string().nullable().optional(),
+  mjml: z.string().nullable().optional(),
+  designJson: z.unknown().optional(),
+  thumbnail: z.string().nullable().optional(),
+  preheader: z.string().max(255).nullable().optional(),
   subject: z.string().max(255).nullable().optional(),
   couponCode: z.string().max(100).nullable().optional(),
   couponDiscountKind: z.enum(['percent', 'amount']).nullable().optional(),
@@ -139,6 +159,12 @@ export type ShopAutomationStepInput = z.infer<typeof ShopAutomationStepSchema>;
 export const UpdateShopAutomationSchema = z.object({
   enabled: z.boolean().optional(),
   templateId: z.string().uuid().nullable().optional(),
+  /** Inline email content (single-template flows). */
+  html: z.string().nullable().optional(),
+  mjml: z.string().nullable().optional(),
+  designJson: z.unknown().optional(),
+  thumbnail: z.string().nullable().optional(),
+  preheader: z.string().max(255).nullable().optional(),
   senderDomainId: z.string().uuid().nullable().optional(),
   fromEmail: z.string().email().nullable().optional(),
   fromName: z.string().max(100).nullable().optional(),

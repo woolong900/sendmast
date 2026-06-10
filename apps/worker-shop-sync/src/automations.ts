@@ -99,6 +99,7 @@ interface ResolvedAutomation {
   fromName: string;
   subject: string;
   html: string;
+  preheader: string | null;
   delayMinutes: number;
 }
 
@@ -121,10 +122,25 @@ async function shopNameMergeVar(
   return name ? { shop_name: name } : {};
 }
 
+/** Resolve an email template's html by id (legacy fallback for null inline content). */
+async function templateHtml(
+  prisma: PrismaClient,
+  templateId: string | null | undefined,
+): Promise<string | null> {
+  if (!templateId) return null;
+  const tpl = await prisma.emailTemplate.findUnique({
+    where: { id: templateId },
+    select: { html: true },
+  });
+  return tpl?.html ?? null;
+}
+
 /**
- * Load a configured + enabled automation and its template body. Returns null
- * when the automation is disabled, unconfigured (no template / from-address),
- * or the template was deleted — caller silently skips in all cases.
+ * Load a configured + enabled automation and its inline email content. Returns
+ * null when the automation is disabled, unconfigured (no content / from-address),
+ * or its content is empty — caller silently skips in all cases. Content is now
+ * stored inline on the automation; falls back to the linked template for legacy
+ * rows not yet materialised.
  */
 async function loadAutomation(
   prisma: PrismaClient,
@@ -134,20 +150,18 @@ async function loadAutomation(
   const a = await prisma.shopAutomation.findUnique({
     where: { shopConnectionId_type: { shopConnectionId, type } },
   });
-  if (!a || !a.enabled || !a.templateId || !a.fromEmail) return null;
+  if (!a || !a.enabled || !a.fromEmail) return null;
 
-  const tpl = await prisma.emailTemplate.findUnique({
-    where: { id: a.templateId },
-    select: { html: true },
-  });
-  if (!tpl?.html) return null;
+  const html = a.html ?? (await templateHtml(prisma, a.templateId));
+  if (!html) return null;
 
   return {
     id: a.id,
     fromEmail: a.fromEmail,
     fromName: a.fromName ?? a.fromEmail.split('@')[0] ?? 'Store',
     subject: a.subject?.trim() || DEFAULT_SUBJECT[type],
-    html: tpl.html,
+    html,
+    preheader: a.preheader ?? null,
     delayMinutes: a.delayMinutes,
   };
 }
@@ -314,6 +328,8 @@ export async function triggerOrderPaid(
     subject: a.subject,
     fromEmail: a.fromEmail,
     fromName: a.fromName,
+    html: a.html,
+    preheader: a.preheader,
     mergeVars: orderMergeVars(ctx, shopName),
   });
 }
@@ -334,6 +350,8 @@ export async function triggerOrderShipped(
     subject: a.subject,
     fromEmail: a.fromEmail,
     fromName: a.fromName,
+    html: a.html,
+    preheader: a.preheader,
     mergeVars: orderMergeVars(ctx, shopName),
   });
 }
@@ -430,6 +448,8 @@ export async function runAbandonedRecovery(
     subject: a.subject,
     fromEmail: a.fromEmail,
     fromName: a.fromName,
+    html: a.html,
+    preheader: a.preheader,
     mergeVars,
   });
 
@@ -475,6 +495,7 @@ export async function scheduleAbandonedFromOrder(
     : [{
         stepIndex: 1,
         templateId: a.templateId,
+        html: a.html,
         subject: a.subject,
         couponCode: null,
         couponDiscountKind: null,
@@ -483,7 +504,7 @@ export async function scheduleAbandonedFromOrder(
       }];
 
   for (const s of rounds) {
-    if (!s.templateId) continue; // round not configured → nothing to send
+    if (!s.html && !s.templateId) continue; // round not configured → nothing to send
     const job: AbandonedJob = {
       accountId: ctx.accountId,
       shopConnectionId: ctx.shopConnectionId,
@@ -525,9 +546,23 @@ export async function runAbandonedFromOrder(
   if (!job.externalOrderId) return;
   const a = await deps.prisma.shopAutomation.findUnique({ where: { id: job.automationId } });
   if (!a || !a.enabled || !a.fromEmail) return;
-  // Round template snapshotted at schedule time; fall back to the parent's.
-  const templateId = job.templateId ?? a.templateId;
-  if (!templateId) return;
+
+  // Resolve this round's inline content fresh at send time (so content edits
+  // after scheduling take effect). Prefer the round's own content, then the
+  // parent's, then the legacy linked template.
+  const round = job.round ?? 1;
+  const step = await deps.prisma.shopAutomationStep.findUnique({
+    where: { automationId_stepIndex: { automationId: a.id, stepIndex: round } },
+  });
+  let html = step?.html ?? null;
+  let preheader = step?.preheader ?? null;
+  if (!html) html = await templateHtml(deps.prisma, step?.templateId);
+  if (!html) {
+    html = a.html;
+    preheader = preheader ?? a.preheader;
+  }
+  if (!html) html = await templateHtml(deps.prisma, a.templateId);
+  if (!html) return;
 
   const order = await deps.prisma.shopOrder.findUnique({
     where: {
@@ -580,7 +615,6 @@ export async function runAbandonedFromOrder(
       : {}),
   };
 
-  const round = job.round ?? 1;
   const fromName = a.fromName ?? a.fromEmail.split('@')[0] ?? 'Store';
   const subject = job.subject?.trim() || a.subject?.trim() || DEFAULT_SUBJECT.abandoned_cart;
 
@@ -595,7 +629,8 @@ export async function runAbandonedFromOrder(
     subject,
     fromEmail: a.fromEmail,
     fromName,
-    templateId,
+    html,
+    preheader,
     mergeVars,
   });
 }

@@ -33,6 +33,13 @@ export interface TransactionalParams {
    * (each round can differ); omit to fall back to the automation's template.
    */
   templateId?: string | null;
+  /**
+   * Inline email content snapshotted at enqueue time (preferred over template).
+   * Automations now store their content inline per round/flow.
+   */
+  html?: string | null;
+  /** Inbox preview text (preheader) snapshotted at enqueue time. */
+  preheader?: string | null;
   /** Per-send {{order_total}} etc. resolved at send time. */
   mergeVars: Record<string, string>;
 }
@@ -90,6 +97,8 @@ export async function enqueueTransactional(
         email: params.email,
         contactId: params.contactId,
         templateId: params.templateId ?? null,
+        html: params.html ?? null,
+        preheader: params.preheader ?? null,
         subject: params.subject,
         fromEmail: params.fromEmail,
         fromName: params.fromName,

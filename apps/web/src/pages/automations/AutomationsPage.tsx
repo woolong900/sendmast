@@ -10,9 +10,11 @@ import {
   ChevronDown,
   Workflow,
   CheckCircle2,
+  Pencil,
   Plus,
   Trash2,
 } from 'lucide-react';
+import { type IEmailTemplate } from 'easy-email-editor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -31,12 +33,7 @@ import {
   type ShopCouponView,
   type SenderDomainView,
 } from '@sendmast/shared';
-
-interface Template {
-  id: string;
-  name: string;
-  scope: 'system' | 'user';
-}
+import { AutomationEmailEditor, type AutomationEmailContent } from './AutomationEmailEditor';
 
 interface ShopConnectionsResponse {
   configured: boolean;
@@ -147,10 +144,6 @@ function FlowList({ connectionId }: { connectionId: string }) {
     queryFn: async () =>
       (await api.get(`/api/integrations/shopyy/${connectionId}/automations`)).data,
   });
-  const templates = useQuery<Template[]>({
-    queryKey: ['templates'],
-    queryFn: async () => (await api.get('/api/templates')).data,
-  });
   const domains = useQuery<SenderDomainView[]>({
     queryKey: ['sender-domains'],
     queryFn: async () => (await api.get('/api/sender-domains')).data,
@@ -183,7 +176,6 @@ function FlowList({ connectionId }: { connectionId: string }) {
           key={a.id}
           connectionId={connectionId}
           automation={a}
-          templates={templates.data ?? []}
           senderOptions={senderOptions}
         />
       ))}
@@ -225,13 +217,60 @@ function FlowStats({ stats }: { stats: FlowStatsView }) {
   );
 }
 
-interface Round {
-  templateId: string;
+/** Inline email content edited per flow / per recovery round. */
+interface EmailContent {
+  html: string | null;
+  mjml: string | null;
+  designJson: IEmailTemplate | null;
+  thumbnail: string | null;
+}
+
+interface Round extends EmailContent {
+  preheader: string;
   subject: string;
   couponCode: string;
   couponDiscountKind: CouponDiscountKind | null;
   couponDiscountValue: number | null;
   delayMinutes: number;
+}
+
+/** Thumbnail of an email's content; click to open the editor. */
+function EmailThumb({
+  thumbnail,
+  html,
+  onEdit,
+}: {
+  thumbnail: string | null;
+  html: string | null;
+  onEdit: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      className="group relative block aspect-[4/3] w-full overflow-hidden rounded-md border bg-muted/30 text-left"
+    >
+      {thumbnail ? (
+        <img src={thumbnail} alt="" className="h-full w-full object-cover object-top" />
+      ) : html ? (
+        <iframe
+          title="email-thumb"
+          srcDoc={html}
+          sandbox=""
+          scrolling="no"
+          className="pointer-events-none h-[300%] w-[300%] origin-top-left scale-[0.333] border-0 bg-white"
+        />
+      ) : (
+        <div className="flex h-full items-center justify-center px-3 text-center text-xs text-muted-foreground">
+          点击设置邮件内容
+        </div>
+      )}
+      <div className="absolute inset-0 flex items-center justify-center gap-1 text-sm font-medium text-white opacity-0 transition group-hover:bg-black/40 group-hover:opacity-100">
+        <Pencil className="size-4" />
+        编辑邮件
+      </div>
+    </button>
+  );
 }
 
 /** Picker label, e.g. "夏季促销（SUMMER）· 15% off" / "· 减 20". */
@@ -299,7 +338,11 @@ function DelayField({
 function initialRounds(a: ShopAutomationView): Round[] {
   if (a.steps.length) {
     return a.steps.map((s) => ({
-      templateId: s.templateId ?? '',
+      html: s.html,
+      mjml: null,
+      designJson: (s.designJson as IEmailTemplate | null) ?? null,
+      thumbnail: s.thumbnail,
+      preheader: s.preheader ?? '',
       subject: s.subject ?? '',
       couponCode: s.couponCode ?? '',
       couponDiscountKind: s.couponDiscountKind,
@@ -309,7 +352,11 @@ function initialRounds(a: ShopAutomationView): Round[] {
   }
   return [
     {
-      templateId: a.templateId ?? '',
+      html: a.html,
+      mjml: null,
+      designJson: (a.designJson as IEmailTemplate | null) ?? null,
+      thumbnail: a.thumbnail,
+      preheader: a.preheader ?? '',
       subject: a.subject ?? '',
       couponCode: '',
       couponDiscountKind: null,
@@ -322,12 +369,10 @@ function initialRounds(a: ShopAutomationView): Round[] {
 function FlowCard({
   connectionId,
   automation,
-  templates,
   senderOptions,
 }: {
   connectionId: string;
   automation: ShopAutomationView;
-  templates: Template[];
   senderOptions: { value: string; label: string; name: string }[];
 }) {
   const qc = useQueryClient();
@@ -346,12 +391,22 @@ function FlowCard({
   });
 
   const [enabled, setEnabled] = useState(automation.enabled);
-  const [templateId, setTemplateId] = useState(automation.templateId ?? '');
   const [fromEmail, setFromEmail] = useState(automation.fromEmail ?? '');
   const [subject, setSubject] = useState(automation.subject ?? '');
+  const [preheader, setPreheader] = useState(automation.preheader ?? '');
+  // Inline email content for single-template flows (order paid / shipped).
+  const [content, setContent] = useState<EmailContent>(() => ({
+    html: automation.html,
+    mjml: null,
+    designJson: (automation.designJson as IEmailTemplate | null) ?? null,
+    thumbnail: automation.thumbnail,
+  }));
   const [rounds, setRounds] = useState<Round[]>(() => initialRounds(automation));
+  // Which email is being edited: 'single' for non-abandoned, a round index
+  // otherwise; null when the editor is closed.
+  const [editing, setEditing] = useState<number | 'single' | null>(null);
   // Configured flows start collapsed; unconfigured ones expand to guide setup.
-  const [open, setOpen] = useState(!automation.templateId);
+  const [open, setOpen] = useState(!automation.html);
 
   const delaysIncreasing = rounds.every(
     (r, i) => i === 0 || r.delayMinutes > rounds[i - 1]!.delayMinutes,
@@ -365,10 +420,17 @@ function FlowCard({
     setRounds((rs) => {
       const last = rs[rs.length - 1]?.delayMinutes ?? 0;
       const def = ROUND_DEFAULT_MINUTES[rs.length] ?? last + MINUTES_PER_DAY;
+      const prev = rs[rs.length - 1];
       return [
         ...rs,
         {
-          templateId: rs[rs.length - 1]?.templateId ?? '',
+          // Seed the new round's content from the previous round so it starts
+          // from a sensible design the merchant can tweak.
+          html: prev?.html ?? null,
+          mjml: prev?.mjml ?? null,
+          designJson: prev?.designJson ?? null,
+          thumbnail: prev?.thumbnail ?? null,
+          preheader: '',
           subject: '',
           couponCode: '',
           couponDiscountKind: null,
@@ -390,7 +452,11 @@ function FlowCard({
       };
       if (isAbandoned) {
         body.steps = rounds.map((r) => ({
-          templateId: r.templateId || null,
+          html: r.html,
+          mjml: r.mjml,
+          designJson: r.designJson,
+          thumbnail: r.thumbnail,
+          preheader: r.preheader.trim() || null,
           subject: r.subject.trim() || null,
           couponCode: r.couponCode || null,
           couponDiscountKind: r.couponCode ? r.couponDiscountKind : null,
@@ -398,7 +464,11 @@ function FlowCard({
           delayMinutes: r.delayMinutes,
         }));
       } else {
-        body.templateId = templateId || null;
+        body.html = content.html;
+        body.mjml = content.mjml;
+        body.designJson = content.designJson;
+        body.thumbnail = content.thumbnail;
+        body.preheader = preheader.trim() || null;
         body.subject = subject.trim() || null;
       }
       return api.patch(
@@ -414,11 +484,44 @@ function FlowCard({
   });
 
   const configured = isAbandoned
-    ? rounds.length >= 1 && rounds.every((r) => r.templateId) && !!fromEmail
-    : !!automation.templateId && !!automation.fromEmail;
+    ? rounds.length >= 1 && rounds.every((r) => !!r.html) && !!fromEmail
+    : !!content.html && !!fromEmail;
+
+  // Email currently open in the editor (single flow vs a specific round).
+  const editingContent: EmailContent | null =
+    editing === 'single'
+      ? content
+      : typeof editing === 'number'
+        ? rounds[editing] ?? null
+        : null;
+
+  const applyContent = (c: AutomationEmailContent) => {
+    const patch = {
+      html: c.html,
+      mjml: c.mjml,
+      designJson: c.designJson,
+      thumbnail: c.thumbnail,
+    };
+    if (editing === 'single') setContent(patch);
+    else if (typeof editing === 'number') updateRound(editing, patch);
+  };
+
+  const editorTitle =
+    SHOP_AUTOMATION_LABELS[automation.type] +
+    (typeof editing === 'number' ? ` · 第 ${editing + 1} 轮` : '');
 
   return (
-    <Card>
+    <>
+      {editing !== null && editingContent && (
+        <AutomationEmailEditor
+          title={editorTitle}
+          initialDesignJson={editingContent.designJson}
+          initialHtml={editingContent.html}
+          onClose={() => setEditing(null)}
+          onApply={applyContent}
+        />
+      )}
+      <Card>
       <CardContent className="p-0">
         <div className="flex items-center gap-3 p-4">
           <div
@@ -488,31 +591,35 @@ function FlowCard({
             </label>
 
             {!isAbandoned && (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1 text-xs">
-                  <span className="text-muted-foreground">邮件模板</span>
-                  <select
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                    value={templateId}
-                    onChange={(e) => setTemplateId(e.target.value)}
-                  >
-                    <option value="">未选择</option>
-                    {templates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="space-y-1 text-xs">
-                  <span className="text-muted-foreground">邮件主题</span>
-                  <input
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                    value={subject}
-                    placeholder="留空使用默认主题"
-                    onChange={(e) => setSubject(e.target.value)}
+              <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
+                <div className="space-y-1 text-xs">
+                  <span className="text-muted-foreground">邮件内容</span>
+                  <EmailThumb
+                    thumbnail={content.thumbnail}
+                    html={content.html}
+                    onEdit={() => setEditing('single')}
                   />
-                </label>
+                </div>
+                <div className="space-y-3">
+                  <label className="block space-y-1 text-xs">
+                    <span className="text-muted-foreground">邮件主题</span>
+                    <input
+                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                      value={subject}
+                      placeholder="留空使用默认主题"
+                      onChange={(e) => setSubject(e.target.value)}
+                    />
+                  </label>
+                  <label className="block space-y-1 text-xs">
+                    <span className="text-muted-foreground">内文预览（选填）</span>
+                    <input
+                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                      value={preheader}
+                      placeholder="收件箱中显示在主题后的预览文字"
+                      onChange={(e) => setPreheader(e.target.value)}
+                    />
+                  </label>
+                </div>
               </div>
             )}
 
@@ -549,30 +656,34 @@ function FlowCard({
                         )}
                       </div>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="space-y-1 text-xs">
-                          <span className="text-muted-foreground">邮件模板</span>
-                          <select
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                            value={r.templateId}
-                            onChange={(e) => updateRound(i, { templateId: e.target.value })}
-                          >
-                            <option value="">未选择</option>
-                            {templates.map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="space-y-1 text-xs">
-                          <span className="text-muted-foreground">邮件主题</span>
-                          <input
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                            value={r.subject}
-                            placeholder="留空使用默认主题"
-                            onChange={(e) => updateRound(i, { subject: e.target.value })}
+                        <div className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">邮件内容</span>
+                          <EmailThumb
+                            thumbnail={r.thumbnail}
+                            html={r.html}
+                            onEdit={() => setEditing(i)}
                           />
-                        </label>
+                        </div>
+                        <div className="space-y-3">
+                          <label className="block space-y-1 text-xs">
+                            <span className="text-muted-foreground">邮件主题</span>
+                            <input
+                              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                              value={r.subject}
+                              placeholder="留空使用默认主题"
+                              onChange={(e) => updateRound(i, { subject: e.target.value })}
+                            />
+                          </label>
+                          <label className="block space-y-1 text-xs">
+                            <span className="text-muted-foreground">内文预览（选填）</span>
+                            <input
+                              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                              value={r.preheader}
+                              placeholder="收件箱中显示在主题后的预览文字"
+                              onChange={(e) => updateRound(i, { preheader: e.target.value })}
+                            />
+                          </label>
+                        </div>
                         <label className="space-y-1 text-xs sm:col-span-2">
                           <span className="text-muted-foreground">优惠券（可选，选择后展示在邮件中）</span>
                           <select
@@ -638,7 +749,7 @@ function FlowCard({
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 {configured && <CheckCircle2 className="size-3.5 text-emerald-600" />}
-                {configured ? '已配置完成' : '请选择模板与发件邮箱后保存'}
+                {configured ? '已配置完成' : '请设置邮件内容与发件邮箱后保存'}
               </span>
               <Button
                 size="sm"
@@ -652,6 +763,7 @@ function FlowCard({
           </div>
         )}
       </CardContent>
-    </Card>
+      </Card>
+    </>
   );
 }
