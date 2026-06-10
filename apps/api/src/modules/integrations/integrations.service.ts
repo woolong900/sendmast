@@ -427,7 +427,7 @@ export class IntegrationsService {
     type: ShopAutomationTypeDto,
     input: UpdateShopAutomationInput,
   ): Promise<ShopAutomationView> {
-    await this.assertConnection(accountId, connectionId);
+    const conn = await this.assertConnection(accountId, connectionId);
     const isAbandoned = type === 'abandoned_cart';
     const { steps, ...rest } = input;
 
@@ -458,6 +458,15 @@ export class IntegrationsService {
     // Enabling requires a deliverable config: a verified sender + a template
     // (every round for abandoned_cart, the single template otherwise).
     if (input.enabled) {
+      // No usable store binding → the flow could never fire (no webhooks).
+      // Revoked = unbound; expired = token dead until re-authorized.
+      if (conn.status !== 'active') {
+        throw new BadRequestException(
+          conn.status === 'expired'
+            ? '店铺授权已过期，请先重新授权店铺后再开启自动化'
+            : '店铺未绑定，请先连接店铺后再开启自动化',
+        );
+      }
       const fromEmail = rest.fromEmail ?? existing?.fromEmail;
       if (!fromEmail) throw new BadRequestException('启用前请先选择发件邮箱');
       if (isAbandoned) {
