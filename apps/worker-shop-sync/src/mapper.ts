@@ -144,6 +144,47 @@ function pickTrackingNumber(o: Json): string | undefined {
 }
 
 /**
+ * Resolve the checkout-recovery URL for the abandoned-cart recall button.
+ *
+ * Shopyy's `orders/create` payload has no ready-made recovery link, but the
+ * storefront resolves a checkout from its token at:
+ *   https://{domain}/{id}-{token[:6]}/{one-page-checkouts|checkouts}/{token}
+ * The leading "{id}-{token6}" segment is a cosmetic slug (only the trailing
+ * token is matched server-side) but the route 404s without *some* first
+ * segment, so we keep Shopyy's own shape. The path depends on `checkout_type`
+ * (`one_page` → one-page-checkouts, else → checkouts). We pre-apply the cart's
+ * coupon via `?email_coupon_code` so the recovered checkout keeps its discount.
+ */
+function pickRecoveryUrl(o: Json): string | undefined {
+  // An explicit pay/checkout URL wins if a payload ever carries one.
+  const explicit = pickStr(o, [
+    'pay_url',
+    'payment_url',
+    'cashier_url',
+    'checkout_url',
+    'order_url',
+    'detail_url',
+  ]);
+  if (explicit) return explicit;
+
+  const domain = pickStr(o, ['domain', 'shop_domain', 'shopDomain', 'store_domain']);
+  const token = pickStr(o, ['checkout_token', 'checkoutToken', 'token']);
+  if (!domain || !token) return undefined;
+
+  const host = domain.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  const id = pickStr(o, ['id', 'order_id', 'orderId']) ?? token.slice(0, 6);
+  const type = pickStr(o, ['checkout_type', 'checkoutType']) ?? '';
+  const path = /one/i.test(type) ? 'one-page-checkouts' : 'checkouts';
+  const base = `https://${host}/${id}-${token.slice(0, 6)}/${path}/${token}`;
+
+  const couponObj = asObject(o.coupon);
+  const coupon =
+    pickStr(o, ['coupon_code', 'couponCode']) ??
+    (couponObj ? pickStr(couponObj, ['coupon_code', 'code']) : undefined);
+  return coupon ? `${base}?email_coupon_code=${encodeURIComponent(coupon)}` : base;
+}
+
+/**
  * Extract the shipping address as plain-text lines (name / street / city,
  * province, zip / country / phone). Reads candidate field names like the rest
  * of the mapper; returns [] when no address object is present. The caller
@@ -208,14 +249,7 @@ export function mapOrder(payload: Json): NormalizedOrder | null {
     ]),
     trackingUrl: pickTrackingUrl(o),
     trackingNumber: pickTrackingNumber(o),
-    payUrl: pickStr(o, [
-      'pay_url',
-      'payment_url',
-      'cashier_url',
-      'checkout_url',
-      'order_url',
-      'detail_url',
-    ]),
+    payUrl: pickRecoveryUrl(o),
   };
 }
 
