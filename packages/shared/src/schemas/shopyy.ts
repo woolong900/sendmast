@@ -120,7 +120,7 @@ export const ShopAutomationStepSchema = z.object({
   couponCode: z.string().max(100).nullable().optional(),
   couponDiscountKind: z.enum(['percent', 'amount']).nullable().optional(),
   couponDiscountValue: z.number().nonnegative().nullable().optional(),
-  delayMinutes: z.number().int().min(5).max(10080),
+  delayMinutes: z.number().int().min(1).max(10080),
 });
 export type ShopAutomationStepInput = z.infer<typeof ShopAutomationStepSchema>;
 
@@ -139,7 +139,7 @@ export const UpdateShopAutomationSchema = z.object({
   fromEmail: z.string().email().nullable().optional(),
   fromName: z.string().max(100).nullable().optional(),
   subject: z.string().max(255).nullable().optional(),
-  delayMinutes: z.number().int().min(5).max(10080).optional(),
+  delayMinutes: z.number().int().min(1).max(10080).optional(),
   steps: z
     .array(ShopAutomationStepSchema)
     .min(1)

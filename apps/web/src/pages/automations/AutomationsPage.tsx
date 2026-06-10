@@ -343,7 +343,7 @@ function FlowCard({
   const delaysIncreasing = rounds.every(
     (r, i) => i === 0 || r.delayMinutes > rounds[i - 1]!.delayMinutes,
   );
-  const delaysInRange = rounds.every((r) => r.delayMinutes >= 5 && r.delayMinutes <= MAX_DELAY_MINUTES);
+  const delaysInRange = rounds.every((r) => r.delayMinutes >= 1 && r.delayMinutes <= MAX_DELAY_MINUTES);
   const roundsValid = !isAbandoned || (rounds.length >= 1 && delaysIncreasing && delaysInRange);
 
   const updateRound = (i: number, patch: Partial<Round>) =>
@@ -361,7 +361,7 @@ function FlowCard({
           couponDiscountKind: null,
           couponDiscountValue: null,
           // Keep strictly increasing even if earlier rounds were edited large.
-          delayMinutes: Math.min(MAX_DELAY_MINUTES, Math.max(def, last + 5)),
+          delayMinutes: Math.min(MAX_DELAY_MINUTES, Math.max(def, last + 1)),
         },
       ];
     });
