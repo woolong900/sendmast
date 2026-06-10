@@ -59,6 +59,10 @@ export interface FlowStatsView {
   opened: number;
   clicked: number;
   bounced: number;
+  /** Revenue hard-attributed to this flow (orders carrying its recall sm_mid). */
+  revenue: number;
+  /** Currency of `revenue` (the flow's dominant order currency). */
+  currency: string;
 }
 
 /** Max recovery rounds an abandoned-cart automation can be split into. */

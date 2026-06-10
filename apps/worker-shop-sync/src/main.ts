@@ -40,6 +40,40 @@ const sendQueue = new Queue(QUEUE_NAMES.SEND_EMAIL, { connection });
 const abandonedQueue = new Queue(QUEUE_NAMES.SHOP_ABANDONED, { connection });
 const deps: AutomationDeps = { prisma, sendQueue, abandonedQueue };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Read the recall-link `sm_mid` (a flow send id) from the order's landing page. */
+function landingPageSendId(payload: Record<string, unknown>): string | null {
+  const lp = payload['landing_page'];
+  if (typeof lp !== 'string' || !lp) return null;
+  try {
+    const mid = new URL(lp).searchParams.get('sm_mid');
+    return mid && UUID_RE.test(mid) ? mid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Hard attribution: resolve the order's `sm_mid` landing-page param to the flow
+ * send that drove it. Works regardless of which email the buyer used at
+ * checkout (unlike last-click, which matches on the order's email). Scoped to
+ * the order's account so a stale/forged id can't cross tenants.
+ */
+async function resolveFlowAttribution(
+  job: ShopEventJob,
+): Promise<{ automationId: string; sendId: string } | null> {
+  const sendId = landingPageSendId(job.payload);
+  if (!sendId) return null;
+  const send = await prisma.shopAutomationSend
+    .findFirst({
+      where: { id: sendId, accountId: job.accountId },
+      select: { id: true, automationId: true },
+    })
+    .catch(() => null);
+  return send ? { automationId: send.automationId, sendId: send.id } : null;
+}
+
 /** Upsert a contact by (accountId, email); shopyy buyers source = 'shopyy'. */
 async function upsertContact(accountId: string, email: string): Promise<string> {
   const normalized = email.toLowerCase().trim();
@@ -75,6 +109,9 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
         withinDays: ATTRIBUTION_WINDOW_DAYS,
       }).catch(() => null);
 
+  // Flow (hard) attribution via the recall link's sm_mid — also paid-event only.
+  const flowAttr = shipped ? null : await resolveFlowAttribution(job).catch(() => null);
+
   const saved = await prisma.shopOrder.upsert({
     where: {
       shopConnectionId_externalOrderId: {
@@ -99,6 +136,8 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       attributedCampaignId: attribution?.campaignId ?? null,
       attributedContactId: attribution ? contactId : null,
       attributionModel: attribution ? 'last_click_7d' : null,
+      attributedAutomationId: flowAttr?.automationId ?? null,
+      attributedSendId: flowAttr?.sendId ?? null,
       raw: job.payload as object,
     },
     update: {
@@ -116,6 +155,9 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
             attributedContactId: contactId,
             attributionModel: 'last_click_7d',
           }
+        : {}),
+      ...(flowAttr
+        ? { attributedAutomationId: flowAttr.automationId, attributedSendId: flowAttr.sendId }
         : {}),
       raw: job.payload as object,
     },

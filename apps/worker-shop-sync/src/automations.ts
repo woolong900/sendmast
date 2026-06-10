@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { PrismaClient, ShopAutomationType } from '@prisma/client';
 import type { Queue } from 'bullmq';
 import { enqueueTransactional, formatMoney } from './transactional.js';
@@ -169,6 +170,23 @@ function withCouponCode(url: string, code: string | null | undefined): string {
   try {
     const u = new URL(url);
     u.searchParams.set('email_coupon_code', c);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Stamp the flow send id onto the recall CTA's destination so the conversion
+ * can be hard-attributed back to this exact send. The buyer lands on the store
+ * checkout with `?sm_mid=<sendId>`, which the order webhook echoes in
+ * `landing_page`; we resolve it to the send at ingest time. Survives our own
+ * click-tracking 302 (the destination URL is preserved verbatim).
+ */
+function withMessageId(url: string, sendId: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.set('sm_mid', sendId);
     return u.toString();
   } catch {
     return url;
@@ -529,10 +547,16 @@ export async function runAbandonedFromOrder(
     mapLineItems((order.raw ?? {}) as Record<string, unknown>),
   );
 
+  // Pre-generate the send id so we can stamp it on the CTA link (sm_mid) and
+  // reuse it as the shop_automation_sends row id — the link and the record then
+  // share an id, letting the order webhook hard-attribute the conversion.
+  const sendId = randomUUID();
+
   // Apply the round's coupon to the CTA link so clicking through re-applies the
-  // discount at checkout (and the coupon card shows the code to type manually).
+  // discount at checkout (and the coupon card shows the code to type manually),
+  // then stamp the send id for attribution.
   const recoveryUrl = job.recoveryUrl
-    ? withCouponCode(job.recoveryUrl, job.couponCode)
+    ? withMessageId(withCouponCode(job.recoveryUrl, job.couponCode), sendId)
     : undefined;
 
   const shopName = await shopNameMergeVar(deps.prisma, job.shopConnectionId);
@@ -563,6 +587,7 @@ export async function runAbandonedFromOrder(
   await enqueueTransactional(deps, {
     accountId: job.accountId,
     automationId: a.id,
+    sendId,
     // Per-round dedup so each round sends once per order (idempotent on retry).
     dedupKey: `abandoned:order:${job.externalOrderId}:r${round}`,
     contactId: job.contactId,

@@ -1103,6 +1103,10 @@ model ShopOrder {
   attributedCampaignId String?  @map("attributed_campaign_id") @db.Uuid
   attributedContactId  String?  @map("attributed_contact_id") @db.Uuid
   attributionModel     String?  @map("attribution_model")
+  /// Flow this order is hard-attributed to (recall link carried sm_mid=sendId).
+  attributedAutomationId String? @map("attributed_automation_id") @db.Uuid
+  /// The exact flow send (shop_automation_sends.id) that earned the conversion.
+  attributedSendId       String? @map("attributed_send_id") @db.Uuid
   raw                  Json?
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
@@ -1113,6 +1117,7 @@ model ShopOrder {
   @@unique([shopConnectionId, externalOrderId])
   @@index([accountId, orderTime])
   @@index([attributedCampaignId])
+  @@index([attributedAutomationId])
   @@index([customerEmail])
   @@map("shop_orders")
 }

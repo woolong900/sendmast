@@ -191,6 +191,19 @@ function FlowList({ connectionId }: { connectionId: string }) {
   );
 }
 
+function formatMoney(v: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency || 'USD',
+      currencyDisplay: 'narrowSymbol',
+      maximumFractionDigits: 0,
+    }).format(v);
+  } catch {
+    return `${currency} ${Math.round(v)}`;
+  }
+}
+
 function FlowStats({ stats }: { stats: FlowStatsView }) {
   const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 1000) / 10}%` : '—');
   const items = [
@@ -198,7 +211,7 @@ function FlowStats({ stats }: { stats: FlowStatsView }) {
     { label: '送达', value: String(stats.delivered) },
     { label: '打开率', value: pct(stats.opened, stats.delivered || stats.sent) },
     { label: '点击率', value: pct(stats.clicked, stats.delivered || stats.sent) },
-    { label: '退信', value: String(stats.bounced) },
+    { label: '销售额', value: formatMoney(stats.revenue, stats.currency) },
   ];
   return (
     <div className="grid grid-cols-5 gap-2 rounded-md bg-muted/40 px-3 py-2">

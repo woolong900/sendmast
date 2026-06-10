@@ -317,7 +317,7 @@ export class IntegrationsService {
     accountId: string,
     automationId: string,
   ): Promise<FlowStatsView> {
-    const [sent, engagement] = await Promise.all([
+    const [sent, engagement, sales] = await Promise.all([
       this.prisma.shopAutomationSend.count({
         where: { automationId, status: 'sent' },
       }),
@@ -327,8 +327,29 @@ export class IntegrationsService {
         clicked: 0,
         bounced: 0,
       })),
+      this.flowRevenue(accountId, automationId),
     ]);
-    return { sent, ...engagement };
+    return { sent, ...engagement, ...sales };
+  }
+
+  /**
+   * Revenue hard-attributed to a flow (orders whose recall link carried this
+   * flow's `sm_mid`). Groups by currency and reports the dominant one's sum —
+   * single-currency stores are the norm; mixed stores show their top currency.
+   */
+  private async flowRevenue(
+    accountId: string,
+    automationId: string,
+  ): Promise<{ revenue: number; currency: string }> {
+    const rows = await this.prisma.shopOrder.groupBy({
+      by: ['currency'],
+      where: { accountId, attributedAutomationId: automationId },
+      _sum: { value: true },
+    });
+    if (rows.length === 0) return { revenue: 0, currency: 'USD' };
+    rows.sort((a, b) => Number(b._sum.value ?? 0) - Number(a._sum.value ?? 0));
+    const top = rows[0]!;
+    return { revenue: Number(top._sum.value ?? 0), currency: top.currency };
   }
 
   /** Verify the store belongs to this tenant; throws 404 otherwise. */

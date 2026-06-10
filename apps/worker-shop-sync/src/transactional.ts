@@ -15,6 +15,12 @@ import type { Queue } from 'bullmq';
 export interface TransactionalParams {
   accountId: string;
   automationId: string;
+  /**
+   * Pre-generated send id. Set when the caller embedded it in the email (e.g.
+   * the recall CTA's `sm_mid` for order attribution) so the row id matches the
+   * link. Omit to let the DB generate one.
+   */
+  sendId?: string;
   /** Idempotency key (external order/checkout id); blocks duplicate sends. */
   dedupKey: string;
   contactId: string;
@@ -77,6 +83,7 @@ export async function enqueueTransactional(
   try {
     const created = await prisma.shopAutomationSend.create({
       data: {
+        ...(params.sendId ? { id: params.sendId } : {}),
         accountId: params.accountId,
         automationId: params.automationId,
         dedupKey: params.dedupKey,
