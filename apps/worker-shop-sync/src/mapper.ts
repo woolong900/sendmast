@@ -80,41 +80,67 @@ export interface NormalizedOrder {
   payUrl?: string;
 }
 
+const TRACKING_NUMBER_KEYS = [
+  'tracking_number',
+  'trackingNumber',
+  'tracking_no',
+  'trackingNo',
+  'track_number',
+  'waybill',
+  'waybill_no',
+  'logistics_no',
+  'express_no',
+  'shipment_number',
+];
+
+/**
+ * Resolve the relevant shipment object. Shopyy nests tracking inside a
+ * `fulfillments` array (one entry per shipment); we use the most recent one.
+ * Falls back to the singular `fulfillment`/`shipment`/... objects other
+ * platforms use.
+ */
+function pickFulfillment(o: Json): Json | undefined {
+  const arr = Array.isArray(o.fulfillments)
+    ? o.fulfillments
+    : Array.isArray(o.shipments)
+      ? o.shipments
+      : undefined;
+  if (arr && arr.length) {
+    const last = asObject(arr[arr.length - 1]);
+    if (last) return last;
+  }
+  return (
+    asObject(o.fulfillment) ??
+    asObject(o.shipment) ??
+    asObject(o.logistics) ??
+    asObject(o.shipping)
+  );
+}
+
 /** Tracking URL can live on the order or a nested fulfillment/shipment object. */
 function pickTrackingUrl(o: Json): string | undefined {
   const keys = ['tracking_url', 'trackingUrl', 'track_url', 'logistics_url', 'shipping_url'];
   const direct = pickStr(o, keys);
   if (direct) return direct;
-  const sub =
-    asObject(o.fulfillment) ??
-    asObject(o.shipment) ??
-    asObject(o.logistics) ??
-    asObject(o.shipping);
-  return sub ? pickStr(sub, [...keys, 'url']) : undefined;
+  const sub = pickFulfillment(o);
+  if (!sub) return undefined;
+  const fromSub = pickStr(sub, [...keys, 'url']);
+  if (fromSub) return fromSub;
+  // Shopyy embeds the carrier-tracking link inside the fulfillment `note`.
+  const note = pickStr(sub, ['note', 'remark', 'memo', 'message']);
+  const urlInNote = note?.match(/https?:\/\/\S+/)?.[0];
+  if (urlInNote) return urlInNote;
+  // Last resort: a universal 17track lookup built from the tracking number.
+  const num = pickStr(sub, [...TRACKING_NUMBER_KEYS, 'number', 'no']);
+  return num ? `https://t.17track.net/en#nums=${encodeURIComponent(num)}` : undefined;
 }
 
 /** Tracking number — same nesting story as the tracking URL. */
 function pickTrackingNumber(o: Json): string | undefined {
-  const keys = [
-    'tracking_number',
-    'trackingNumber',
-    'tracking_no',
-    'trackingNo',
-    'track_number',
-    'waybill',
-    'waybill_no',
-    'logistics_no',
-    'express_no',
-    'shipment_number',
-  ];
-  const direct = pickStr(o, keys);
+  const direct = pickStr(o, TRACKING_NUMBER_KEYS);
   if (direct) return direct;
-  const sub =
-    asObject(o.fulfillment) ??
-    asObject(o.shipment) ??
-    asObject(o.logistics) ??
-    asObject(o.shipping);
-  return sub ? pickStr(sub, [...keys, 'number', 'no']) : undefined;
+  const sub = pickFulfillment(o);
+  return sub ? pickStr(sub, [...TRACKING_NUMBER_KEYS, 'number', 'no']) : undefined;
 }
 
 /**

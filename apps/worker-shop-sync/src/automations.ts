@@ -90,8 +90,8 @@ interface ResolvedAutomation {
 }
 
 const DEFAULT_SUBJECT: Record<ShopAutomationType, string> = {
-  order_paid: '您的订单已支付成功',
-  order_shipped: '您的订单已发货',
+  order_paid: 'Your order is confirmed',
+  order_shipped: 'Your order has shipped',
   abandoned_cart: 'Complete your purchase',
 };
 
