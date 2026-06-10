@@ -94,7 +94,11 @@ export function LoginPage() {
           </Button>
           <div className="text-center text-sm text-muted-foreground">
             没有账号？{' '}
-            <Link to="/signup" className="text-primary hover:underline">
+            <Link
+              to="/signup"
+              state={from ? { from } : undefined}
+              className="text-primary hover:underline"
+            >
               立即注册
             </Link>
           </div>

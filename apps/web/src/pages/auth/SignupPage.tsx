@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+  type Location,
+} from 'react-router-dom';
 import { BrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,8 +21,14 @@ const REFERRAL_LS_KEY = 'sm.referralCode';
 
 export function SignupPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [params] = useSearchParams();
   const setSession = useAuth((s) => s.setSession);
+
+  // Carried from LoginPage/RequireAuth so a merchant who lands here mid-OAuth
+  // (clicked Shopyy authorize → bounced to login → no account → signup) is
+  // returned to the authorize callback after registering instead of /dashboard.
+  const from = (location.state as { from?: Location } | null)?.from;
 
   const [accountName, setAccountName] = useState('');
   const [email, setEmail] = useState('');
@@ -101,7 +113,7 @@ export function SignupPage() {
         token: r.data.accessToken,
         refreshToken: r.data.refreshToken,
       });
-      navigate('/dashboard', { replace: true });
+      navigate(from ?? '/dashboard', { replace: true });
     } catch (err) {
       setError(apiErrMessage(err));
     } finally {
@@ -180,7 +192,11 @@ export function SignupPage() {
           </Button>
           <div className="text-center text-sm text-muted-foreground">
             已有账号？{' '}
-            <Link to="/login" className="text-primary hover:underline">
+            <Link
+              to="/login"
+              state={from ? { from } : undefined}
+              className="text-primary hover:underline"
+            >
               直接登录
             </Link>
           </div>
