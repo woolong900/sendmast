@@ -219,6 +219,10 @@ export interface ShopyyCoupon {
   ends_at?: number;
   /** Lifecycle status (2 = active, 3 = ended); semantics best-effort. */
   status?: number;
+  /** Discount spec. `discount.type`: 1 = percent off, 2 = fixed amount off. */
+  param?: {
+    discount?: { type?: number; value?: number };
+  };
 }
 
 /** A webhook row as returned by `GET /webhooks`. */

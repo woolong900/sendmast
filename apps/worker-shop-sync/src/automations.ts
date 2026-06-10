@@ -74,6 +74,10 @@ export interface AbandonedJob {
   subject?: string | null;
   /** Round's coupon code, snapshotted at schedule time; rendered into the email. */
   couponCode?: string | null;
+  /** Coupon discount kind ('percent' | 'amount') for the email's "Save …" line. */
+  couponDiscountKind?: string | null;
+  /** Coupon discount value: percent off, or amount off. */
+  couponDiscountValue?: number | null;
 }
 
 export interface OrderAbandonContext {
@@ -214,19 +218,45 @@ export function renderShippingAddressHtml(lines: string[]): string {
 }
 
 /**
- * Render the abandoned-cart coupon card into the `{{coupon_block}}` merge var.
- * Returns '' when the round has no coupon so the block disappears. Markup +
- * palette mirror the approved style (dashed amber card, monospace code).
+ * Headline for the coupon card — reflects the discount when we snapshotted it
+ * ("Save 15%" / "Save $20"), else a generic line. `percent` value is the
+ * percentage off; `amount` value is money off in the order's currency.
  */
-export function renderCouponHtml(code: string | null | undefined): string {
+function couponHeadline(
+  kind: string | null | undefined,
+  value: number | null | undefined,
+  currency: string | undefined,
+): string {
+  if (kind === 'percent' && typeof value === 'number' && value > 0) {
+    return `Save ${+value.toFixed(2)}%`;
+  }
+  if (kind === 'amount' && typeof value === 'number' && value > 0) {
+    return `Save ${currency ? formatMoney(value, currency) : value}`;
+  }
+  return 'A discount just for you';
+}
+
+/**
+ * Render the abandoned-cart coupon card into the `{{coupon_block}}` merge var.
+ * Returns '' when the round has no coupon so the block disappears. The headline
+ * differentiates percent-off vs amount-off coupons. Markup + palette mirror the
+ * approved style (dashed amber card, monospace code).
+ */
+export function renderCouponHtml(
+  code: string | null | undefined,
+  discount?: { kind?: string | null; value?: number | null; currency?: string },
+): string {
   const c = (code ?? '').trim();
   if (!c) return '';
   const safe = escapeHtml(c);
+  const headline = escapeHtml(
+    couponHeadline(discount?.kind, discount?.value, discount?.currency),
+  );
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-spacing:0;border-collapse:collapse;margin:0;">
   <tr><td align="center" style="padding:0;">
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-spacing:0;border-collapse:separate;background:#fff7ed;border:2px dashed #f59e0b;border-radius:12px;">
       <tr><td align="center" style="padding:22px 24px;">
-        <div style="font-size:14px;color:#92400e;font-weight:600;margin:0 0 12px;">A discount just for you</div>
+        <div style="font-size:14px;color:#92400e;font-weight:600;margin:0 0 12px;">${headline}</div>
         <div style="display:inline-block;background:#ffffff;border:1px dashed #f59e0b;border-radius:8px;padding:11px 24px;font-size:24px;font-weight:700;letter-spacing:3px;color:#111827;font-family:'Courier New',Courier,monospace;">${safe}</div>
         <div style="font-size:12px;color:#b45309;margin:12px 0 0;">Apply this code at checkout</div>
       </td></tr>
@@ -424,7 +454,15 @@ export async function scheduleAbandonedFromOrder(
   });
   const rounds = steps.length
     ? steps
-    : [{ stepIndex: 1, templateId: a.templateId, subject: a.subject, couponCode: null, delayMinutes: a.delayMinutes }];
+    : [{
+        stepIndex: 1,
+        templateId: a.templateId,
+        subject: a.subject,
+        couponCode: null,
+        couponDiscountKind: null,
+        couponDiscountValue: null,
+        delayMinutes: a.delayMinutes,
+      }];
 
   for (const s of rounds) {
     if (!s.templateId) continue; // round not configured → nothing to send
@@ -443,6 +481,8 @@ export async function scheduleAbandonedFromOrder(
       templateId: s.templateId,
       subject: s.subject,
       couponCode: s.couponCode,
+      couponDiscountKind: s.couponDiscountKind,
+      couponDiscountValue: s.couponDiscountValue,
     };
     await deps.abandonedQueue.add('recover-order', job, {
       delay: s.delayMinutes * 60_000,
@@ -505,7 +545,15 @@ export async function runAbandonedFromOrder(
       : {}),
     ...(recoveryUrl ? { tracking_url: recoveryUrl } : {}),
     ...(itemsHtml ? { order_items: itemsHtml } : {}),
-    ...(job.couponCode ? { coupon_block: renderCouponHtml(job.couponCode) } : {}),
+    ...(job.couponCode
+      ? {
+          coupon_block: renderCouponHtml(job.couponCode, {
+            kind: job.couponDiscountKind,
+            value: job.couponDiscountValue,
+            currency: job.currency,
+          }),
+        }
+      : {}),
   };
 
   const round = job.round ?? 1;

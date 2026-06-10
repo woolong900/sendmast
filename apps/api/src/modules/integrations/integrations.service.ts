@@ -24,6 +24,7 @@ import { ClickHouseService } from '../../common/clickhouse/clickhouse.service';
 import {
   SHOP_AUTOMATION_TYPES,
   type ConnectShopyyInput,
+  type CouponDiscountKind,
   type FlowStatsView,
   type ShopAutomationType as ShopAutomationTypeDto,
   type ShopAutomationView,
@@ -98,6 +99,8 @@ function toAutomationView(
         templateId: s.templateId,
         subject: s.subject,
         couponCode: s.couponCode,
+        couponDiscountKind: (s.couponDiscountKind as CouponDiscountKind | null) ?? null,
+        couponDiscountValue: s.couponDiscountValue,
         delayMinutes: s.delayMinutes,
       })),
     stats,
@@ -497,14 +500,20 @@ export class IntegrationsService {
       if (isAbandoned && steps) {
         await tx.shopAutomationStep.deleteMany({ where: { automationId: a.id } });
         await tx.shopAutomationStep.createMany({
-          data: steps.map((s, i) => ({
-            automationId: a.id,
-            stepIndex: i + 1,
-            templateId: s.templateId ?? null,
-            subject: s.subject ?? null,
-            couponCode: s.couponCode?.trim() || null,
-            delayMinutes: s.delayMinutes,
-          })),
+          data: steps.map((s, i) => {
+            const couponCode = s.couponCode?.trim() || null;
+            return {
+              automationId: a.id,
+              stepIndex: i + 1,
+              templateId: s.templateId ?? null,
+              subject: s.subject ?? null,
+              couponCode,
+              // Only keep the discount snapshot when a coupon is actually set.
+              couponDiscountKind: couponCode ? s.couponDiscountKind ?? null : null,
+              couponDiscountValue: couponCode ? s.couponDiscountValue ?? null : null,
+              delayMinutes: s.delayMinutes,
+            };
+          }),
         });
       }
       return a;
@@ -559,7 +568,18 @@ export class IntegrationsService {
       // Drop already-expired coupons (ends_at in the past); -1/absent = forever.
       if (typeof c.ends_at === 'number' && c.ends_at > 0 && c.ends_at < nowSec) continue;
       seen.add(code);
-      out.push({ code, name: c.coupon_name?.trim() || code });
+      // discount.type: 1 = percent off, 2 = fixed amount off (confirmed against
+      // live store data); anything else → unknown, render the generic card.
+      const dt = c.param?.discount?.type;
+      const dv = c.param?.discount?.value;
+      const discountKind: CouponDiscountKind | null =
+        dt === 1 ? 'percent' : dt === 2 ? 'amount' : null;
+      out.push({
+        code,
+        name: c.coupon_name?.trim() || code,
+        discountKind,
+        discountValue: discountKind && typeof dv === 'number' ? dv : null,
+      });
     }
     return out;
   }

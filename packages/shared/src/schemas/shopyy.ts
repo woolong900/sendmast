@@ -64,6 +64,9 @@ export interface FlowStatsView {
 /** Max recovery rounds an abandoned-cart automation can be split into. */
 export const MAX_ABANDONED_ROUNDS = 5;
 
+/** How a coupon discounts: a percentage off, or a fixed amount off. */
+export type CouponDiscountKind = 'percent' | 'amount';
+
 /** One configured recovery round (abandoned_cart only). */
 export interface ShopAutomationStepView {
   id: string;
@@ -72,6 +75,9 @@ export interface ShopAutomationStepView {
   subject: string | null;
   /** Store coupon code shown in this round's email; null = no coupon. */
   couponCode: string | null;
+  /** Snapshot of the coupon's discount kind/value, for the email's "Save …" line. */
+  couponDiscountKind: CouponDiscountKind | null;
+  couponDiscountValue: number | null;
   delayMinutes: number;
 }
 
@@ -81,6 +87,10 @@ export interface ShopCouponView {
   code: string;
   /** Human label for the picker (falls back to the code). */
   name: string;
+  /** Discount kind, or null when the gateway didn't expose a recognised one. */
+  discountKind: CouponDiscountKind | null;
+  /** Discount value: percent off (kind=percent) or amount off (kind=amount). */
+  discountValue: number | null;
 }
 
 export interface ShopAutomationView {
@@ -108,6 +118,8 @@ export const ShopAutomationStepSchema = z.object({
   templateId: z.string().uuid().nullable().optional(),
   subject: z.string().max(255).nullable().optional(),
   couponCode: z.string().max(100).nullable().optional(),
+  couponDiscountKind: z.enum(['percent', 'amount']).nullable().optional(),
+  couponDiscountValue: z.number().nonnegative().nullable().optional(),
   delayMinutes: z.number().int().min(5).max(10080),
 });
 export type ShopAutomationStepInput = z.infer<typeof ShopAutomationStepSchema>;

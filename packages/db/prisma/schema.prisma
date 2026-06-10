@@ -1172,6 +1172,10 @@ model ShopAutomationStep {
   subject      String?
   /// Store coupon code shown in this round's recall email; null = no coupon.
   couponCode   String?  @map("coupon_code")
+  /// Snapshot of the coupon's discount kind: 'percent' | 'amount' (null = unknown).
+  couponDiscountKind  String? @map("coupon_discount_kind")
+  /// Snapshot of the coupon's discount value (percent off, or amount off).
+  couponDiscountValue Float?  @map("coupon_discount_value")
   /// Minutes after order creation this round fires (absolute, not incremental).
   delayMinutes Int      @map("delay_minutes")
   createdAt    DateTime @default(now()) @map("created_at")

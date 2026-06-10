@@ -23,6 +23,7 @@ import { api, apiErrMessage } from '@/lib/api';
 import {
   SHOP_AUTOMATION_LABELS,
   MAX_ABANDONED_ROUNDS,
+  type CouponDiscountKind,
   type FlowStatsView,
   type ShopAutomationType,
   type ShopAutomationView,
@@ -215,7 +216,17 @@ interface Round {
   templateId: string;
   subject: string;
   couponCode: string;
+  couponDiscountKind: CouponDiscountKind | null;
+  couponDiscountValue: number | null;
   delayMinutes: number;
+}
+
+/** Picker label, e.g. "夏季促销（SUMMER）· 15% off" / "· 减 20". */
+function couponOptionLabel(c: ShopCouponView): string {
+  const base = c.name === c.code ? c.code : `${c.name}（${c.code}）`;
+  if (c.discountKind === 'percent' && c.discountValue) return `${base} · ${c.discountValue}% off`;
+  if (c.discountKind === 'amount' && c.discountValue) return `${base} · 减 ${c.discountValue}`;
+  return base;
 }
 
 const MINUTES_PER_DAY = 1440;
@@ -278,11 +289,20 @@ function initialRounds(a: ShopAutomationView): Round[] {
       templateId: s.templateId ?? '',
       subject: s.subject ?? '',
       couponCode: s.couponCode ?? '',
+      couponDiscountKind: s.couponDiscountKind,
+      couponDiscountValue: s.couponDiscountValue,
       delayMinutes: s.delayMinutes,
     }));
   }
   return [
-    { templateId: a.templateId ?? '', subject: a.subject ?? '', couponCode: '', delayMinutes: a.delayMinutes },
+    {
+      templateId: a.templateId ?? '',
+      subject: a.subject ?? '',
+      couponCode: '',
+      couponDiscountKind: null,
+      couponDiscountValue: null,
+      delayMinutes: a.delayMinutes,
+    },
   ];
 }
 
@@ -338,6 +358,8 @@ function FlowCard({
           templateId: rs[rs.length - 1]?.templateId ?? '',
           subject: '',
           couponCode: '',
+          couponDiscountKind: null,
+          couponDiscountValue: null,
           // Keep strictly increasing even if earlier rounds were edited large.
           delayMinutes: Math.min(MAX_DELAY_MINUTES, Math.max(def, last + 5)),
         },
@@ -358,6 +380,8 @@ function FlowCard({
           templateId: r.templateId || null,
           subject: r.subject.trim() || null,
           couponCode: r.couponCode || null,
+          couponDiscountKind: r.couponCode ? r.couponDiscountKind : null,
+          couponDiscountValue: r.couponCode ? r.couponDiscountValue : null,
           delayMinutes: r.delayMinutes,
         }));
       } else {
@@ -541,7 +565,25 @@ function FlowCard({
                           <select
                             className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                             value={r.couponCode}
-                            onChange={(e) => updateRound(i, { couponCode: e.target.value })}
+                            onChange={(e) => {
+                              const code = e.target.value;
+                              const c = (coupons.data ?? []).find((x) => x.code === code);
+                              updateRound(i, {
+                                couponCode: code,
+                                // Snapshot the picked coupon's discount; keep the
+                                // saved one if re-selecting an off-list code.
+                                couponDiscountKind: c
+                                  ? c.discountKind
+                                  : code === r.couponCode
+                                    ? r.couponDiscountKind
+                                    : null,
+                                couponDiscountValue: c
+                                  ? c.discountValue
+                                  : code === r.couponCode
+                                    ? r.couponDiscountValue
+                                    : null,
+                              });
+                            }}
                           >
                             <option value="">不使用优惠券</option>
                             {/* Keep a saved code selectable even if it's not in the live list. */}
@@ -551,7 +593,7 @@ function FlowCard({
                               )}
                             {(coupons.data ?? []).map((c) => (
                               <option key={c.code} value={c.code}>
-                                {c.name === c.code ? c.code : `${c.name}（${c.code}）`}
+                                {couponOptionLabel(c)}
                               </option>
                             ))}
                           </select>
