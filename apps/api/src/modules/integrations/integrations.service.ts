@@ -246,7 +246,29 @@ export class IntegrationsService {
       };
     });
 
-    await client.batchSaveWebhooks(items);
+    try {
+      await client.batchSaveWebhooks(items);
+    } catch (batchErr) {
+      // batchsave is atomic: one event_id that's invalid for this store's plan
+      // (e.g. 36 = single-page checkout, absent on some stores) rejects the
+      // WHOLE batch, so no webhooks get created. Fall back to per-event saves
+      // so the valid events still register; skip (log) only the bad ones.
+      const results = await Promise.allSettled(
+        items.map((it) => client.batchSaveWebhooks([it])),
+      );
+      const failures = results.flatMap((r, i) =>
+        r.status === 'rejected' ? [{ event: SHOPYY_WEBHOOK_EVENTS[i]!, reason: r.reason }] : [],
+      );
+      // Every event failed → real problem (auth/IP/etc.); surface to caller.
+      if (failures.length === items.length) throw batchErr;
+      for (const f of failures) {
+        this.logger.warn(
+          `Shopyy webhook skipped event ${f.event.eventId} (${f.event.name}) for store ${conn.externalStoreId}: ${
+            f.reason instanceof Error ? f.reason.message : f.reason
+          }`,
+        );
+      }
+    }
   }
 
   /** PG sent count + ClickHouse engagement for one flow. Best-effort on CH outage. */
