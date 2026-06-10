@@ -76,7 +76,7 @@ export function FilterSelect<T extends string>({
       {open && (
         <div
           className={cn(
-            'absolute left-0 top-full z-20 mt-1 min-w-full overflow-hidden rounded-md border bg-popover py-1 shadow-lg',
+            'absolute left-0 top-full z-20 mt-1 max-h-64 min-w-full overflow-auto rounded-md border bg-popover py-1 shadow-lg',
             dropdownClassName,
           )}
         >
