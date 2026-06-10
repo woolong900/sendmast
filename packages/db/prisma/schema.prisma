@@ -1151,10 +1151,34 @@ model ShopAutomation {
   account        Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
   shopConnection ShopConnection       @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
   sends          ShopAutomationSend[]
+  steps          ShopAutomationStep[]
 
   @@unique([shopConnectionId, type])
   @@index([accountId])
   @@map("shop_automations")
+}
+
+/// abandoned_cart only: an ordered recovery round (up to 5 per automation).
+/// Each round fires its own send `delayMinutes` after order creation (absolute,
+/// strictly increasing across rounds) with its own template + subject. The
+/// shared sender (from address) lives on the parent `ShopAutomation`. Other
+/// automation types ignore steps and keep using the parent's template/subject.
+model ShopAutomationStep {
+  id           String   @id @default(uuid()) @db.Uuid
+  automationId String   @map("automation_id") @db.Uuid
+  /// 1-based round order; delays must strictly increase with stepIndex.
+  stepIndex    Int      @map("step_index")
+  templateId   String?  @map("template_id") @db.Uuid
+  subject      String?
+  /// Minutes after order creation this round fires (absolute, not incremental).
+  delayMinutes Int      @map("delay_minutes")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  automation ShopAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, stepIndex])
+  @@map("shop_automation_steps")
 }
 
 /// A single flow-message send — the Klaviyo-style first-class, independently
@@ -1170,6 +1194,9 @@ model ShopAutomationSend {
   dedupKey     String    @map("dedup_key")
   email        String
   contactId    String?   @map("contact_id") @db.Uuid
+  /// Template this send renders. Snapshots the round's template for multi-round
+  /// abandoned-cart (where each round has its own); null = use automation's.
+  templateId   String?   @map("template_id") @db.Uuid
   /// Lifecycle: pending → queued → sent | failed | skipped.
   status       String    @default("pending")
   /// ACS operationId, echoed back as messageId on delivery/bounce reports.

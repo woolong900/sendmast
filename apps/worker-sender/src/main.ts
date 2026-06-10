@@ -832,7 +832,10 @@ async function runFlowSend(job: Job<SendJobData>) {
       data: { status: terminal, errorMessage: terminal === 'failed' ? msg : null },
     });
 
-  if (!automation.enabled || !automation.templateId) {
+  // Multi-round abandoned cart snapshots each round's template onto the send;
+  // fall back to the automation's template for single-template flows.
+  const templateId = send.templateId ?? automation.templateId;
+  if (!automation.enabled || !templateId) {
     await fail('自动化已停用或未配置模板', 'skipped');
     return;
   }
@@ -855,7 +858,7 @@ async function runFlowSend(job: Job<SendJobData>) {
   }
 
   const tpl = await prisma.emailTemplate.findUnique({
-    where: { id: automation.templateId },
+    where: { id: templateId },
     select: { html: true },
   });
   if (!tpl?.html) {

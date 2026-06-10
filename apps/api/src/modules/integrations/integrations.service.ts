@@ -7,7 +7,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'node:crypto';
-import type { ShopAutomation, ShopAutomationType, ShopConnection } from '@prisma/client';
+import type {
+  ShopAutomation,
+  ShopAutomationStep,
+  ShopAutomationType,
+  ShopConnection,
+} from '@prisma/client';
 import {
   exchangeAuthorizeToken,
   ShopyyAuthError,
@@ -67,7 +72,11 @@ function parseExpiredAt(v: string | number | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function toAutomationView(a: ShopAutomation, stats: FlowStatsView): ShopAutomationView {
+function toAutomationView(
+  a: ShopAutomation,
+  steps: ShopAutomationStep[],
+  stats: FlowStatsView,
+): ShopAutomationView {
   return {
     id: a.id,
     type: a.type,
@@ -78,6 +87,16 @@ function toAutomationView(a: ShopAutomation, stats: FlowStatsView): ShopAutomati
     fromName: a.fromName,
     subject: a.subject,
     delayMinutes: a.delayMinutes,
+    steps: steps
+      .slice()
+      .sort((x, y) => x.stepIndex - y.stepIndex)
+      .map((s) => ({
+        id: s.id,
+        stepIndex: s.stepIndex,
+        templateId: s.templateId,
+        subject: s.subject,
+        delayMinutes: s.delayMinutes,
+      })),
     stats,
   };
 }
@@ -355,9 +374,44 @@ export class IntegrationsService {
     });
     const order = SHOP_AUTOMATION_TYPES;
     rows.sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type));
+
+    // abandoned_cart is multi-round; ensure it always has at least round 1 so
+    // the UI renders an editable round and legacy single-config keeps working.
+    const abandoned = rows.find((a) => a.type === 'abandoned_cart');
+    if (abandoned) await this.ensureAbandonedStep(abandoned);
+    const stepsByAutomation = abandoned
+      ? await this.prisma.shopAutomationStep.findMany({
+          where: { automationId: abandoned.id },
+          orderBy: { stepIndex: 'asc' },
+        })
+      : [];
+
     return Promise.all(
-      rows.map(async (a) => toAutomationView(a, await this.automationStats(accountId, a.id))),
+      rows.map(async (a) =>
+        toAutomationView(
+          a,
+          a.type === 'abandoned_cart' ? stepsByAutomation : [],
+          await this.automationStats(accountId, a.id),
+        ),
+      ),
     );
+  }
+
+  /** Seed round 1 from the automation's own config when it has no steps yet. */
+  private async ensureAbandonedStep(a: ShopAutomation): Promise<void> {
+    const count = await this.prisma.shopAutomationStep.count({
+      where: { automationId: a.id },
+    });
+    if (count > 0) return;
+    await this.prisma.shopAutomationStep.create({
+      data: {
+        automationId: a.id,
+        stepIndex: 1,
+        templateId: a.templateId,
+        subject: a.subject,
+        delayMinutes: a.delayMinutes,
+      },
+    });
   }
 
   async updateAutomation(
@@ -367,40 +421,101 @@ export class IntegrationsService {
     input: UpdateShopAutomationInput,
   ): Promise<ShopAutomationView> {
     await this.assertConnection(accountId, connectionId);
+    const isAbandoned = type === 'abandoned_cart';
+    const { steps, ...rest } = input;
 
-    // Enabling requires a deliverable config: a template + a verified sender.
-    if (input.enabled) {
-      const merged = await this.prisma.shopAutomation.findUnique({
-        where: {
-          shopConnectionId_type: {
-            shopConnectionId: connectionId,
-            type: type as ShopAutomationType,
-          },
-        },
-      });
-      const templateId = input.templateId ?? merged?.templateId;
-      const fromEmail = input.fromEmail ?? merged?.fromEmail;
-      if (!templateId || !fromEmail) {
-        throw new BadRequestException('启用前请先选择邮件模板和发件邮箱');
-      }
-    }
-
-    const updated = await this.prisma.shopAutomation.upsert({
+    const existing = await this.prisma.shopAutomation.findUnique({
       where: {
         shopConnectionId_type: {
           shopConnectionId: connectionId,
           type: type as ShopAutomationType,
         },
       },
-      create: {
-        accountId,
-        shopConnectionId: connectionId,
-        type: type as ShopAutomationType,
-        ...input,
-      },
-      update: { ...input },
     });
-    return toAutomationView(updated, await this.automationStats(accountId, updated.id));
+
+    // Resolve the effective rounds for the enable check (incoming overrides the
+    // stored rounds; fall back to stored when the payload omits `steps`).
+    let effectiveSteps = steps;
+    if (isAbandoned && !effectiveSteps && existing) {
+      const cur = await this.prisma.shopAutomationStep.findMany({
+        where: { automationId: existing.id },
+        orderBy: { stepIndex: 'asc' },
+      });
+      effectiveSteps = cur.map((s) => ({
+        templateId: s.templateId,
+        subject: s.subject,
+        delayMinutes: s.delayMinutes,
+      }));
+    }
+
+    // Enabling requires a deliverable config: a verified sender + a template
+    // (every round for abandoned_cart, the single template otherwise).
+    if (input.enabled) {
+      const fromEmail = rest.fromEmail ?? existing?.fromEmail;
+      if (!fromEmail) throw new BadRequestException('启用前请先选择发件邮箱');
+      if (isAbandoned) {
+        if (!effectiveSteps?.length || effectiveSteps.some((s) => !s.templateId)) {
+          throw new BadRequestException('启用前请为每一轮选择邮件模板');
+        }
+      } else if (!(rest.templateId ?? existing?.templateId)) {
+        throw new BadRequestException('启用前请先选择邮件模板');
+      }
+    }
+
+    // For abandoned_cart, mirror round 1 onto the parent so legacy reads and
+    // the worker's fallback path keep resolving a sensible template/subject.
+    const first = isAbandoned ? steps?.[0] : undefined;
+    const parentData = first
+      ? {
+          ...rest,
+          templateId: first.templateId ?? null,
+          subject: first.subject ?? null,
+          delayMinutes: first.delayMinutes,
+        }
+      : rest;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const a = await tx.shopAutomation.upsert({
+        where: {
+          shopConnectionId_type: {
+            shopConnectionId: connectionId,
+            type: type as ShopAutomationType,
+          },
+        },
+        create: {
+          accountId,
+          shopConnectionId: connectionId,
+          type: type as ShopAutomationType,
+          ...parentData,
+        },
+        update: { ...parentData },
+      });
+      if (isAbandoned && steps) {
+        await tx.shopAutomationStep.deleteMany({ where: { automationId: a.id } });
+        await tx.shopAutomationStep.createMany({
+          data: steps.map((s, i) => ({
+            automationId: a.id,
+            stepIndex: i + 1,
+            templateId: s.templateId ?? null,
+            subject: s.subject ?? null,
+            delayMinutes: s.delayMinutes,
+          })),
+        });
+      }
+      return a;
+    });
+
+    const stepRows = isAbandoned
+      ? await this.prisma.shopAutomationStep.findMany({
+          where: { automationId: updated.id },
+          orderBy: { stepIndex: 'asc' },
+        })
+      : [];
+    return toAutomationView(
+      updated,
+      stepRows,
+      await this.automationStats(accountId, updated.id),
+    );
   }
 
   async disconnect(accountId: string, id: string): Promise<{ ok: true }> {

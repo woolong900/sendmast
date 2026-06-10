@@ -66,6 +66,12 @@ export interface AbandonedJob {
   value?: number;
   currency?: string;
   recoveryUrl?: string;
+  /** Recovery round (1-based). Absent on the legacy single-round checkout path. */
+  round?: number;
+  /** Round's template, snapshotted at schedule time (multi-round abandoned). */
+  templateId?: string | null;
+  /** Round's subject, snapshotted at schedule time. */
+  subject?: string | null;
 }
 
 export interface OrderAbandonContext {
@@ -357,27 +363,51 @@ export async function scheduleAbandonedFromOrder(
   deps: AutomationDeps,
   ctx: OrderAbandonContext,
 ): Promise<void> {
-  const a = await loadAutomation(deps.prisma, ctx.shopConnectionId, 'abandoned_cart');
-  if (!a) return;
-
-  const job: AbandonedJob = {
-    accountId: ctx.accountId,
-    shopConnectionId: ctx.shopConnectionId,
-    automationId: a.id,
-    externalOrderId: ctx.externalOrderId,
-    orderNo: ctx.orderNo,
-    email: ctx.email,
-    contactId: ctx.contactId,
-    value: ctx.value,
-    currency: ctx.currency,
-    recoveryUrl: ctx.recoveryUrl,
-  };
-  await deps.abandonedQueue.add('recover-order', job, {
-    delay: a.delayMinutes * 60_000,
-    jobId: `ab-order-${ctx.shopConnectionId}-${ctx.externalOrderId}`,
-    removeOnComplete: true,
-    removeOnFail: { age: 86400 * 7 },
+  const a = await deps.prisma.shopAutomation.findUnique({
+    where: {
+      shopConnectionId_type: {
+        shopConnectionId: ctx.shopConnectionId,
+        type: 'abandoned_cart',
+      },
+    },
   });
+  if (!a || !a.enabled || !a.fromEmail) return;
+
+  // Each configured round becomes its own delayed job (jobId carries the round
+  // so they don't collide and re-delivered create webhooks stay deduped). Falls
+  // back to the parent's single config when no step rows exist (pre-migration).
+  const steps = await deps.prisma.shopAutomationStep.findMany({
+    where: { automationId: a.id },
+    orderBy: { stepIndex: 'asc' },
+  });
+  const rounds = steps.length
+    ? steps
+    : [{ stepIndex: 1, templateId: a.templateId, subject: a.subject, delayMinutes: a.delayMinutes }];
+
+  for (const s of rounds) {
+    if (!s.templateId) continue; // round not configured → nothing to send
+    const job: AbandonedJob = {
+      accountId: ctx.accountId,
+      shopConnectionId: ctx.shopConnectionId,
+      automationId: a.id,
+      externalOrderId: ctx.externalOrderId,
+      orderNo: ctx.orderNo,
+      email: ctx.email,
+      contactId: ctx.contactId,
+      value: ctx.value,
+      currency: ctx.currency,
+      recoveryUrl: ctx.recoveryUrl,
+      round: s.stepIndex,
+      templateId: s.templateId,
+      subject: s.subject,
+    };
+    await deps.abandonedQueue.add('recover-order', job, {
+      delay: s.delayMinutes * 60_000,
+      jobId: `ab-order-${ctx.shopConnectionId}-${ctx.externalOrderId}-r${s.stepIndex}`,
+      removeOnComplete: true,
+      removeOnFail: { age: 86400 * 7 },
+    });
+  }
 }
 
 /**
@@ -391,8 +421,12 @@ export async function runAbandonedFromOrder(
   deps: AutomationDeps,
   job: AbandonedJob,
 ): Promise<void> {
-  const a = await loadAutomation(deps.prisma, job.shopConnectionId, 'abandoned_cart');
-  if (!a || !job.externalOrderId) return;
+  if (!job.externalOrderId) return;
+  const a = await deps.prisma.shopAutomation.findUnique({ where: { id: job.automationId } });
+  if (!a || !a.enabled || !a.fromEmail) return;
+  // Round template snapshotted at schedule time; fall back to the parent's.
+  const templateId = job.templateId ?? a.templateId;
+  if (!templateId) return;
 
   const order = await deps.prisma.shopOrder.findUnique({
     where: {
@@ -424,15 +458,21 @@ export async function runAbandonedFromOrder(
     ...(itemsHtml ? { order_items: itemsHtml } : {}),
   };
 
+  const round = job.round ?? 1;
+  const fromName = a.fromName ?? a.fromEmail.split('@')[0] ?? 'Store';
+  const subject = job.subject?.trim() || a.subject?.trim() || DEFAULT_SUBJECT.abandoned_cart;
+
   await enqueueTransactional(deps, {
     accountId: job.accountId,
     automationId: a.id,
-    dedupKey: `abandoned:order:${job.externalOrderId}`,
+    // Per-round dedup so each round sends once per order (idempotent on retry).
+    dedupKey: `abandoned:order:${job.externalOrderId}:r${round}`,
     contactId: job.contactId,
     email: job.email,
-    subject: a.subject,
+    subject,
     fromEmail: a.fromEmail,
-    fromName: a.fromName,
+    fromName,
+    templateId,
     mergeVars,
   });
 }

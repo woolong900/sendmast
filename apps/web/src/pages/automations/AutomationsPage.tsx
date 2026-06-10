@@ -10,6 +10,8 @@ import {
   ChevronDown,
   Workflow,
   CheckCircle2,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -20,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { api, apiErrMessage } from '@/lib/api';
 import {
   SHOP_AUTOMATION_LABELS,
+  MAX_ABANDONED_ROUNDS,
   type FlowStatsView,
   type ShopAutomationType,
   type ShopAutomationView,
@@ -207,6 +210,24 @@ function FlowStats({ stats }: { stats: FlowStatsView }) {
   );
 }
 
+interface Round {
+  templateId: string;
+  subject: string;
+  delayMinutes: number;
+}
+
+/** Initial rounds for abandoned_cart: stored steps, else a single default. */
+function initialRounds(a: ShopAutomationView): Round[] {
+  if (a.steps.length) {
+    return a.steps.map((s) => ({
+      templateId: s.templateId ?? '',
+      subject: s.subject ?? '',
+      delayMinutes: s.delayMinutes,
+    }));
+  }
+  return [{ templateId: a.templateId ?? '', subject: a.subject ?? '', delayMinutes: a.delayMinutes }];
+}
+
 function FlowCard({
   connectionId,
   automation,
@@ -221,26 +242,52 @@ function FlowCard({
   const qc = useQueryClient();
   const toast = useToast();
   const Icon = ICONS[automation.type];
+  const isAbandoned = automation.type === 'abandoned_cart';
 
   const [enabled, setEnabled] = useState(automation.enabled);
   const [templateId, setTemplateId] = useState(automation.templateId ?? '');
   const [fromEmail, setFromEmail] = useState(automation.fromEmail ?? '');
   const [subject, setSubject] = useState(automation.subject ?? '');
-  const [delayMinutes, setDelayMinutes] = useState(automation.delayMinutes);
+  const [rounds, setRounds] = useState<Round[]>(() => initialRounds(automation));
   // Configured flows start collapsed; unconfigured ones expand to guide setup.
   const [open, setOpen] = useState(!automation.templateId);
+
+  const delaysIncreasing = rounds.every(
+    (r, i) => i === 0 || r.delayMinutes > rounds[i - 1]!.delayMinutes,
+  );
+  const roundsValid = !isAbandoned || (rounds.length >= 1 && delaysIncreasing);
+
+  const updateRound = (i: number, patch: Partial<Round>) =>
+    setRounds((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const addRound = () =>
+    setRounds((rs) => [
+      ...rs,
+      {
+        templateId: rs[rs.length - 1]?.templateId ?? '',
+        subject: '',
+        delayMinutes: (rs[rs.length - 1]?.delayMinutes ?? 0) + 1440,
+      },
+    ]);
+  const removeRound = (i: number) => setRounds((rs) => rs.filter((_, idx) => idx !== i));
 
   const save = useMutation({
     mutationFn: async () => {
       const fromName = senderOptions.find((o) => o.value === fromEmail)?.name ?? null;
       const body: Record<string, unknown> = {
         enabled,
-        templateId: templateId || null,
         fromEmail: fromEmail || null,
         fromName,
-        subject: subject.trim() || null,
       };
-      if (automation.type === 'abandoned_cart') body.delayMinutes = delayMinutes;
+      if (isAbandoned) {
+        body.steps = rounds.map((r) => ({
+          templateId: r.templateId || null,
+          subject: r.subject.trim() || null,
+          delayMinutes: r.delayMinutes,
+        }));
+      } else {
+        body.templateId = templateId || null;
+        body.subject = subject.trim() || null;
+      }
       return api.patch(
         `/api/integrations/shopyy/${connectionId}/automations/${automation.type}`,
         body,
@@ -253,7 +300,9 @@ function FlowCard({
     onError: (err) => toast(apiErrMessage(err), 'error'),
   });
 
-  const configured = !!automation.templateId && !!automation.fromEmail;
+  const configured = isAbandoned
+    ? rounds.length >= 1 && rounds.every((r) => r.templateId) && !!fromEmail
+    : !!automation.templateId && !!automation.fromEmail;
 
   return (
     <Card>
@@ -282,6 +331,9 @@ function FlowCard({
                 ) : (
                   <Badge variant="muted">已关闭</Badge>
                 )}
+                {isAbandoned && (
+                  <Badge variant="muted">{automation.steps.length || 1} 轮</Badge>
+                )}
                 {!configured && <Badge variant="warning">待配置</Badge>}
               </div>
               <div className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -305,70 +357,147 @@ function FlowCard({
         {open && (
           <div className="space-y-3 border-t px-4 py-4">
             <p className="text-xs text-muted-foreground">{DESCRIPTIONS[automation.type]}</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1 text-xs">
-                <span className="text-muted-foreground">邮件模板</span>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  value={templateId}
-                  onChange={(e) => setTemplateId(e.target.value)}
-                >
-                  <option value="">未选择</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
 
-              <label className="space-y-1 text-xs">
-                <span className="text-muted-foreground">发件邮箱</span>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  value={fromEmail}
-                  onChange={(e) => setFromEmail(e.target.value)}
-                >
-                  <option value="">未选择</option>
-                  {senderOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <label className="space-y-1 text-xs">
+              <span className="text-muted-foreground">发件邮箱</span>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                value={fromEmail}
+                onChange={(e) => setFromEmail(e.target.value)}
+              >
+                <option value="">未选择</option>
+                {senderOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-              <label className="space-y-1 text-xs sm:col-span-2">
-                <span className="text-muted-foreground">邮件主题</span>
-                <input
-                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  value={subject}
-                  placeholder="留空使用默认主题"
-                  onChange={(e) => setSubject(e.target.value)}
-                />
-              </label>
-
-              {automation.type === 'abandoned_cart' && (
+            {!isAbandoned && (
+              <div className="grid gap-3 sm:grid-cols-2">
                 <label className="space-y-1 text-xs">
-                  <span className="text-muted-foreground">下单后延迟（分钟）</span>
-                  <input
-                    type="number"
-                    min={5}
-                    max={10080}
+                  <span className="text-muted-foreground">邮件模板</span>
+                  <select
                     className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                    value={delayMinutes}
-                    onChange={(e) => setDelayMinutes(Number(e.target.value))}
+                    value={templateId}
+                    onChange={(e) => setTemplateId(e.target.value)}
+                  >
+                    <option value="">未选择</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-1 text-xs">
+                  <span className="text-muted-foreground">邮件主题</span>
+                  <input
+                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                    value={subject}
+                    placeholder="留空使用默认主题"
+                    onChange={(e) => setSubject(e.target.value)}
                   />
                 </label>
-              )}
-            </div>
+              </div>
+            )}
+
+            {isAbandoned && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium">召回轮次（最多 {MAX_ABANDONED_ROUNDS} 轮，延迟从下单时算起，须逐轮递增）</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={rounds.length >= MAX_ABANDONED_ROUNDS}
+                    onClick={addRound}
+                  >
+                    <Plus className="mr-1 size-3.5" />
+                    添加一轮
+                  </Button>
+                </div>
+                {rounds.map((r, i) => {
+                  const badDelay = i > 0 && r.delayMinutes <= rounds[i - 1]!.delayMinutes;
+                  return (
+                    <div key={i} className="rounded-md border border-input p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-xs font-semibold">第 {i + 1} 轮</span>
+                        {rounds.length > 1 && (
+                          <button
+                            type="button"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() => removeRound(i)}
+                            aria-label="删除该轮"
+                          >
+                            <Trash2 className="size-4" />
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">邮件模板</span>
+                          <select
+                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                            value={r.templateId}
+                            onChange={(e) => updateRound(i, { templateId: e.target.value })}
+                          >
+                            <option value="">未选择</option>
+                            {templates.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">下单后延迟（分钟）</span>
+                          <input
+                            type="number"
+                            min={5}
+                            max={10080}
+                            className={cn(
+                              'h-9 w-full rounded-md border bg-background px-2 text-sm',
+                              badDelay ? 'border-destructive' : 'border-input',
+                            )}
+                            value={r.delayMinutes}
+                            onChange={(e) =>
+                              updateRound(i, { delayMinutes: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs sm:col-span-2">
+                          <span className="text-muted-foreground">邮件主题</span>
+                          <input
+                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                            value={r.subject}
+                            placeholder="留空使用默认主题"
+                            onChange={(e) => updateRound(i, { subject: e.target.value })}
+                          />
+                        </label>
+                      </div>
+                      {badDelay && (
+                        <p className="mt-2 text-xs text-destructive">
+                          该轮延迟必须大于上一轮（{rounds[i - 1]!.delayMinutes} 分钟）。
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 {configured && <CheckCircle2 className="size-3.5 text-emerald-600" />}
                 {configured ? '已配置完成' : '请选择模板与发件邮箱后保存'}
               </span>
-              <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
+              <Button
+                size="sm"
+                onClick={() => save.mutate()}
+                disabled={save.isPending || !roundsValid}
+              >
                 <Save className="mr-1 size-4" />
                 保存
               </Button>

@@ -61,6 +61,18 @@ export interface FlowStatsView {
   bounced: number;
 }
 
+/** Max recovery rounds an abandoned-cart automation can be split into. */
+export const MAX_ABANDONED_ROUNDS = 5;
+
+/** One configured recovery round (abandoned_cart only). */
+export interface ShopAutomationStepView {
+  id: string;
+  stepIndex: number;
+  templateId: string | null;
+  subject: string | null;
+  delayMinutes: number;
+}
+
 export interface ShopAutomationView {
   id: string;
   type: ShopAutomationType;
@@ -71,14 +83,31 @@ export interface ShopAutomationView {
   fromName: string | null;
   subject: string | null;
   delayMinutes: number;
+  /** Recovery rounds — only populated for `abandoned_cart`. */
+  steps: ShopAutomationStepView[];
   /** Lifetime performance for this flow. */
   stats: FlowStatsView;
 }
 
 /**
+ * One recovery round in an `abandoned_cart` update. `delayMinutes` is absolute
+ * (minutes after order creation); the server enforces strictly increasing
+ * delays across the ordered list.
+ */
+export const ShopAutomationStepSchema = z.object({
+  templateId: z.string().uuid().nullable().optional(),
+  subject: z.string().max(255).nullable().optional(),
+  delayMinutes: z.number().int().min(5).max(10080),
+});
+export type ShopAutomationStepInput = z.infer<typeof ShopAutomationStepSchema>;
+
+/**
  * Editable automation fields. `delayMinutes` only meaningful for
  * `abandoned_cart` (minutes to wait after an order is created before sending
  * the recall, if still unpaid) but accepted for all to keep the form uniform.
+ * `steps` replaces the recovery rounds for `abandoned_cart` (1..5, strictly
+ * increasing delays); when present it supersedes the top-level
+ * `templateId`/`subject`/`delayMinutes` for that type.
  */
 export const UpdateShopAutomationSchema = z.object({
   enabled: z.boolean().optional(),
@@ -88,6 +117,15 @@ export const UpdateShopAutomationSchema = z.object({
   fromName: z.string().max(100).nullable().optional(),
   subject: z.string().max(255).nullable().optional(),
   delayMinutes: z.number().int().min(5).max(10080).optional(),
+  steps: z
+    .array(ShopAutomationStepSchema)
+    .min(1)
+    .max(MAX_ABANDONED_ROUNDS)
+    .refine(
+      (steps) => steps.every((s, i) => i === 0 || s.delayMinutes > steps[i - 1]!.delayMinutes),
+      { message: '每一轮的延迟必须大于前一轮' },
+    )
+    .optional(),
 });
 export type UpdateShopAutomationInput = z.infer<typeof UpdateShopAutomationSchema>;
 

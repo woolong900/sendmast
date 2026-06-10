@@ -22,6 +22,11 @@ export interface TransactionalParams {
   subject: string;
   fromEmail: string;
   fromName: string;
+  /**
+   * Template this send renders. Snapshots the abandoned-cart round's template
+   * (each round can differ); omit to fall back to the automation's template.
+   */
+  templateId?: string | null;
   /** Per-send {{order_total}} etc. resolved at send time. */
   mergeVars: Record<string, string>;
 }
@@ -77,6 +82,7 @@ export async function enqueueTransactional(
         dedupKey: params.dedupKey,
         email: params.email,
         contactId: params.contactId,
+        templateId: params.templateId ?? null,
         subject: params.subject,
         fromEmail: params.fromEmail,
         fromName: params.fromName,
