@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ConfirmDialogProvider } from '@/components/ui/confirm-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { Layout } from '@/layouts/Layout';
@@ -128,7 +128,12 @@ const AdminReferralPage = lazy(() =>
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
-  if (!token) return <Navigate to="/login" replace />;
+  const location = useLocation();
+  // Remember where the user was headed so LoginPage can send them back after
+  // sign-in — without this, deep links like the Shopyy authorize callback
+  // (which carries one-time `code` + `authorize_token_url` query params) are
+  // lost and the merchant has to restart the authorization.
+  if (!token) return <Navigate to="/login" replace state={{ from: location }} />;
   return <>{children}</>;
 }
 

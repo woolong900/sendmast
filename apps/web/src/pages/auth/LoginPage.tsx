@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, type Location } from 'react-router-dom';
 import { BrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,13 @@ import { useAuth } from '@/store/auth';
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const setSession = useAuth((s) => s.setSession);
+
+  // Set by RequireAuth when it bounced an unauthenticated deep link here;
+  // includes pathname + search so one-time query params (e.g. the Shopyy
+  // authorize callback's `code`) survive the round-trip through login.
+  const from = (location.state as { from?: Location } | null)?.from;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,7 +37,7 @@ export function LoginPage() {
         token: r.data.accessToken,
         refreshToken: r.data.refreshToken,
       });
-      navigate('/dashboard', { replace: true });
+      navigate(from ?? '/dashboard', { replace: true });
     } catch (err) {
       setError(apiErrMessage(err));
     } finally {
