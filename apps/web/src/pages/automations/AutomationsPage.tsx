@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -14,6 +14,7 @@ import {
   Plus,
   Trash2,
   Zap,
+  Clock,
 } from 'lucide-react';
 import { type IEmailTemplate } from 'easy-email-editor';
 import { Button } from '@/components/ui/button';
@@ -47,24 +48,27 @@ const ICONS: Record<ShopAutomationType, typeof Mail> = {
   abandoned_cart: ShoppingCart,
 };
 
-/** Colour accent per flow, Omnisend-style coloured leading badge. */
+/** Soft tinted icon tile per flow. */
 const ACCENTS: Record<ShopAutomationType, string> = {
-  order_paid: 'bg-emerald-100 text-emerald-700',
-  order_shipped: 'bg-sky-100 text-sky-700',
-  abandoned_cart: 'bg-amber-100 text-amber-700',
+  order_paid: 'bg-emerald-50 text-emerald-600',
+  order_shipped: 'bg-sky-50 text-sky-600',
+  abandoned_cart: 'bg-amber-50 text-amber-600',
 };
+
+/** Left accent stripe colour per flow. */
+const STRIPES: Record<ShopAutomationType, string> = {
+  order_paid: 'bg-emerald-400',
+  order_shipped: 'bg-sky-400',
+  abandoned_cart: 'bg-amber-400',
+};
+
+/** Shared input/select styling across the settings panel. */
+const FIELD = 'h-10 w-full rounded-lg border border-input bg-background px-3 text-sm';
 
 const TRIGGERS: Record<ShopAutomationType, string> = {
   order_paid: '当买家完成支付时立即发送',
   order_shipped: '当订单发货时立即发送',
   abandoned_cart: '当订单创建后超过设定时间仍未支付时发送召回',
-};
-
-const DESCRIPTIONS: Record<ShopAutomationType, string> = {
-  order_paid: '买家完成支付后立即发送，可用 {{order_no}}、{{order_total}} 等变量。',
-  order_shipped: '订单发货后立即发送，可用 {{tracking_url}} 物流追踪链接。',
-  abandoned_cart:
-    '订单创建后等待设定的分钟数，若买家仍未完成支付则发送召回邮件；期间已支付则自动跳过。',
 };
 
 export function AutomationsPage() {
@@ -80,11 +84,11 @@ export function AutomationsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-3">
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700">
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
           <Workflow className="size-5" />
         </div>
         <div>
-          <h1 className="text-xl font-semibold">自动化</h1>
+          <h1 className="text-2xl font-bold tracking-tight">自动化</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             为店铺事件配置自动化邮件流程：买家下单、支付、发货时自动触发，无需手动发送。
           </p>
@@ -165,8 +169,24 @@ function FlowList({ connectionId }: { connectionId: string }) {
     return <p className="text-sm text-muted-foreground">加载自动化流程...</p>;
   }
 
+  const flows = automations.data ?? [];
+  const enabledCount = flows.filter((a) => a.enabled).length;
+
   return (
     <div className="space-y-3">
+      {flows.length > 0 && (
+        <div className="flex justify-end">
+          <span className="inline-flex items-center gap-2 rounded-full border bg-card px-3.5 py-1.5 text-xs font-medium text-muted-foreground">
+            <span
+              className={cn(
+                'size-2 rounded-full',
+                enabledCount > 0 ? 'bg-emerald-500' : 'bg-muted-foreground/40',
+              )}
+            />
+            {flows.length} 个流程 · {enabledCount} 已启用
+          </span>
+        </div>
+      )}
       {senderOptions.length === 0 && (
         <p className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-700">
           尚无已验证的发件邮箱，启用流程前请先在「发件域名」中完成验证。
@@ -204,14 +224,21 @@ function FlowStats({ stats }: { stats: FlowStatsView }) {
     { label: '送达', value: String(stats.delivered) },
     { label: '打开率', value: pct(stats.opened, stats.delivered || stats.sent) },
     { label: '点击率', value: pct(stats.clicked, stats.delivered || stats.sent) },
-    { label: '销售额', value: formatMoney(stats.revenue, stats.currency) },
+    { label: '销售额', value: formatMoney(stats.revenue, stats.currency), highlight: true },
   ];
   return (
-    <div className="flex items-stretch divide-x divide-border overflow-hidden rounded-lg border bg-muted/20">
-      {items.map((it) => (
-        <div key={it.label} className="flex-1 px-2 py-2.5 text-center">
-          <div className="text-[15px] font-semibold leading-none tabular-nums">{it.value}</div>
-          <div className="mt-1.5 text-[11px] text-muted-foreground">{it.label}</div>
+    <div className="grid grid-cols-5 border-y border-border">
+      {items.map((it, i) => (
+        <div key={it.label} className={cn('py-4 text-center', i > 0 && 'border-l border-border')}>
+          <div
+            className={cn(
+              'text-xl font-semibold tabular-nums tracking-tight',
+              it.highlight && 'text-emerald-600',
+            )}
+          >
+            {it.value}
+          </div>
+          <div className="mt-1 text-[11px] font-medium text-muted-foreground">{it.label}</div>
         </div>
       ))}
     </div>
@@ -249,7 +276,7 @@ function EmailThumb({
     <button
       type="button"
       onClick={onEdit}
-      className="group relative block aspect-[16/10] max-h-64 w-full overflow-hidden rounded-lg border bg-muted/30 text-left"
+      className="group relative block h-full min-h-[160px] w-full overflow-hidden rounded-xl border bg-muted/30 text-left shadow-sm"
     >
       {thumbnail ? (
         <img src={thumbnail} alt="" className="h-full w-full object-cover object-top" />
@@ -271,6 +298,83 @@ function EmailThumb({
         编辑邮件
       </div>
     </button>
+  );
+}
+
+function FieldLabel({ children }: { children: ReactNode }) {
+  return <span className="mb-1.5 block text-[13px] font-medium text-foreground">{children}</span>;
+}
+
+/**
+ * Email content block shared by single-template flows and recovery rounds:
+ * a larger email thumbnail on the left, with sender / subject / preheader
+ * stacked on the right. Collapses to a single column on narrow screens.
+ */
+function EmailContentBlock({
+  thumbnail,
+  html,
+  onEdit,
+  fromEmail,
+  onFromEmail,
+  senderOptions,
+  subject,
+  onSubject,
+  preheader,
+  onPreheader,
+}: {
+  thumbnail: string | null;
+  html: string | null;
+  onEdit: () => void;
+  fromEmail: string;
+  onFromEmail: (v: string) => void;
+  senderOptions: { value: string; label: string; name: string }[];
+  subject: string;
+  onSubject: (v: string) => void;
+  preheader: string;
+  onPreheader: (v: string) => void;
+}) {
+  return (
+    <div className="grid items-stretch gap-5 sm:[grid-template-columns:minmax(0,220px)_minmax(0,1fr)]">
+      <div className="flex flex-col">
+        <FieldLabel>邮件内容</FieldLabel>
+        <div className="min-h-[160px] flex-1">
+          <EmailThumb thumbnail={thumbnail} html={html} onEdit={onEdit} />
+        </div>
+      </div>
+      <div className="min-w-0 space-y-3">
+        <label className="block">
+          <FieldLabel>发件人</FieldLabel>
+          <select className={FIELD} value={fromEmail} onChange={(e) => onFromEmail(e.target.value)}>
+            <option value="">未选择</option>
+            {senderOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <FieldLabel>邮件主题</FieldLabel>
+          <input
+            className={cn(FIELD, 'truncate')}
+            value={subject}
+            placeholder="留空使用默认主题"
+            onChange={(e) => onSubject(e.target.value)}
+          />
+        </label>
+        <label className="block">
+          <FieldLabel>
+            内文预览 <span className="font-normal text-muted-foreground">（选填）</span>
+          </FieldLabel>
+          <input
+            className={cn(FIELD, 'truncate')}
+            value={preheader}
+            placeholder="收件箱中显示在主题后的预览文字"
+            onChange={(e) => onPreheader(e.target.value)}
+          />
+        </label>
+      </div>
+    </div>
   );
 }
 
@@ -522,24 +626,27 @@ function FlowCard({
           onApply={applyContent}
         />
       )}
-      <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center gap-3 p-4">
-          <div
-            className={cn(
-              'flex size-11 shrink-0 items-center justify-center rounded-xl',
-              ACCENTS[automation.type],
-            )}
-          >
-            <Icon className="size-5" />
-          </div>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          >
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
+      <Card className="relative overflow-hidden transition-shadow hover:shadow-md">
+        <span
+          className={cn('absolute inset-y-0 left-0 w-1.5', STRIPES[automation.type])}
+          aria-hidden
+        />
+        <CardContent className="p-0">
+          <div className="flex items-center gap-3 p-4 pl-5">
+            <div
+              className={cn(
+                'flex size-11 shrink-0 items-center justify-center rounded-xl',
+                ACCENTS[automation.type],
+              )}
+            >
+              <Icon className="size-5" />
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              className="flex min-w-0 flex-1 flex-col text-left"
+            >
+              <span className="flex flex-wrap items-center gap-2">
                 <span className="truncate text-[15px] font-semibold">
                   {SHOP_AUTOMATION_LABELS[automation.type]}
                 </span>
@@ -548,91 +655,65 @@ function FlowCard({
                 ) : (
                   <Badge variant="muted">已关闭</Badge>
                 )}
-                {isAbandoned && (
-                  <Badge variant="muted">{automation.steps.length || 1} 轮</Badge>
-                )}
+                {isAbandoned && <Badge variant="muted">{automation.steps.length || 1} 轮</Badge>}
                 {!configured && <Badge variant="warning">待配置</Badge>}
-              </div>
-              <div className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground">
+              </span>
+              <span className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground">
                 <Zap className="size-3 shrink-0" />
                 <span className="truncate">{TRIGGERS[automation.type]}</span>
-              </div>
-            </div>
-            <ChevronDown
-              className={cn(
-                'ml-auto size-4 shrink-0 text-muted-foreground transition-transform',
-                open && 'rotate-180',
-              )}
-            />
-          </button>
-          <Switch checked={enabled} onCheckedChange={setEnabled} />
-        </div>
+              </span>
+            </button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="hidden sm:inline-flex"
+              onClick={() => setOpen(true)}
+            >
+              <Pencil className="mr-1 size-3.5" />
+              编辑
+            </Button>
+            <Switch checked={enabled} onCheckedChange={setEnabled} />
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted/60"
+              aria-label={open ? '收起' : '展开'}
+            >
+              <ChevronDown className={cn('size-4 transition-transform', open && 'rotate-180')} />
+            </button>
+          </div>
 
-        <div className="px-4 pb-4">
           <FlowStats stats={automation.stats} />
-        </div>
 
-        {open && (
-          <div className="space-y-3 border-t px-4 py-4">
-            <p className="text-xs text-muted-foreground">{DESCRIPTIONS[automation.type]}</p>
-
-            <label className="space-y-1 text-xs">
-              <span className="text-muted-foreground">发件邮箱</span>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                value={fromEmail}
-                onChange={(e) => setFromEmail(e.target.value)}
-              >
-                <option value="">未选择</option>
-                {senderOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {!isAbandoned && (
-              <div className="grid gap-3 sm:grid-cols-[180px_1fr]">
-                <div className="space-y-1 text-xs">
-                  <span className="text-muted-foreground">邮件内容</span>
-                  <EmailThumb
-                    thumbnail={content.thumbnail}
-                    html={content.html}
-                    onEdit={() => setEditing('single')}
-                  />
-                </div>
-                <div className="space-y-3">
-                  <label className="block space-y-1 text-xs">
-                    <span className="text-muted-foreground">邮件主题</span>
-                    <input
-                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                      value={subject}
-                      placeholder="留空使用默认主题"
-                      onChange={(e) => setSubject(e.target.value)}
-                    />
-                  </label>
-                  <label className="block space-y-1 text-xs">
-                    <span className="text-muted-foreground">内文预览（选填）</span>
-                    <input
-                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                      value={preheader}
-                      placeholder="收件箱中显示在主题后的预览文字"
-                      onChange={(e) => setPreheader(e.target.value)}
-                    />
-                  </label>
-                </div>
-              </div>
-            )}
+          {open && (
+            <div className="space-y-6 bg-muted/20 p-5">
+              {!isAbandoned && (
+                <EmailContentBlock
+                  thumbnail={content.thumbnail}
+                  html={content.html}
+                  onEdit={() => setEditing('single')}
+                  fromEmail={fromEmail}
+                  onFromEmail={setFromEmail}
+                  senderOptions={senderOptions}
+                  subject={subject}
+                  onSubject={setSubject}
+                  preheader={preheader}
+                  onPreheader={setPreheader}
+                />
+              )}
 
             {isAbandoned && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium">召回轮次（最多 {MAX_ABANDONED_ROUNDS} 轮，延迟从下单时算起，须逐轮递增）</span>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5 text-[13px] font-semibold text-muted-foreground">
+                    <Clock className="size-4 shrink-0" />
+                    <span>召回节奏 · 最多 {MAX_ABANDONED_ROUNDS} 轮，延迟须逐轮递增</span>
+                  </div>
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="shrink-0"
                     disabled={rounds.length >= MAX_ABANDONED_ROUNDS}
                     onClick={addRound}
                   >
@@ -643,21 +724,22 @@ function FlowCard({
                 {rounds.map((r, i) => {
                   const badDelay = i > 0 && r.delayMinutes <= rounds[i - 1]!.delayMinutes;
                   return (
-                    <div key={i} className="rounded-lg border bg-muted/20 p-4">
-                      <div className="mb-3 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                    <div key={i} className="rounded-xl border bg-card p-4">
+                      <div className="mb-4 flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-[13px] font-semibold text-primary">
                             {i + 1}
                           </span>
-                          <span className="text-sm font-medium">第 {i + 1} 轮召回</span>
-                          <span className="text-xs text-muted-foreground">
-                            · 下单后 {formatDelay(r.delayMinutes)}
+                          <span className="text-sm font-semibold">第 {i + 1} 轮召回</span>
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                            <Clock className="size-3" />
+                            下单后 {formatDelay(r.delayMinutes)}
                           </span>
                         </div>
                         {rounds.length > 1 && (
                           <button
                             type="button"
-                            className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => removeRound(i)}
                             aria-label="删除该轮"
                           >
@@ -665,39 +747,27 @@ function FlowCard({
                           </button>
                         )}
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="space-y-1 text-xs">
-                          <span className="text-muted-foreground">邮件内容</span>
-                          <EmailThumb
-                            thumbnail={r.thumbnail}
-                            html={r.html}
-                            onEdit={() => setEditing(i)}
-                          />
-                        </div>
-                        <div className="space-y-3">
-                          <label className="block space-y-1 text-xs">
-                            <span className="text-muted-foreground">邮件主题</span>
-                            <input
-                              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                              value={r.subject}
-                              placeholder="留空使用默认主题"
-                              onChange={(e) => updateRound(i, { subject: e.target.value })}
-                            />
-                          </label>
-                          <label className="block space-y-1 text-xs">
-                            <span className="text-muted-foreground">内文预览（选填）</span>
-                            <input
-                              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                              value={r.preheader}
-                              placeholder="收件箱中显示在主题后的预览文字"
-                              onChange={(e) => updateRound(i, { preheader: e.target.value })}
-                            />
-                          </label>
-                        </div>
-                        <label className="space-y-1 text-xs sm:col-span-2">
-                          <span className="text-muted-foreground">优惠券（可选，选择后展示在邮件中）</span>
+
+                      <EmailContentBlock
+                        thumbnail={r.thumbnail}
+                        html={r.html}
+                        onEdit={() => setEditing(i)}
+                        fromEmail={fromEmail}
+                        onFromEmail={setFromEmail}
+                        senderOptions={senderOptions}
+                        subject={r.subject}
+                        onSubject={(v) => updateRound(i, { subject: v })}
+                        preheader={r.preheader}
+                        onPreheader={(v) => updateRound(i, { preheader: v })}
+                      />
+
+                      <div className="mt-4 grid gap-4 border-t pt-4 sm:grid-cols-2">
+                        <label className="block">
+                          <FieldLabel>
+                            优惠券 <span className="font-normal text-muted-foreground">（选填，展示在邮件中）</span>
+                          </FieldLabel>
                           <select
-                            className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                            className={FIELD}
                             value={r.couponCode}
                             onChange={(e) => {
                               const code = e.target.value;
@@ -732,13 +802,13 @@ function FlowCard({
                             ))}
                           </select>
                           {coupons.isError && (
-                            <span className="text-amber-600">
+                            <span className="mt-1 block text-xs text-amber-600">
                               无法拉取店铺优惠券：请在 Shopyy 开发者后台为应用开通「优惠券」接口权限后重试。
                             </span>
                           )}
                         </label>
-                        <div className="space-y-1 text-xs sm:col-span-2">
-                          <span className="text-muted-foreground">下单后延迟</span>
+                        <div>
+                          <FieldLabel>下单后延迟</FieldLabel>
                           <DelayField
                             minutes={r.delayMinutes}
                             onChange={(m) => updateRound(i, { delayMinutes: m })}
@@ -756,23 +826,19 @@ function FlowCard({
               </div>
             )}
 
-            <div className="flex items-center justify-between border-t pt-4">
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                {configured && <CheckCircle2 className="size-3.5 text-emerald-600" />}
-                {configured ? '已配置完成' : '请设置邮件内容与发件邮箱后保存'}
-              </span>
-              <Button
-                size="sm"
-                onClick={() => save.mutate()}
-                disabled={save.isPending || !roundsValid}
-              >
-                <Save className="mr-1 size-4" />
-                保存
-              </Button>
+              <div className="flex items-center justify-between border-t pt-5">
+                <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                  {configured && <CheckCircle2 className="size-3.5 text-emerald-600" />}
+                  {configured ? '已配置完成' : '请设置邮件内容与发件人后保存'}
+                </span>
+                <Button onClick={() => save.mutate()} disabled={save.isPending || !roundsValid}>
+                  <Save className="mr-1 size-4" />
+                  保存流程
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
-      </CardContent>
+          )}
+        </CardContent>
       </Card>
     </>
   );
