@@ -50,6 +50,10 @@ const ConfigSchema = z.object({
   // shopyy should deliver order/checkout webhooks — defaults to API_BASE_URL.
   SHOPYY_APP_KEY: z.string().optional(),
   SHOPYY_APP_SECRET: z.string().optional(),
+  // Partner credential shopyy now requires as the `Tp-Partner-Id` header on
+  // every OpenAPI call (paired with a fixed partner User-Agent). Missing → the
+  // header is omitted and shopyy may reject calls.
+  SHOPYY_PARTNER_ID: z.string().optional(),
   SHOPYY_WEBHOOK_BASE_URL: z.string().url().optional(),
 
   // Shouqianba (收钱吧) for self-service quota top-up via 当面付/扫码支付.

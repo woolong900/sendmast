@@ -171,6 +171,7 @@ export class IntegrationsService {
         authorizeTokenUrl: input.authorizeTokenUrl,
         code: input.code,
         secret,
+        partnerId: this.config.get<string>('SHOPYY_PARTNER_ID'),
         extraParams: appKey ? { app_key: appKey } : undefined,
       });
     } catch (err) {
@@ -241,6 +242,15 @@ export class IntegrationsService {
     return toView(conn);
   }
 
+  /** Build a ShopyyClient with the partner identification header attached. */
+  private shopyyClient(openapiDomain: string, token: string): ShopyyClient {
+    return new ShopyyClient({
+      openapiDomain,
+      token,
+      partnerId: this.config.get<string>('SHOPYY_PARTNER_ID'),
+    });
+  }
+
   private async installWebhooks(conn: {
     externalStoreId: string;
     openapiDomain: string;
@@ -251,10 +261,7 @@ export class IntegrationsService {
       this.config.get<string>('SHOPYY_WEBHOOK_BASE_URL') ??
       `${this.config.getOrThrow<string>('API_BASE_URL')}/api`;
     const base = rawBase.replace(/\/+$/, '');
-    const client = new ShopyyClient({
-      openapiDomain: conn.openapiDomain,
-      token: conn.devToken,
-    });
+    const client = this.shopyyClient(conn.openapiDomain, conn.devToken);
 
     // Reuse an existing webhook row for the same event when it already points at
     // our receiver, so re-connecting edits in place instead of duplicating
@@ -573,10 +580,7 @@ export class IntegrationsService {
     if (!conn.openapiDomain || !conn.devToken) {
       throw new BadRequestException('店铺连接缺少 API 凭证，请重新授权店铺');
     }
-    const client = new ShopyyClient({
-      openapiDomain: conn.openapiDomain,
-      token: conn.devToken,
-    });
+    const client = this.shopyyClient(conn.openapiDomain, conn.devToken);
     let coupons;
     try {
       coupons = await client.listCoupons();
