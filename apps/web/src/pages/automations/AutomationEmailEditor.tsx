@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Eye, LayoutTemplate, Save, X } from 'lucide-react';
 import { ConfigProvider } from '@arco-design/web-react';
@@ -61,13 +62,11 @@ function toEditorData(designJson: IEmailTemplate | null, html: string | null): I
  * hands the content back to the caller (which persists it on page save).
  */
 export function AutomationEmailEditor({
-  title,
   initialDesignJson,
   initialHtml,
   onClose,
   onApply,
 }: {
-  title: string;
   initialDesignJson: IEmailTemplate | null;
   initialHtml: string | null;
   onClose: () => void;
@@ -116,14 +115,14 @@ export function AutomationEmailEditor({
           }
         }}
       >
-        {(_props, helper) => (
+        {(_props, helper) =>
+          createPortal(
           <div className="fixed inset-0 z-50 flex flex-col bg-background">
             <div className="flex items-center gap-3 border-b bg-background py-2 pr-4">
               <Button variant="outline" onClick={onClose}>
                 <ArrowLeft className="mr-1.5 size-4" />
                 返回
               </Button>
-              <span className="truncate text-sm font-medium">{title}</span>
               <VariablesHelper variant="button" size="default" />
               <div className="ml-auto flex items-center gap-3">
                 <Button variant="outline" onClick={() => setPickerOpen(true)}>
@@ -255,8 +254,10 @@ export function AutomationEmailEditor({
                 <EmailEditor />
               </StandardLayout>
             </div>
-          </div>
-        )}
+          </div>,
+          document.body,
+          )
+        }
       </EmailEditorProvider>
     </ConfigProvider>
   );

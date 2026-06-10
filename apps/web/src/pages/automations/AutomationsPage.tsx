@@ -611,15 +611,10 @@ function FlowCard({
     else if (typeof editing === 'number') updateRound(editing, patch);
   };
 
-  const editorTitle =
-    SHOP_AUTOMATION_LABELS[automation.type] +
-    (typeof editing === 'number' ? ` · 第 ${editing + 1} 轮` : '');
-
   return (
     <>
       {editing !== null && editingContent && (
         <AutomationEmailEditor
-          title={editorTitle}
           initialDesignJson={editingContent.designJson}
           initialHtml={editingContent.html}
           onClose={() => setEditing(null)}
