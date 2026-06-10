@@ -409,7 +409,8 @@ export class IntegrationsService {
         stepIndex: 1,
         templateId: a.templateId,
         subject: a.subject,
-        delayMinutes: a.delayMinutes,
+        // Round 1 default: 30 minutes after order creation.
+        delayMinutes: 30,
       },
     });
   }

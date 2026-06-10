@@ -216,6 +216,59 @@ interface Round {
   delayMinutes: number;
 }
 
+const MINUTES_PER_DAY = 1440;
+/** Server cap on a round's delay (== 7 days). */
+const MAX_DELAY_MINUTES = 10080;
+/** Per-round default delays (minutes): 30m, 2h, 1d, 3d, 7d. */
+const ROUND_DEFAULT_MINUTES = [30, 120, 1440, 4320, 10080];
+
+/** Render a minute count as a human delay, e.g. 1530 -> "1天1小时30分钟". */
+function formatDelay(m: number): string {
+  const d = Math.floor(m / MINUTES_PER_DAY);
+  const h = Math.floor((m % MINUTES_PER_DAY) / 60);
+  const mm = m % 60;
+  const parts: string[] = [];
+  if (d) parts.push(`${d}天`);
+  if (h) parts.push(`${h}小时`);
+  if (mm) parts.push(`${mm}分钟`);
+  return parts.join('') || '0分钟';
+}
+
+/** Days/hours/minutes editor over a single total-minutes value (capped at 7d). */
+function DelayField({
+  minutes,
+  onChange,
+}: {
+  minutes: number;
+  onChange: (m: number) => void;
+}) {
+  const days = Math.floor(minutes / MINUTES_PER_DAY);
+  const hours = Math.floor((minutes % MINUTES_PER_DAY) / 60);
+  const mins = minutes % 60;
+  const commit = (d: number, h: number, m: number) =>
+    onChange(Math.min(MAX_DELAY_MINUTES, Math.max(0, d * MINUTES_PER_DAY + h * 60 + m)));
+  const box = (label: string, value: number, max: number, on: (v: number) => void) => (
+    <label className="flex items-center gap-1">
+      <input
+        type="number"
+        min={0}
+        max={max}
+        className="h-9 w-16 rounded-md border border-input bg-background px-2 text-sm"
+        value={value}
+        onChange={(e) => on(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+      />
+      <span className="text-muted-foreground">{label}</span>
+    </label>
+  );
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      {box('天', days, 7, (v) => commit(v, hours, mins))}
+      {box('小时', hours, 23, (v) => commit(days, v, mins))}
+      {box('分钟', mins, 59, (v) => commit(days, hours, v))}
+    </div>
+  );
+}
+
 /** Initial rounds for abandoned_cart: stored steps, else a single default. */
 function initialRounds(a: ShopAutomationView): Round[] {
   if (a.steps.length) {
@@ -255,19 +308,25 @@ function FlowCard({
   const delaysIncreasing = rounds.every(
     (r, i) => i === 0 || r.delayMinutes > rounds[i - 1]!.delayMinutes,
   );
-  const roundsValid = !isAbandoned || (rounds.length >= 1 && delaysIncreasing);
+  const delaysInRange = rounds.every((r) => r.delayMinutes >= 5 && r.delayMinutes <= MAX_DELAY_MINUTES);
+  const roundsValid = !isAbandoned || (rounds.length >= 1 && delaysIncreasing && delaysInRange);
 
   const updateRound = (i: number, patch: Partial<Round>) =>
     setRounds((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const addRound = () =>
-    setRounds((rs) => [
-      ...rs,
-      {
-        templateId: rs[rs.length - 1]?.templateId ?? '',
-        subject: '',
-        delayMinutes: (rs[rs.length - 1]?.delayMinutes ?? 0) + 1440,
-      },
-    ]);
+    setRounds((rs) => {
+      const last = rs[rs.length - 1]?.delayMinutes ?? 0;
+      const def = ROUND_DEFAULT_MINUTES[rs.length] ?? last + MINUTES_PER_DAY;
+      return [
+        ...rs,
+        {
+          templateId: rs[rs.length - 1]?.templateId ?? '',
+          subject: '',
+          // Keep strictly increasing even if earlier rounds were edited large.
+          delayMinutes: Math.min(MAX_DELAY_MINUTES, Math.max(def, last + 5)),
+        },
+      ];
+    });
   const removeRound = (i: number) => setRounds((rs) => rs.filter((_, idx) => idx !== i));
 
   const save = useMutation({
@@ -452,22 +511,6 @@ function FlowCard({
                           </select>
                         </label>
                         <label className="space-y-1 text-xs">
-                          <span className="text-muted-foreground">下单后延迟（分钟）</span>
-                          <input
-                            type="number"
-                            min={5}
-                            max={10080}
-                            className={cn(
-                              'h-9 w-full rounded-md border bg-background px-2 text-sm',
-                              badDelay ? 'border-destructive' : 'border-input',
-                            )}
-                            value={r.delayMinutes}
-                            onChange={(e) =>
-                              updateRound(i, { delayMinutes: Number(e.target.value) })
-                            }
-                          />
-                        </label>
-                        <label className="space-y-1 text-xs sm:col-span-2">
                           <span className="text-muted-foreground">邮件主题</span>
                           <input
                             className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
@@ -476,10 +519,17 @@ function FlowCard({
                             onChange={(e) => updateRound(i, { subject: e.target.value })}
                           />
                         </label>
+                        <div className="space-y-1 text-xs sm:col-span-2">
+                          <span className="text-muted-foreground">下单后延迟</span>
+                          <DelayField
+                            minutes={r.delayMinutes}
+                            onChange={(m) => updateRound(i, { delayMinutes: m })}
+                          />
+                        </div>
                       </div>
                       {badDelay && (
                         <p className="mt-2 text-xs text-destructive">
-                          该轮延迟必须大于上一轮（{rounds[i - 1]!.delayMinutes} 分钟）。
+                          该轮延迟必须大于上一轮（{formatDelay(rounds[i - 1]!.delayMinutes)}）。
                         </p>
                       )}
                     </div>
