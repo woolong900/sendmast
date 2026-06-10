@@ -1,21 +1,22 @@
 import { useState } from 'react';
-import { Link, useLocation, useNavigate, type Location } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { BrandLogo } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api, apiErrMessage } from '@/lib/api';
 import { useAuth } from '@/store/auth';
+import { sanitizeNext, withNext } from '@/lib/next-redirect';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const location = useLocation();
+  const [params] = useSearchParams();
   const setSession = useAuth((s) => s.setSession);
 
-  // Set by RequireAuth when it bounced an unauthenticated deep link here;
-  // includes pathname + search so one-time query params (e.g. the Shopyy
-  // authorize callback's `code`) survive the round-trip through login.
-  const from = (location.state as { from?: Location } | null)?.from;
+  // Where to go after login, carried by RequireAuth as a ?next= param so it
+  // survives a fresh navigation (e.g. the Shopyy authorize callback whose URL
+  // holds one-time `code` + `authorize_token_url`). Sanitized to internal paths.
+  const next = sanitizeNext(params.get('next'));
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -37,7 +38,7 @@ export function LoginPage() {
         token: r.data.accessToken,
         refreshToken: r.data.refreshToken,
       });
-      navigate(from ?? '/dashboard', { replace: true });
+      navigate(next ?? '/dashboard', { replace: true });
     } catch (err) {
       setError(apiErrMessage(err));
     } finally {
@@ -94,11 +95,7 @@ export function LoginPage() {
           </Button>
           <div className="text-center text-sm text-muted-foreground">
             没有账号？{' '}
-            <Link
-              to="/signup"
-              state={from ? { from } : undefined}
-              className="text-primary hover:underline"
-            >
+            <Link to={withNext('/signup', next)} className="text-primary hover:underline">
               立即注册
             </Link>
           </div>

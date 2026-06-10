@@ -4,6 +4,7 @@ import { ConfirmDialogProvider } from '@/components/ui/confirm-dialog';
 import { ToastProvider } from '@/components/ui/toast';
 import { Layout } from '@/layouts/Layout';
 import { useAuth } from '@/store/auth';
+import { withNext } from '@/lib/next-redirect';
 
 // Route-level code splitting. Heavy pages — CampaignWizardPage and
 // TemplateEditorPage in particular, which pull in react-email-editor (~1.5MB
@@ -129,11 +130,14 @@ const AdminReferralPage = lazy(() =>
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth();
   const location = useLocation();
-  // Remember where the user was headed so LoginPage can send them back after
-  // sign-in — without this, deep links like the Shopyy authorize callback
-  // (which carries one-time `code` + `authorize_token_url` query params) are
-  // lost and the merchant has to restart the authorization.
-  if (!token) return <Navigate to="/login" replace state={{ from: location }} />;
+  // Remember where the user was headed (as a ?next= param) so LoginPage can
+  // send them back after sign-in — without this, deep links like the Shopyy
+  // authorize callback (which carries one-time `code` + `authorize_token_url`
+  // query params) are lost and the merchant has to restart the authorization.
+  if (!token) {
+    const next = location.pathname + location.search;
+    return <Navigate to={withNext('/login', next)} replace />;
+  }
   return <>{children}</>;
 }
 
