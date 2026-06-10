@@ -70,6 +70,30 @@ const shipped = build(
   resolve(repo, 'packages/db/prisma/migrations/20260610180000_order_shipped_trim/migration.sql'),
 );
 
+// Make the tracking number itself a link to {{tracking_url}} so it matches the
+// "Track your shipment" button (both go through the same click-tracked link)
+// and mail clients don't auto-linkify the bare number to their own page.
+const TRACK_NUM_OLD =
+  '<mj-text padding="0 0 16px" align="left" font-size="15px" color="#111827" font-weight="600" line-height="1.7" >{{tracking_number}}</mj-text>';
+const TRACK_NUM_NEW =
+  '<mj-text padding="0 0 16px" align="left" font-size="15px" color="#111827" font-weight="600" line-height="1.7" ><a href="{{tracking_url}}" style="color:#111827;text-decoration:underline;">{{tracking_number}}</a></mj-text>';
+if (!shipped.mjml.includes(TRACK_NUM_OLD)) throw new Error('tracking-number node not found in shipped mjml');
+shipped.mjml = shipped.mjml.replace(TRACK_NUM_OLD, TRACK_NUM_NEW);
+shipped.html = mjml2html(shipped.mjml, { validationLevel: 'soft' }).html;
+let patched = 0;
+(function walk(node) {
+  if (Array.isArray(node)) return node.forEach(walk);
+  if (node && typeof node === 'object') {
+    if (node?.data?.value?.content === '{{tracking_number}}') {
+      node.data.value.content =
+        '<a href="{{tracking_url}}" style="color:#111827;text-decoration:underline;">{{tracking_number}}</a>';
+      patched++;
+    }
+    Object.values(node).forEach(walk);
+  }
+})(shipped.design);
+if (patched !== 1) throw new Error(`expected 1 tracking-number node in design json, patched ${patched}`);
+
 // ---- migration ----
 function upsert(id, name, t) {
   return `INSERT INTO "email_templates" ("id", "scope", "name", "mjml", "html", "design_json", "created_at", "updated_at")
@@ -91,15 +115,13 @@ ON CONFLICT ("id") DO UPDATE SET
   "updated_at" = now();`;
 }
 
-const migration = `-- Order confirmation + shipped: move the order number under the shop name
--- (single left-aligned header column) instead of right of it.
-
-${upsert('00000000-0000-4000-8000-000000000005', '订单确认通知（默认）', confirmation)}
+const migration = `-- Order shipped: make the tracking number a link to {{tracking_url}} so it
+-- matches the "Track your shipment" button and clients don't auto-linkify it.
 
 ${upsert('00000000-0000-4000-8000-000000000006', '订单发货通知（默认）', shipped)}
 `;
 
-const migDir = resolve(repo, 'packages/db/prisma/migrations/20260610190000_order_no_left');
+const migDir = resolve(repo, 'packages/db/prisma/migrations/20260610200000_tracking_number_link');
 mkdirSync(migDir, { recursive: true });
 writeFileSync(resolve(migDir, 'migration.sql'), migration);
 
