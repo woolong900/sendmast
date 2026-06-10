@@ -243,11 +243,14 @@ export class IntegrationsService {
       // Per-store opaque key authenticates inbound webhooks; topic is encoded so
       // the receiver knows the event without trusting shopyy's inbound shape.
       // Store identity is read from the payload's `store_id` at receive time, so
-      // the URL only carries `key` (auth) + `topic` (which event fired).
+      // the URL only carries `key` (auth) + `topic` (which event fired). The
+      // topic is a fixed safe constant (`orders/create` etc.), so we leave its
+      // `/` literal rather than percent-encoding it to `%2F` — both decode the
+      // same at the receiver, but the literal slash reads cleaner.
       const url =
         `${ourPrefix}` +
         `?key=${conn.webhookSecret}` +
-        `&topic=${encodeURIComponent(e.topic)}`;
+        `&topic=${e.topic}`;
       const prior = existing.find(
         (w) => w.event_id === e.eventId && typeof w.url === 'string' && w.url.startsWith(ourPrefix),
       );
