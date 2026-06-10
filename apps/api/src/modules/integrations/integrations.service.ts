@@ -550,11 +550,14 @@ export class IntegrationsService {
         `拉取优惠券失败：${msg}。若提示权限验证失败，请在 Shopyy 开发者后台为应用开通「优惠券」接口权限。`,
       );
     }
+    const nowSec = Math.floor(Date.now() / 1000);
     const seen = new Set<string>();
     const out: ShopCouponView[] = [];
     for (const c of coupons) {
       const code = c.coupon_code?.trim();
       if (!code || seen.has(code)) continue;
+      // Drop already-expired coupons (ends_at in the past); -1/absent = forever.
+      if (typeof c.ends_at === 'number' && c.ends_at > 0 && c.ends_at < nowSec) continue;
       seen.add(code);
       out.push({ code, name: c.coupon_name?.trim() || code });
     }

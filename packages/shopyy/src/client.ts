@@ -215,6 +215,10 @@ export interface ShopyyCoupon {
   id?: number;
   coupon_code?: string;
   coupon_name?: string;
+  /** End time in Unix seconds; `-1` (or absent) = no expiry. */
+  ends_at?: number;
+  /** Lifecycle status (2 = active, 3 = ended); semantics best-effort. */
+  status?: number;
 }
 
 /** A webhook row as returned by `GET /webhooks`. */
