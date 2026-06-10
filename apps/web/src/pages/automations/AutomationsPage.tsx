@@ -13,6 +13,7 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Zap,
 } from 'lucide-react';
 import { type IEmailTemplate } from 'easy-email-editor';
 import { Button } from '@/components/ui/button';
@@ -206,11 +207,11 @@ function FlowStats({ stats }: { stats: FlowStatsView }) {
     { label: '销售额', value: formatMoney(stats.revenue, stats.currency) },
   ];
   return (
-    <div className="grid grid-cols-5 gap-2 rounded-md bg-muted/40 px-3 py-2">
+    <div className="flex items-stretch divide-x divide-border overflow-hidden rounded-lg border bg-muted/20">
       {items.map((it) => (
-        <div key={it.label} className="text-center">
-          <div className="text-sm font-semibold tabular-nums">{it.value}</div>
-          <div className="text-[11px] text-muted-foreground">{it.label}</div>
+        <div key={it.label} className="flex-1 px-2 py-2.5 text-center">
+          <div className="text-[15px] font-semibold leading-none tabular-nums">{it.value}</div>
+          <div className="mt-1.5 text-[11px] text-muted-foreground">{it.label}</div>
         </div>
       ))}
     </div>
@@ -248,7 +249,7 @@ function EmailThumb({
     <button
       type="button"
       onClick={onEdit}
-      className="group relative block aspect-[4/3] w-full overflow-hidden rounded-md border bg-muted/30 text-left"
+      className="group relative block aspect-[16/10] max-h-64 w-full overflow-hidden rounded-lg border bg-muted/30 text-left"
     >
       {thumbnail ? (
         <img src={thumbnail} alt="" className="h-full w-full object-cover object-top" />
@@ -526,7 +527,7 @@ function FlowCard({
         <div className="flex items-center gap-3 p-4">
           <div
             className={cn(
-              'flex size-10 shrink-0 items-center justify-center rounded-lg',
+              'flex size-11 shrink-0 items-center justify-center rounded-xl',
               ACCENTS[automation.type],
             )}
           >
@@ -538,8 +539,8 @@ function FlowCard({
             className="flex min-w-0 flex-1 items-center gap-2 text-left"
           >
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="truncate text-[15px] font-semibold">
                   {SHOP_AUTOMATION_LABELS[automation.type]}
                 </span>
                 {automation.enabled ? (
@@ -552,8 +553,9 @@ function FlowCard({
                 )}
                 {!configured && <Badge variant="warning">待配置</Badge>}
               </div>
-              <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                触发：{TRIGGERS[automation.type]}
+              <div className="mt-1 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                <Zap className="size-3 shrink-0" />
+                <span className="truncate">{TRIGGERS[automation.type]}</span>
               </div>
             </div>
             <ChevronDown
@@ -641,13 +643,21 @@ function FlowCard({
                 {rounds.map((r, i) => {
                   const badDelay = i > 0 && r.delayMinutes <= rounds[i - 1]!.delayMinutes;
                   return (
-                    <div key={i} className="rounded-md border border-input p-3">
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-xs font-semibold">第 {i + 1} 轮</span>
+                    <div key={i} className="rounded-lg border bg-muted/20 p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="flex size-6 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                            {i + 1}
+                          </span>
+                          <span className="text-sm font-medium">第 {i + 1} 轮召回</span>
+                          <span className="text-xs text-muted-foreground">
+                            · 下单后 {formatDelay(r.delayMinutes)}
+                          </span>
+                        </div>
                         {rounds.length > 1 && (
                           <button
                             type="button"
-                            className="text-muted-foreground hover:text-destructive"
+                            className="rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => removeRound(i)}
                             aria-label="删除该轮"
                           >
@@ -746,8 +756,8 @@ function FlowCard({
               </div>
             )}
 
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <div className="flex items-center justify-between border-t pt-4">
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 {configured && <CheckCircle2 className="size-3.5 text-emerald-600" />}
                 {configured ? '已配置完成' : '请设置邮件内容与发件邮箱后保存'}
               </span>
