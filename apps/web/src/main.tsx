@@ -15,7 +15,11 @@ window.addEventListener('vite:preloadError', () => {
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: 1 },
+    // Users are far from the origin (US) over a high-RTT link — each round trip
+    // costs ~1s warm / ~3s cold. A longer staleTime lets in-session navigation
+    // reuse cached data instead of re-paying that latency on every page mount;
+    // mutations still invalidate explicitly, so freshness on writes is intact.
+    queries: { staleTime: 5 * 60_000, gcTime: 30 * 60_000, refetchOnWindowFocus: false, retry: 1 },
   },
 });
 
