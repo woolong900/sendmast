@@ -242,10 +242,11 @@ export class IntegrationsService {
     const items = SHOPYY_WEBHOOK_EVENTS.map((e) => {
       // Per-store opaque key authenticates inbound webhooks; topic is encoded so
       // the receiver knows the event without trusting shopyy's inbound shape.
+      // Store identity is read from the payload's `store_id` at receive time, so
+      // the URL only carries `key` (auth) + `topic` (which event fired).
       const url =
         `${ourPrefix}` +
-        `?store=${encodeURIComponent(conn.externalStoreId)}` +
-        `&key=${conn.webhookSecret}` +
+        `?key=${conn.webhookSecret}` +
         `&topic=${encodeURIComponent(e.topic)}`;
       const prior = existing.find(
         (w) => w.event_id === e.eventId && typeof w.url === 'string' && w.url.startsWith(ourPrefix),

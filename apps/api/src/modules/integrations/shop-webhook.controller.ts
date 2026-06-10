@@ -36,7 +36,6 @@ export class ShopWebhookController {
   @Post('shopyy')
   @HttpCode(200)
   async shopyy(
-    @Query('store') store: string | undefined,
     @Query('key') key: string | undefined,
     @Query('challenge') challenge: string | undefined,
     @Query('topic') topicQuery: string | undefined,
@@ -46,6 +45,11 @@ export class ShopWebhookController {
     // Some providers verify a webhook by expecting the challenge echoed back.
     if (challenge) return { challenge };
 
+    // Store identity comes from the payload (`store_id`) rather than a URL param.
+    // It's only routing — the per-store `?key=` below is what authenticates, so a
+    // forged store_id without the matching secret is dropped.
+    const storeIdRaw = body?.store_id ?? body?.storeId;
+    const store = storeIdRaw != null ? String(storeIdRaw) : undefined;
     if (!store || !key) return { accepted: false };
 
     const conn = await this.prisma.shopConnection.findUnique({
