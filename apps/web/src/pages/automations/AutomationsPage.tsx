@@ -90,11 +90,7 @@ export function AutomationsPage() {
         </div>
       )}
 
-      {isLoading && (
-        <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">加载中...</CardContent>
-        </Card>
-      )}
+      {isLoading && <AutomationLoading />}
 
       {!isLoading && active.length === 0 && (
         <Card>
@@ -174,7 +170,7 @@ function FlowList({
   }, [domains.data]);
 
   if (automations.isLoading) {
-    return <p className="text-sm text-muted-foreground">加载自动化流程...</p>;
+    return <AutomationLoading />;
   }
 
   const flows = automations.data ?? [];
@@ -227,6 +223,10 @@ function FlowList({
       </div>
     </div>
   );
+}
+
+function AutomationLoading() {
+  return <p className="min-h-6 text-sm text-muted-foreground">加载自动化流程...</p>;
 }
 
 function formatMoney(v: number, currency: string): string {
