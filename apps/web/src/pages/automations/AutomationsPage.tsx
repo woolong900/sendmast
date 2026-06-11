@@ -13,7 +13,6 @@ import {
   Plus,
   Trash2,
   Clock,
-  Workflow,
 } from 'lucide-react';
 import { type IEmailTemplate } from 'easy-email-editor';
 import { Button } from '@/components/ui/button';
@@ -28,7 +27,6 @@ import {
   SHOP_AUTOMATION_LABELS,
   MAX_ABANDONED_ROUNDS,
   type CouponDiscountKind,
-  type FlowStatsView,
   type ShopAutomationType,
   type ShopAutomationView,
   type ShopConnectionView,
@@ -76,16 +74,11 @@ export function AutomationsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-3">
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
-          <Workflow className="size-5" />
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold sm:text-2xl">自动化</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            为店铺事件配置自动化邮件流程：买家下单、支付、发货时自动触发，无需手动发送。
-          </p>
-        </div>
+      <div>
+        <h1 className="text-xl font-semibold">自动化</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          为店铺事件配置自动化邮件流程：买家下单、支付、发货时自动触发，无需手动发送。
+        </p>
       </div>
 
       {isLoading && (
@@ -162,7 +155,6 @@ function FlowList({ connectionId }: { connectionId: string }) {
   }
 
   const flows = automations.data ?? [];
-  const enabledCount = flows.filter((a) => a.enabled).length;
   const editing = editingType ? flows.find((a) => a.type === editingType) : null;
 
   if (editing) {
@@ -183,57 +175,33 @@ function FlowList({ connectionId }: { connectionId: string }) {
           尚无已验证的发件邮箱，启用流程前请先在「发件域名」中完成验证。
         </p>
       )}
-      <Card>
-        <CardContent className="p-5">
-          <div className="grid grid-cols-3 divide-x divide-border text-center">
-            <SummaryStat label="流程" value={String(flows.length)} />
-            <SummaryStat label="已启用" value={String(enabledCount)} highlight />
-            <SummaryStat
-              label="近 30 日发送"
-              value={formatNumber(flows.reduce((sum, a) => sum + a.stats.sent, 0))}
-            />
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between border-b px-5 py-4">
-            <h2 className="text-base font-semibold">店铺自动化</h2>
-            <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
-              {flows.length} 个流程
-            </span>
-          </div>
-          <div className="divide-y divide-border">
-            {flows.map((a) => (
-              <FlowSummaryRow
-                key={a.id}
-                connectionId={connectionId}
-                automation={a}
-                onEdit={() => setEditingType(a.type)}
-              />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-function SummaryStat({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div>
-      <div className={cn('text-2xl font-semibold tabular-nums', highlight && 'text-emerald-600')}>
-        {value}
+      <div className="overflow-hidden rounded-lg border bg-card">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead>
+              <tr className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-6 py-3 text-left font-medium">名称</th>
+                <th className="px-6 py-3 text-left font-medium">状态</th>
+                <th className="px-6 py-3 text-right font-medium">已发送</th>
+                <th className="px-6 py-3 text-right font-medium">打开率</th>
+                <th className="px-6 py-3 text-right font-medium">点击率</th>
+                <th className="px-6 py-3 text-right font-medium">销售额</th>
+                <th className="px-6 py-3 text-right font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flows.map((a) => (
+                <FlowTableRow
+                  key={a.id}
+                  connectionId={connectionId}
+                  automation={a}
+                  onEdit={() => setEditingType(a.type)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <div className="mt-1 text-xs text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -249,34 +217,6 @@ function formatMoney(v: number, currency: string): string {
   } catch {
     return `${currency} ${Math.round(v)}`;
   }
-}
-
-function FlowStats({ stats }: { stats: FlowStatsView }) {
-  const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 1000) / 10}%` : '—');
-  const items = [
-    { label: '已发送', value: String(stats.sent) },
-    { label: '送达', value: String(stats.delivered) },
-    { label: '打开率', value: pct(stats.opened, stats.delivered || stats.sent) },
-    { label: '点击率', value: pct(stats.clicked, stats.delivered || stats.sent) },
-    { label: '销售额', value: formatMoney(stats.revenue, stats.currency), highlight: true },
-  ];
-  return (
-    <div className="grid grid-cols-5 border-y border-border">
-      {items.map((it, i) => (
-        <div key={it.label} className={cn('py-4 text-center', i > 0 && 'border-l border-border')}>
-          <div
-            className={cn(
-              'text-xl font-semibold tabular-nums tracking-tight',
-              it.highlight && 'text-emerald-600',
-            )}
-          >
-            {it.value}
-          </div>
-          <div className="mt-1 text-[11px] font-medium text-muted-foreground">{it.label}</div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 /** Inline email content edited per flow / per recovery round. */
@@ -506,7 +446,7 @@ function initialRounds(a: ShopAutomationView): Round[] {
   ];
 }
 
-function FlowSummaryRow({
+function FlowTableRow({
   connectionId,
   automation,
   onEdit,
@@ -535,10 +475,14 @@ function FlowSummaryRow({
     onError: (err) => toast(apiErrMessage(err), 'error'),
   });
 
+  const s = automation.stats;
+  const denom = s.delivered || s.sent;
+  const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 1000) / 10}%` : '—');
+
   return (
-    <div className="p-4 sm:p-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
+    <tr className="border-b last:border-b-0">
+      <td className="px-6 py-4 align-middle">
+        <div className="flex items-center gap-3">
           <div
             className={cn(
               'flex size-9 shrink-0 items-center justify-center rounded-lg',
@@ -547,22 +491,42 @@ function FlowSummaryRow({
           >
             <Icon className="size-4" />
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold">{SHOP_AUTOMATION_LABELS[automation.type]}</h3>
-              {automation.enabled ? (
-                <Badge variant="success">已启用</Badge>
-              ) : configured ? (
-                <Badge variant="muted">已关闭</Badge>
-              ) : (
-                <Badge variant="warning">待配置</Badge>
-              )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-foreground">
+                {SHOP_AUTOMATION_LABELS[automation.type]}
+              </span>
               {isAbandoned && <Badge variant="muted">{automation.steps.length || 1} 轮</Badge>}
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">{TRIGGERS[automation.type]}</p>
+            <div className="mt-0.5 text-xs text-muted-foreground line-clamp-1">
+              {TRIGGERS[automation.type]}
+            </div>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
+      </td>
+      <td className="px-6 py-4 align-middle">
+        {automation.enabled ? (
+          <Badge variant="success">已启用</Badge>
+        ) : configured ? (
+          <Badge variant="muted">已关闭</Badge>
+        ) : (
+          <Badge variant="warning">待配置</Badge>
+        )}
+      </td>
+      <td className="px-6 py-4 align-middle text-right tabular-nums text-muted-foreground">
+        {formatNumber(s.sent)}
+      </td>
+      <td className="px-6 py-4 align-middle text-right tabular-nums text-muted-foreground">
+        {pct(s.opened, denom)}
+      </td>
+      <td className="px-6 py-4 align-middle text-right tabular-nums text-muted-foreground">
+        {pct(s.clicked, denom)}
+      </td>
+      <td className="px-6 py-4 align-middle text-right tabular-nums font-medium text-emerald-600">
+        {formatMoney(s.revenue, s.currency)}
+      </td>
+      <td className="px-6 py-4 align-middle">
+        <div className="flex items-center justify-end gap-3">
           <Switch
             checked={automation.enabled}
             onCheckedChange={(next) => toggle.mutate(next)}
@@ -572,9 +536,8 @@ function FlowSummaryRow({
             {configured ? '编辑' : '配置'}
           </Button>
         </div>
-      </div>
-      <FlowStats stats={automation.stats} />
-    </div>
+      </td>
+    </tr>
   );
 }
 
