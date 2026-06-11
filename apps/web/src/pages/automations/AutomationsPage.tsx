@@ -27,6 +27,7 @@ import {
   SHOP_AUTOMATION_LABELS,
   SHOP_AUTOMATION_DEFAULT_SUBJECT,
   SHOP_AUTOMATION_DEFAULT_PREHEADER,
+  abandonedRoundDefault,
   MAX_ABANDONED_ROUNDS,
   type CouponDiscountKind,
   type ShopAutomationType,
@@ -438,13 +439,13 @@ function DelayField({
 /** Initial rounds for abandoned_cart: stored steps, else a single default. */
 function initialRounds(a: ShopAutomationView): Round[] {
   if (a.steps.length) {
-    return a.steps.map((s) => ({
+    return a.steps.map((s, idx) => ({
       html: s.html,
       mjml: null,
       designJson: (s.designJson as IEmailTemplate | null) ?? null,
       thumbnail: s.thumbnail,
-      preheader: s.preheader || SHOP_AUTOMATION_DEFAULT_PREHEADER.abandoned_cart,
-      subject: s.subject || SHOP_AUTOMATION_DEFAULT_SUBJECT.abandoned_cart,
+      preheader: s.preheader || abandonedRoundDefault(idx + 1).preheader,
+      subject: s.subject || abandonedRoundDefault(idx + 1).subject,
       couponCode: s.couponCode ?? '',
       couponDiscountKind: s.couponDiscountKind,
       couponDiscountValue: s.couponDiscountValue,
@@ -457,8 +458,8 @@ function initialRounds(a: ShopAutomationView): Round[] {
       mjml: null,
       designJson: (a.designJson as IEmailTemplate | null) ?? null,
       thumbnail: a.thumbnail,
-      preheader: a.preheader || SHOP_AUTOMATION_DEFAULT_PREHEADER.abandoned_cart,
-      subject: a.subject || SHOP_AUTOMATION_DEFAULT_SUBJECT.abandoned_cart,
+      preheader: a.preheader || abandonedRoundDefault(1).preheader,
+      subject: a.subject || abandonedRoundDefault(1).subject,
       couponCode: '',
       couponDiscountKind: null,
       couponDiscountValue: null,
@@ -636,8 +637,9 @@ function FlowEditor({
           mjml: prev?.mjml ?? null,
           designJson: prev?.designJson ?? null,
           thumbnail: prev?.thumbnail ?? null,
-          preheader: prev?.preheader || SHOP_AUTOMATION_DEFAULT_PREHEADER.abandoned_cart,
-          subject: prev?.subject || SHOP_AUTOMATION_DEFAULT_SUBJECT.abandoned_cart,
+          // Subject/preview default to this round's own escalating copy.
+          preheader: abandonedRoundDefault(rs.length + 1).preheader,
+          subject: abandonedRoundDefault(rs.length + 1).subject,
           couponCode: '',
           couponDiscountKind: null,
           couponDiscountValue: null,

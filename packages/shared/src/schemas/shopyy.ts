@@ -29,12 +29,13 @@ export const SHOP_AUTOMATION_LABELS: Record<ShopAutomationType, string> = {
 /**
  * Default email subject per automation, used when the merchant leaves the
  * subject blank. Shown pre-filled in the editor and used as the send-time
- * fallback (worker `DEFAULT_SUBJECT`).
+ * fallback (worker `DEFAULT_SUBJECT`). For abandoned_cart this is only a
+ * generic fallback — per-round defaults live in `ABANDONED_CART_DEFAULT_ROUNDS`.
  */
 export const SHOP_AUTOMATION_DEFAULT_SUBJECT: Record<ShopAutomationType, string> = {
   order_paid: 'Your order is confirmed',
   order_shipped: 'Your order has shipped',
-  abandoned_cart: 'Complete your purchase',
+  abandoned_cart: 'Did you forget something?',
 };
 
 /**
@@ -44,8 +45,33 @@ export const SHOP_AUTOMATION_DEFAULT_SUBJECT: Record<ShopAutomationType, string>
 export const SHOP_AUTOMATION_DEFAULT_PREHEADER: Record<ShopAutomationType, string> = {
   order_paid: 'Thanks for your order — here are the details.',
   order_shipped: 'Your package is on the way — track your delivery.',
-  abandoned_cart: 'You left something behind — complete your purchase.',
+  abandoned_cart: 'Are you still interested in these items?',
 };
+
+/**
+ * Per-round default subject/preview for abandoned-cart recovery (1-based round
+ * → entry). Each escalating round nudges harder. Used to pre-fill the editor
+ * and as the send-time fallback when a round leaves its fields blank.
+ */
+export const ABANDONED_CART_DEFAULT_ROUNDS: ReadonlyArray<{
+  subject: string;
+  preheader: string;
+}> = [
+  { subject: 'Did you forget something?', preheader: 'Are you still interested in these items?' },
+  { subject: 'Your items are waiting for you', preheader: 'Complete your purchase' },
+  { subject: "Finish your order before it's gone!", preheader: "Let's complete your order!" },
+  {
+    subject: 'Items in your cart are selling out fast!',
+    preheader: 'Complete your purchase',
+  },
+  { subject: 'Your cart misses you!', preheader: 'You still have items left in your cart' },
+];
+
+/** Resolve a 1-based recovery round's default subject/preview (clamped to range). */
+export function abandonedRoundDefault(round: number): { subject: string; preheader: string } {
+  const i = Math.min(Math.max(round, 1), ABANDONED_CART_DEFAULT_ROUNDS.length) - 1;
+  return ABANDONED_CART_DEFAULT_ROUNDS[i]!;
+}
 
 /**
  * Body the SPA posts after shopyy redirects the merchant back to our

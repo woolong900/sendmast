@@ -4,6 +4,7 @@ import type { Queue } from 'bullmq';
 import {
   SHOP_AUTOMATION_DEFAULT_SUBJECT,
   SHOP_AUTOMATION_DEFAULT_PREHEADER,
+  abandonedRoundDefault,
 } from '@sendmast/shared';
 import { enqueueTransactional, formatMoney } from './transactional.js';
 import { mapLineItems, type LineItem } from './mapper.js';
@@ -617,8 +618,9 @@ export async function runAbandonedFromOrder(
   };
 
   const fromName = a.fromName ?? a.fromEmail.split('@')[0] ?? 'Store';
-  const subject = job.subject?.trim() || a.subject?.trim() || DEFAULT_SUBJECT.abandoned_cart;
-  const effectivePreheader = preheader?.trim() || DEFAULT_PREHEADER.abandoned_cart;
+  const roundDefault = abandonedRoundDefault(round);
+  const subject = job.subject?.trim() || a.subject?.trim() || roundDefault.subject;
+  const effectivePreheader = preheader?.trim() || roundDefault.preheader;
 
   await enqueueTransactional(deps, {
     accountId: job.accountId,
