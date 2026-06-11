@@ -69,6 +69,7 @@ export function AutomationsPage() {
   const { data, isLoading } = useQuery<ShopConnectionsResponse>({
     queryKey: ['shop-connections'],
     queryFn: async () => (await api.get('/api/integrations/shopyy')).data,
+    refetchOnMount: 'always',
   });
 
   const active = (data?.connections ?? []).filter((c) => c.status === 'active');

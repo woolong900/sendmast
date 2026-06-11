@@ -31,6 +31,9 @@ export function ShopConnectionsPage() {
   const { data, isLoading } = useQuery<ShopConnectionsResponse>({
     queryKey: ['shop-connections'],
     queryFn: async () => (await api.get('/api/integrations/shopyy')).data,
+    // OAuth re-bind happens outside this page; always revalidate on mount so a
+    // persisted revoked snapshot doesn't mask a fresh active connection.
+    refetchOnMount: 'always',
   });
 
   const disconnectMut = useMutation({
