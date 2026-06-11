@@ -15,11 +15,15 @@
 # Override via env vars:
 #   BASE_URL=http://localhost:3000 ./fire.sh create
 #   KEY=... STORE_ID=... ./fire.sh
+#   # Attribution test: inject a real shop_automation_sends.id as sm_mid into
+#   # the order's landing_page so the paid event attributes to that flow send.
+#   SM_MID=7d328004-c3dc-4958-8be9-371305f6866d ./fire.sh paid
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-https://app.sendmast.com}"
 KEY="${KEY:-981863c1fdbbc0e25f7261d2517ccc6c9b47c6a15b8b76c1}"
 STORE_ID="${STORE_ID:-52051}"
+SM_MID="${SM_MID:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PAYLOAD_DIR="$SCRIPT_DIR/payloads"
@@ -50,14 +54,21 @@ fire() {
   local new_id="$(date +%s)$(printf '%02d' $((RANDOM % 100)))"
   local order_no="${STORE_ID}-${new_id}"
 
+  # When SM_MID is set, rewrite landing_page so it carries ?sm_mid=<send id>.
+  # Attribution reads exactly this param off the order's landing_page.
+  local landing="https://example-store.com/checkout?sm_mid=$SM_MID"
+
   local body
   body="$(jq \
     --argjson sid "$STORE_ID" \
     --arg oid "$new_id" \
-    --arg ono "$order_no" '
+    --arg ono "$order_no" \
+    --arg mid "$SM_MID" \
+    --arg lp "$landing" '
       .store_id = $sid
       | .id = ($oid | tonumber)
       | .order_number = $ono
+      | (if $mid != "" then .landing_page = $lp else . end)
       | (if (.products | type) == "array" then .products |= map(.order_id = ($oid | tonumber) | .store_id = $sid) else . end)
       | (if (.shipping_zone_plans | type) == "array" then .shipping_zone_plans |= map(.order_id = ($oid | tonumber) | .store_id = $sid) else . end)
       | (if (.fulfillment_products | type) == "array" then .fulfillment_products |= map(.order_id = ($oid | tonumber) | .store_id = $sid) else . end)
@@ -65,6 +76,7 @@ fire() {
 
   local url="$ENDPOINT?key=$KEY&topic=$topic"
   echo "==> $event  topic=$topic  store_id=$STORE_ID  id=$new_id"
+  [[ -n "$SM_MID" ]] && echo "    sm_mid=$SM_MID  landing_page=$landing"
   echo "    POST $url"
   curl -sS -i -X POST "$url" \
     -H 'Content-Type: application/json' \

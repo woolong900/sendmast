@@ -84,26 +84,28 @@ export class DashboardService {
   }
 
   /**
-   * Email-attributed sales over the last 30 days (orders with a non-null
-   * attributed_campaign_id). Returns zeros on CH outage / no shop.
+   * Email-attributed sales over the last 30 days — orders attributed to either
+   * a campaign (last-click) OR a flow/automation (hard sm_mid attribution).
+   * Read from Postgres shop_orders, which is the source of truth for both
+   * attribution kinds (ClickHouse orders carries campaign attribution only).
+   * Returns zeros on error so the dashboard still renders.
    */
   private async querySales30d(
     accountId: string,
     since: Date,
   ): Promise<{ revenue: number; orders: number; aov: number }> {
     try {
-      const rows = await this.ch.query<{ orders: string; revenue: string }>(
-        `SELECT toString(count()) AS orders,
-                toString(toFloat64(sum(value))) AS revenue
-         FROM sendmast.orders FINAL
-         WHERE account_id = {aid:UUID}
-           AND attributed_campaign_id IS NOT NULL
-           AND order_time >= {since:DateTime64(3)}`,
-        { aid: accountId, since: since.toISOString().replace('T', ' ').replace('Z', '') },
-      );
-      const r = rows[0];
-      const orders = Number(r?.orders ?? 0);
-      const revenue = Number(r?.revenue ?? 0);
+      const agg = await this.prisma.shopOrder.aggregate({
+        where: {
+          accountId,
+          orderTime: { gte: since },
+          OR: [{ attributedCampaignId: { not: null } }, { attributedAutomationId: { not: null } }],
+        },
+        _count: { _all: true },
+        _sum: { value: true },
+      });
+      const orders = agg._count._all;
+      const revenue = Number(agg._sum.value ?? 0);
       return { orders, revenue, aov: orders > 0 ? revenue / orders : 0 };
     } catch (err) {
       console.warn('Dashboard 30d sales query failed:', err);
