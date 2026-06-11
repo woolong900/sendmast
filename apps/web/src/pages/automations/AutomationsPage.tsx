@@ -194,39 +194,53 @@ function FlowList({
           尚无已验证的发件邮箱，启用流程前请先在「发件域名」中完成验证。
         </p>
       )}
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-6 py-3 text-left font-medium">名称</th>
-                <th className="px-6 py-3 text-left font-medium">状态</th>
-                <th className="px-6 py-3 text-right font-medium">已发送</th>
-                <th className="px-6 py-3 text-right font-medium">打开率</th>
-                <th className="px-6 py-3 text-right font-medium">点击率</th>
-                <th className="px-6 py-3 text-right font-medium">销售额</th>
-                <th className="px-6 py-3 text-right font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {flows.map((a) => (
-                <FlowTableRow
-                  key={a.id}
-                  connectionId={connectionId}
-                  automation={a}
-                  onEdit={() => setEditingType(a.type)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <AutomationTable>
+        {flows.map((a) => (
+          <FlowTableRow
+            key={a.id}
+            connectionId={connectionId}
+            automation={a}
+            onEdit={() => setEditingType(a.type)}
+          />
+        ))}
+      </AutomationTable>
     </div>
   );
 }
 
 function AutomationLoading() {
-  return <p className="min-h-6 text-sm text-muted-foreground">加载自动化流程...</p>;
+  return (
+    <AutomationTable>
+      <tr>
+        <td colSpan={7} className="px-6 py-10 text-center text-muted-foreground">
+          加载中...
+        </td>
+      </tr>
+    </AutomationTable>
+  );
+}
+
+function AutomationTable({ children }: { children: ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-lg border bg-card">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead>
+            <tr className="border-b bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+              <th className="px-6 py-3 text-left font-medium">名称</th>
+              <th className="px-6 py-3 text-left font-medium">状态</th>
+              <th className="px-6 py-3 text-right font-medium">已发送</th>
+              <th className="px-6 py-3 text-right font-medium">打开率</th>
+              <th className="px-6 py-3 text-right font-medium">点击率</th>
+              <th className="px-6 py-3 text-right font-medium">销售额</th>
+              <th className="px-6 py-3 text-right font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>{children}</tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 function formatMoney(v: number, currency: string): string {
