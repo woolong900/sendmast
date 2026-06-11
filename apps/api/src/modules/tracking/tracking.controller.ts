@@ -1,14 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpStatus,
-  Param,
-  Query,
-  Req,
-  Res,
-  Post,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpStatus, Param, Query, Req, Res, Post } from '@nestjs/common';
 import { ApiTags, ApiExcludeEndpoint } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { TRANSPARENT_GIF } from '@sendmast/email-tracking';
@@ -102,7 +92,8 @@ export class TrackingController {
       // POSTs (no reason field) returning a plain status is fine — the email
       // client doesn't render the body.
       const acceptHtml = (req.headers['accept'] ?? '').toString().includes('text/html');
-      if (acceptHtml) res.status(400).send(htmlPage('This unsubscribe link is invalid or expired.'));
+      if (acceptHtml)
+        res.status(400).send(htmlPage('This unsubscribe link is invalid or expired.'));
       else res.status(400).end();
       return;
     }
@@ -110,10 +101,7 @@ export class TrackingController {
     // The "Other" radio sends the literal value "Other" alongside
     // `reason_other` textbox content; collapse to the textbox value when present.
     const raw = body?.reason ?? '';
-    const reason =
-      raw === 'Other'
-        ? (body?.reason_other ?? '').trim()
-        : raw.trim();
+    const reason = raw === 'Other' ? (body?.reason_other ?? '').trim() : raw.trim();
 
     const result = await this.svc.unsubscribeByToken(payload, reason || undefined);
 
@@ -137,8 +125,7 @@ export class TrackingController {
 }
 
 function clientIp(req: Request): string | undefined {
-  const xff = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
-  return xff || req.ip;
+  return req.ip;
 }
 
 function htmlPage(msg: string): string {
@@ -198,5 +185,8 @@ function unsubscribeFormPage(token: string): string {
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
 }

@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Post, Query, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+  BadRequestException,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
@@ -87,11 +96,7 @@ export class AuthController {
   @Throttle({ default: { ttl: 60_000, limit: 3 } })
   async forgotPassword(@Body() body: unknown, @Req() req: Request) {
     const input = parse(ForgotPasswordSchema, body) as ForgotPasswordInput;
-    await this.auth.requestPasswordReset(
-      input.email,
-      req.headers['user-agent'],
-      requestIp(req),
-    );
+    await this.auth.requestPasswordReset(input.email, req.headers['user-agent'], requestIp(req));
     return { ok: true };
   }
 
@@ -136,11 +141,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { ttl: 60_000, limit: 3 } })
   async resendActivation(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
-    await this.auth.resendActivation(
-      user.userId,
-      req.headers['user-agent'],
-      requestIp(req),
-    );
+    await this.auth.resendActivation(user.userId, req.headers['user-agent'], requestIp(req));
     return { ok: true };
   }
 
@@ -155,15 +156,20 @@ export class AuthController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   async endImpersonation(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
-    return this.auth.endImpersonate(
-      user.userId,
-      req.headers['user-agent'],
-      requestIp(req),
-    );
+    return this.auth.endImpersonate(user.userId, req.headers['user-agent'], requestIp(req));
   }
 }
 
-function parse<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?: T; error?: { errors: Array<{ path: (string | number)[]; message: string }> } } }, value: unknown): T {
+function parse<T>(
+  schema: {
+    safeParse: (v: unknown) => {
+      success: boolean;
+      data?: T;
+      error?: { errors: Array<{ path: (string | number)[]; message: string }> };
+    };
+  },
+  value: unknown,
+): T {
   const result = schema.safeParse(value);
   if (!result.success) {
     const msg = result.error?.errors
@@ -175,6 +181,5 @@ function parse<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?
 }
 
 function requestIp(req: Request): string | undefined {
-  const xff = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim();
-  return xff || req.ip;
+  return req.ip;
 }

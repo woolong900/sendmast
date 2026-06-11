@@ -5,6 +5,7 @@ import {
   HttpCode,
   Post,
   Query,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -48,11 +49,13 @@ export class WebhookController {
    * this, anyone could POST forged delivery/bounce/complaint events and skew
    * analytics or trip hard-bounce suppression on real contacts. The handshake
    * (SubscriptionValidation) also carries the key, so validation still passes.
-   * When the env var is unset we accept (backward compatible) — set it in prod.
+   * Production config validation also refuses to boot without this secret.
    */
   private assertAuthorized(key: string | undefined): void {
     const expected = this.config.get<string>('EVENTGRID_WEBHOOK_KEY');
-    if (!expected) return;
+    if (!expected) {
+      throw new ServiceUnavailableException('webhook authentication is not configured');
+    }
     const given = Buffer.from(key ?? '');
     const want = Buffer.from(expected);
     if (given.length !== want.length || !timingSafeEqual(given, want)) {

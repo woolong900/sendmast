@@ -3,15 +3,22 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger, RequestMethod } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { json, urlencoded } from 'express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
+
+  // The API is only reachable through the single Caddy container in
+  // production. Trust exactly that first proxy hop so Express/Throttler use
+  // the real client IP from X-Forwarded-For instead of grouping every user
+  // under Caddy's internal Docker address.
+  app.set('trust proxy', 1);
 
   app.setGlobalPrefix('api', {
     exclude: [

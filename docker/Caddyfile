@@ -128,6 +128,10 @@ api.sendmast.com {
 	# MinIO; MinIO resolves the bucket name from the path. URLs stay
 	# port-less and origin-relative (Easy Email's canvas inline-style
 	# parser breaks on URLs containing `:port`, see vite.config.ts).
+	# SVG is intentionally blocked even for legacy uploads: active SVG content
+	# on the app origin could execute script and read persisted auth tokens.
+	@publicSvg path_regexp publicSvg ^/sendmast-public/.*\.svg$
+	respond @publicSvg 404
 	handle /sendmast-public/* {
 		reverse_proxy minio:9000
 	}
