@@ -241,12 +241,15 @@ export type ShopEventTopic =
   | 'order_paid'
   | 'order_shipped'
   | 'checkout_abandoned'
-  | 'order_created';
+  | 'order_created'
+  | 'customer_created';
 
 /** Map a raw provider topic string to our normalised topic (null = ignore). */
 export function normalizeShopTopic(raw: string | undefined | null): ShopEventTopic | null {
   if (!raw) return null;
   const t = raw.toLowerCase().replace(/[\s./-]+/g, '_');
+  // `customers/create` — the only customer event we subscribe to.
+  if (t.includes('customer')) return 'customer_created';
   if (t.includes('paid') || t.includes('pay')) return 'order_paid';
   if (t.includes('ship') || t.includes('fulfill') || t.includes('deliver'))
     return 'order_shipped';
@@ -264,6 +267,16 @@ export interface ShopEventJob {
   topic: ShopEventTopic;
   payload: Record<string, unknown>;
   receivedAt: string;
+}
+
+/**
+ * BullMQ job payload for the `shop-sync` queue. Enqueued once per successful
+ * store bind: worker-shop-sync pages the store's full customer base into the
+ * connection's 店铺客户 list and backfills all paid orders into shop_orders.
+ */
+export interface ShopSyncJob {
+  connectionId: string;
+  accountId: string;
 }
 
 /** Sales rollup for a campaign / dashboard (revenue attributed to email). */

@@ -108,7 +108,9 @@ export function mapBuyerName(payload: Json): { firstName?: string; lastName?: st
     asObject(o.address) ??
     asObject(o.delivery_address) ??
     asObject(o.consignee) ??
-    asObject(o.receiver);
+    asObject(o.receiver) ??
+    // `GET /orders` rows carry the buyer name on billing_address (verified live).
+    asObject(o.billing_address);
   const customer = asObject(o.customer) ?? asObject(o.buyer) ?? asObject(o.contact);
 
   for (const c of [o, address, customer]) {
@@ -335,6 +337,79 @@ export function mapLineItems(payload: Json): LineItem[] {
     });
   }
   return items;
+}
+
+/**
+ * Whether an order payload represents a PAID order. Confirmed against live
+ * shopyy payloads: `pay_at` is a Unix-seconds timestamp when paid and `0` when
+ * not; `financial_status` is `230` paid vs `200` unpaid. Falls back to a
+ * Shopify-style string match for unknown shapes.
+ */
+export function isPaidOrderPayload(payload: Json): boolean {
+  const o = unwrap(payload, ['order', 'data', 'resource']);
+  const payAt = pickNum(o, ['pay_at', 'paid_at', 'paidAt']);
+  if (payAt !== undefined) return payAt > 0;
+  const fin = o['financial_status'];
+  if (typeof fin === 'number') return fin >= 230;
+  const status = pickStr(o, ['financial_status', 'pay_status', 'status']);
+  return status ? /paid/i.test(status) : false;
+}
+
+export interface NormalizedCustomer {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  /** Normalised to 'male' / 'female'; absent when the store reports 0/unknown. */
+  gender?: string;
+  /** English country name (e.g. "China") — matches the free-form Contact.country. */
+  country?: string;
+  birthday?: Date;
+}
+
+/**
+ * Map a `customers/create` webhook payload (or a `GET /customers/list` row —
+ * shape verified live) to the contact fields we keep. Same candidate-field
+ * philosophy as {@link mapOrder}. Verified row shape: `email`, `first_name` /
+ * `last_name` (may be empty strings), `contact` (phone), `gender` (0 = unset,
+ * 1/2 = male/female), `birthday` (Unix seconds, 0 = unset), and a nested
+ * `country: { country_name, country_code2, chinese_name }`.
+ */
+export function mapCustomer(payload: Json): NormalizedCustomer | null {
+  const c = unwrap(payload, ['customer', 'data', 'resource']);
+  const email = pickEmail(c) ?? pickEmail(payload);
+  if (!email) return null;
+
+  let firstName = pickStr(c, ['first_name', 'firstName', 'given_name', 'givenName']);
+  let lastName = pickStr(c, ['last_name', 'lastName', 'family_name', 'familyName', 'surname']);
+  if (!firstName && !lastName) {
+    const full = pickStr(c, ['name', 'full_name', 'fullName', 'customer_name', 'nickname']);
+    if (full) ({ firstName, lastName } = splitFullName(full));
+  }
+
+  const countryObj = asObject(c.country);
+  const country = countryObj
+    ? pickStr(countryObj, ['country_name', 'chinese_name', 'country_code2'])
+    : pickStr(c, ['country', 'country_name', 'country_code']);
+
+  const genderNum = pickNum(c, ['gender']);
+  const gender = genderNum === 1 ? 'male' : genderNum === 2 ? 'female' : undefined;
+
+  const birthdayRaw = pickNum(c, ['birthday']);
+  const birthday =
+    birthdayRaw && birthdayRaw > 0
+      ? new Date(birthdayRaw < 1e12 ? birthdayRaw * 1000 : birthdayRaw)
+      : undefined;
+
+  return {
+    email,
+    firstName,
+    lastName,
+    phone: pickStr(c, ['contact', 'phone', 'mobile', 'tel']),
+    gender,
+    country,
+    birthday,
+  };
 }
 
 export interface NormalizedCheckout {

@@ -2,6 +2,7 @@ import { buildSignedQuery } from './sign.js';
 import type {
   ShopyyAuthorizeResult,
   ShopyyEnvelope,
+  ShopyyRawCustomer,
   ShopyyRawOrder,
 } from './types.js';
 
@@ -230,6 +231,62 @@ export class ShopyyClient {
     if (Array.isArray(data)) return data;
     return Array.isArray(data?.list) ? data.list : [];
   }
+
+  /**
+   * One page of the store's customers (`GET /customers/list`, verified live).
+   * Rows carry `email` / `first_name` / `last_name` etc.; field mapping lives
+   * in worker-shop-sync's field-mapper, like orders/checkouts.
+   */
+  listCustomers(query?: { page?: number; limit?: number }): Promise<ShopyyPage<ShopyyRawCustomer>> {
+    return this.getPage<ShopyyRawCustomer>('/customers/list', query);
+  }
+
+  /**
+   * One page of the store's orders (`GET /orders`, verified live). Rows have
+   * the same shape as order webhook payloads. `financialStatus` filters
+   * server-side; `230` = paid (`200` = unpaid).
+   */
+  listOrders(query?: {
+    page?: number;
+    limit?: number;
+    financialStatus?: number;
+  }): Promise<ShopyyPage<ShopyyRawOrder>> {
+    return this.getPage<ShopyyRawOrder>('/orders', {
+      page: query?.page,
+      limit: query?.limit,
+      financial_status: query?.financialStatus,
+    });
+  }
+
+  /**
+   * Fetch one page of a `{ list: [...], paginate: {...} }` endpoint (the
+   * verified live shape); also tolerates a bare array (no paginate object).
+   */
+  private async getPage<T>(
+    path: string,
+    query?: Record<string, string | number | undefined>,
+  ): Promise<ShopyyPage<T>> {
+    const data = await this.get<unknown>(path, query);
+    if (Array.isArray(data)) return { list: data as T[] };
+    const obj = data as { list?: T[]; paginate?: { pageTotal?: number; total?: number } } | null;
+    return {
+      list: Array.isArray(obj?.list) ? obj!.list! : [],
+      pageTotal: typeof obj?.paginate?.pageTotal === 'number' ? obj.paginate.pageTotal : undefined,
+      total: typeof obj?.paginate?.total === 'number' ? obj.paginate.total : undefined,
+    };
+  }
+}
+
+/** `financial_status` value for a paid order (verified against live data). */
+export const SHOPYY_FINANCIAL_STATUS_PAID = 230;
+
+/** One page of a paginated list endpoint. */
+export interface ShopyyPage<T> {
+  list: T[];
+  /** Total page count (`paginate.pageTotal`); undefined when not reported. */
+  pageTotal?: number;
+  /** Total row count (`paginate.total`); undefined when not reported. */
+  total?: number;
 }
 
 /** A coupon row as returned by `GET /coupons` (only fields we rely on). */

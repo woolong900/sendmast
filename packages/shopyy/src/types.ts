@@ -55,6 +55,7 @@ export interface ShopyyEnvelope<T = unknown> {
   trace_id?: string;
 }
 
-/** Permissive order/checkout payloads — mapped in worker-shop-sync. */
+/** Permissive order/checkout/customer payloads — mapped in worker-shop-sync. */
 export type ShopyyRawOrder = Record<string, unknown>;
 export type ShopyyRawCheckout = Record<string, unknown>;
+export type ShopyyRawCustomer = Record<string, unknown>;

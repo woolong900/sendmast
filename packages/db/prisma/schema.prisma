@@ -497,9 +497,10 @@ model ContactList {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  account     Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  memberships ContactListMembership[]
-  campaigns   CampaignList[]
+  account         Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  memberships     ContactListMembership[]
+  campaigns       CampaignList[]
+  shopConnections ShopConnection[]
 
   @@unique([accountId, name])
   @@index([accountId])
@@ -1070,10 +1071,14 @@ model ShopConnection {
   storeExpiredAt  DateTime?            @map("store_expired_at")
   connectedAt     DateTime             @default(now()) @map("connected_at")
   lastSyncAt      DateTime?            @map("last_sync_at")
+  /// Auto-created "店铺客户" list this store's customers are funnelled into
+  /// (customers/create + order webhooks + initial full sync).
+  customerListId  String?              @map("customer_list_id") @db.Uuid
   createdAt       DateTime             @default(now()) @map("created_at")
   updatedAt       DateTime             @updatedAt @map("updated_at")
 
   account            Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  customerList       ContactList?            @relation(fields: [customerListId], references: [id], onDelete: SetNull)
   orders             ShopOrder[]
   automations        ShopAutomation[]
   abandonedCheckouts ShopAbandonedCheckout[]

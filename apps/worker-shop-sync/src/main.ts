@@ -9,8 +9,20 @@ import {
   insertOrders,
   toClickHouseDateTime,
 } from '@sendmast/clickhouse';
-import { QUEUE_NAMES, type ShopEventJob } from '@sendmast/shared';
-import { mapCheckout, mapLineItems, mapOrder, mapShippingAddressLines } from './mapper.js';
+import { QUEUE_NAMES, type ShopEventJob, type ShopSyncJob } from '@sendmast/shared';
+import {
+  SHOPYY_FINANCIAL_STATUS_PAID,
+  ShopyyClient,
+  type ShopyyPage,
+} from '@sendmast/shopyy';
+import {
+  isPaidOrderPayload,
+  mapCheckout,
+  mapCustomer,
+  mapLineItems,
+  mapOrder,
+  mapShippingAddressLines,
+} from './mapper.js';
 import {
   runAbandonedFromOrder,
   runAbandonedRecovery,
@@ -108,25 +120,36 @@ async function resolveCampaignAttribution(
 
 /**
  * Upsert a contact by (accountId, email); shopyy buyers source = 'shopyy'.
- * Refreshes firstName/lastName from the latest order payload on every event so
- * `{{full_name}}`/`{{first_name}}` render the real recipient (else the system
- * tag falls back to the email local-part). Only writes name fields that are
- * actually present so a name-less payload never wipes an existing name.
+ * Refreshes the profile fields from the latest payload on every event so
+ * `{{full_name}}`/`{{first_name}}` render the real recipient and segment
+ * attribute rules (country etc.) have data to match. Only writes fields that
+ * are actually present so a sparse payload never wipes existing values.
  */
 async function upsertContact(
   accountId: string,
   email: string,
-  name?: { firstName?: string; lastName?: string },
+  attrs?: {
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+    gender?: string;
+    country?: string;
+    birthday?: Date;
+  },
 ): Promise<string> {
   const normalized = email.toLowerCase().trim();
-  const nameData = {
-    ...(name?.firstName ? { firstName: name.firstName } : {}),
-    ...(name?.lastName ? { lastName: name.lastName } : {}),
+  const data = {
+    ...(attrs?.firstName ? { firstName: attrs.firstName } : {}),
+    ...(attrs?.lastName ? { lastName: attrs.lastName } : {}),
+    ...(attrs?.phone ? { phone: attrs.phone } : {}),
+    ...(attrs?.gender ? { gender: attrs.gender } : {}),
+    ...(attrs?.country ? { country: attrs.country } : {}),
+    ...(attrs?.birthday ? { birthday: attrs.birthday } : {}),
   };
   const row = await prisma.contact.upsert({
     where: { accountId_email: { accountId, email: normalized } },
-    update: nameData,
-    create: { accountId, email: normalized, source: 'shopyy', ...nameData },
+    update: data,
+    create: { accountId, email: normalized, source: 'shopyy', ...data },
     select: { id: true },
   });
   return row.id;
@@ -136,6 +159,39 @@ async function touchSync(connectionId: string): Promise<void> {
   await prisma.shopConnection
     .update({ where: { id: connectionId }, data: { lastSyncAt: new Date() } })
     .catch(() => undefined);
+}
+
+/** The connection's auto-created 店铺客户 list id (null when never provisioned). */
+async function customerListIdOf(connectionId: string): Promise<string | null> {
+  const conn = await prisma.shopConnection.findUnique({
+    where: { id: connectionId },
+    select: { customerListId: true },
+  });
+  return conn?.customerListId ?? null;
+}
+
+/**
+ * Add contacts to the store's 店铺客户 list. `skipDuplicates` makes the add
+ * idempotent — contacts already in the list are skipped, per the spec.
+ */
+async function addToCustomerList(listId: string | null, contactIds: string[]): Promise<void> {
+  if (!listId || contactIds.length === 0) return;
+  await prisma.contactListMembership.createMany({
+    data: contactIds.map((contactId) => ({ listId, contactId })),
+    skipDuplicates: true,
+  });
+}
+
+/** `customers/create`: upsert the contact and put it in the 店铺客户 list. */
+async function handleCustomerCreated(job: ShopEventJob): Promise<void> {
+  const customer = mapCustomer(job.payload);
+  if (!customer) {
+    console.warn(`[shop-sync] customer payload missing email (store conn ${job.connectionId})`);
+    return;
+  }
+  const contactId = await upsertContact(job.accountId, customer.email, customer);
+  await addToCustomerList(await customerListIdOf(job.connectionId), [contactId]);
+  await touchSync(job.connectionId);
 }
 
 async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
@@ -317,6 +373,11 @@ async function handleOrderCreated(job: ShopEventJob): Promise<void> {
     lastName: order.lastName,
   });
 
+  // The buyer belongs in the 店铺客户 list too (no-op when already a member).
+  await addToCustomerList(await customerListIdOf(job.connectionId), [contactId]).catch((e) =>
+    console.error('[shop-sync] customer-list add failed:', e),
+  );
+
   await prisma.shopOrder.upsert({
     where: {
       shopConnectionId_externalOrderId: {
@@ -429,6 +490,159 @@ async function handleAbandoned(job: ShopEventJob): Promise<void> {
   }
 }
 
+// ── Initial full store sync (enqueued once per successful bind) ─────────────
+
+const SYNC_PAGE_SIZE = 100;
+/** Hard cap so a misbehaving gateway can never loop us forever. */
+const SYNC_MAX_PAGES = 500;
+
+/**
+ * Page through a `{ list, paginate }` endpoint. Stops at `paginate.pageTotal`
+ * (the gateway reports it — verified live); falls back to the empty/short-page
+ * heuristic when a response carries no paginate object.
+ */
+async function* syncPages(
+  fetchPage: (page: number) => Promise<ShopyyPage<Record<string, unknown>>>,
+): AsyncGenerator<Record<string, unknown>[]> {
+  for (let page = 1; page <= SYNC_MAX_PAGES; page++) {
+    const { list, pageTotal } = await fetchPage(page);
+    if (list.length === 0) return;
+    yield list;
+    if (pageTotal !== undefined ? page >= pageTotal : list.length < SYNC_PAGE_SIZE) return;
+  }
+}
+
+/**
+ * Backfill after a store bind:
+ *  1. every store customer → contact + 店铺客户 list membership;
+ *  2. every PAID order → shop_orders (+ ClickHouse), so dynamic segments can
+ *     match customers who have already ordered.
+ * Everything is upsert/skipDuplicates-based, so re-binding just re-runs it.
+ * Each phase is isolated (a missing /customers scope must not block the order
+ * backfill); a failed phase rethrows at the end so BullMQ retries the job.
+ */
+async function runInitialSync(job: Job<ShopSyncJob>): Promise<void> {
+  const { connectionId, accountId } = job.data;
+  const conn = await prisma.shopConnection.findUnique({ where: { id: connectionId } });
+  if (!conn || conn.status !== 'active') return;
+  const client = new ShopyyClient({
+    openapiDomain: conn.openapiDomain,
+    token: conn.devToken,
+    partnerId: process.env.SHOPYY_PARTNER_ID,
+  });
+  const errors: unknown[] = [];
+
+  let customers = 0;
+  try {
+    for await (const batch of syncPages((page) =>
+      client.listCustomers({ page, limit: SYNC_PAGE_SIZE }),
+    )) {
+      const contactIds: string[] = [];
+      for (const raw of batch) {
+        const customer = mapCustomer(raw);
+        if (!customer) continue;
+        contactIds.push(await upsertContact(accountId, customer.email, customer));
+      }
+      await addToCustomerList(conn.customerListId, contactIds);
+      customers += contactIds.length;
+    }
+  } catch (e) {
+    console.error(`[shop-sync] initial customer sync failed (conn ${connectionId}):`, e);
+    errors.push(e);
+  }
+
+  let paidOrders = 0;
+  try {
+    // `financial_status=230` filters to paid orders server-side (verified
+    // live); the local isPaidOrderPayload check stays as a cheap safety net.
+    for await (const batch of syncPages((page) =>
+      client.listOrders({
+        page,
+        limit: SYNC_PAGE_SIZE,
+        financialStatus: SHOPYY_FINANCIAL_STATUS_PAID,
+      }),
+    )) {
+      const chRows: Parameters<typeof insertOrders>[1] = [];
+      for (const raw of batch) {
+        if (!isPaidOrderPayload(raw)) continue;
+        const order = mapOrder(raw);
+        if (!order) continue;
+        const contactId = await upsertContact(accountId, order.email, {
+          firstName: order.firstName,
+          lastName: order.lastName,
+        });
+        await addToCustomerList(conn.customerListId, [contactId]);
+
+        await prisma.shopOrder.upsert({
+          where: {
+            shopConnectionId_externalOrderId: {
+              shopConnectionId: connectionId,
+              externalOrderId: order.externalOrderId,
+            },
+          },
+          create: {
+            accountId,
+            shopConnectionId: connectionId,
+            externalOrderId: order.externalOrderId,
+            orderNo: order.orderNo ?? null,
+            customerEmail: order.email,
+            contactId,
+            value: order.value,
+            currency: order.currency,
+            status: 'paid',
+            orderTime: order.orderTime,
+            raw: raw as object,
+          },
+          // `status` advances separately via the monotonic guard below so the
+          // backfill can never downgrade an order a webhook already shipped.
+          update: {
+            orderNo: order.orderNo ?? null,
+            customerEmail: order.email,
+            contactId,
+            value: order.value,
+            currency: order.currency,
+            orderTime: order.orderTime,
+            raw: raw as object,
+          },
+        });
+        await prisma.shopOrder.updateMany({
+          where: {
+            shopConnectionId: connectionId,
+            externalOrderId: order.externalOrderId,
+            status: { in: lowerOrderStatuses('paid') },
+          },
+          data: { status: 'paid' },
+        });
+
+        chRows.push({
+          account_id: accountId,
+          shop_id: connectionId,
+          external_order_id: order.externalOrderId,
+          customer_email: order.email,
+          value: order.value,
+          currency: order.currency,
+          order_time: toClickHouseDateTime(order.orderTime),
+        });
+        paidOrders++;
+      }
+      if (chRows.length) {
+        await insertOrders(ch, chRows).catch((e) =>
+          console.error('[shop-sync] CH backfill insert failed:', e),
+        );
+      }
+    }
+  } catch (e) {
+    console.error(`[shop-sync] initial order sync failed (conn ${connectionId}):`, e);
+    errors.push(e);
+  }
+
+  await touchSync(connectionId);
+  console.log(
+    `[shop-sync] initial sync (conn ${connectionId}): ${customers} customers, ${paidOrders} paid orders`,
+  );
+  if (errors.length) throw errors[0];
+}
+
 async function runJob(job: Job<ShopEventJob>): Promise<void> {
   const data = job.data;
   switch (data.topic) {
@@ -440,6 +654,8 @@ async function runJob(job: Job<ShopEventJob>): Promise<void> {
       return handleOrder(data, true);
     case 'checkout_abandoned':
       return handleAbandoned(data);
+    case 'customer_created':
+      return handleCustomerCreated(data);
     default:
       console.warn(`[shop-sync] unknown topic ${(data as ShopEventJob).topic}`);
   }
@@ -448,6 +664,12 @@ async function runJob(job: Job<ShopEventJob>): Promise<void> {
 new Worker<ShopEventJob>(QUEUE_NAMES.SHOP_EVENTS, runJob, {
   connection,
   concurrency: 8,
+});
+
+// Initial full store sync — one job per successful bind, paged API pulls.
+new Worker<ShopSyncJob>(QUEUE_NAMES.SHOP_SYNC, runInitialSync, {
+  connection,
+  concurrency: 2,
 });
 
 // Delayed abandoned-cart recovery. Jobs land here `delayMinutes` after the

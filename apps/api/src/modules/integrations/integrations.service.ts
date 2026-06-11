@@ -31,9 +31,11 @@ import {
   type ShopAutomationView,
   type ShopConnectionView,
   type ShopCouponView,
+  type ShopSyncJob,
   type UpdateShopAutomationInput,
 } from '@sendmast/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { QueueService } from '../../common/queue/queue.service';
 
 /**
  * Webhook events we subscribe the store to. `eventId` is the shopyy event id
@@ -49,10 +51,21 @@ const SHOPYY_WEBHOOK_EVENTS: ReadonlyArray<{
   topic: string;
   name: string;
 }> = [
+  { eventId: 1, topic: 'customers/create', name: 'SendMast 顾客创建' },
   { eventId: 4, topic: 'orders/create', name: 'SendMast 订单创建' },
   { eventId: 5, topic: 'orders/paid', name: 'SendMast 订单支付' },
   { eventId: 7, topic: 'orders/fulfilled', name: 'SendMast 订单发货' },
+  // Single-page checkout order creation; not available on every store's plan —
+  // installWebhooks' per-event fallback skips it where the batch rejects.
+  { eventId: 36, topic: 'orderonepeges/create', name: 'SendMast 订单创建（单页流程）' },
 ];
+
+/**
+ * Name of the auto-created per-tenant list that mirrors the store's customer
+ * base ("店铺客户"). Created on first store bind, then kept current by the
+ * `customers/create` webhook, order webhooks, and the initial full sync.
+ */
+const SHOP_CUSTOMER_LIST_NAME = '店铺客户';
 
 /**
  * System default template the abandoned-cart flow is pre-pointed at (seeded by
@@ -151,6 +164,7 @@ export class IntegrationsService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly ch: ClickHouseService,
+    private readonly queue: QueueService,
   ) {}
 
   /** Whether the partnership app secret is present (gates the connect flow). */
@@ -258,6 +272,43 @@ export class IntegrationsService {
       },
       update: { ...data, connectedAt: new Date() },
     });
+
+    // Auto-provision the tenant's "店铺客户" contact list and remember it on the
+    // connection. The webhook handlers and the initial sync below funnel every
+    // store customer into this list.
+    if (!conn.customerListId) {
+      const list = await this.prisma.contactList.upsert({
+        where: { accountId_name: { accountId, name: SHOP_CUSTOMER_LIST_NAME } },
+        create: {
+          accountId,
+          name: SHOP_CUSTOMER_LIST_NAME,
+          description: '绑定店铺后自动创建：店铺的全部客户（自动同步）',
+        },
+        update: {},
+      });
+      await this.prisma.shopConnection.update({
+        where: { id: conn.id },
+        data: { customerListId: list.id },
+      });
+    }
+
+    // Kick off the initial full sync in the background: pull every store
+    // customer into the list, and every paid order into shop_orders (used to
+    // match "已下单" customers when building dynamic segments). Idempotent, so
+    // a re-connect just re-runs it. Bind already succeeded — don't fail it on
+    // a queueing hiccup.
+    try {
+      await this.queue.add(QueueService.names.SHOP_SYNC, 'initial-sync', {
+        connectionId: conn.id,
+        accountId,
+      } satisfies ShopSyncJob);
+    } catch (e) {
+      this.logger.warn(
+        `Shopyy initial sync enqueue failed for store ${externalStoreId}: ${
+          e instanceof Error ? e.message : e
+        }`,
+      );
+    }
 
     return toView(conn);
   }

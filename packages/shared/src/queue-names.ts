@@ -6,7 +6,7 @@ export const QUEUE_NAMES = {
   EVENTS_INGEST: 'events-ingest',
   /** Inbound shopyy webhook events (order paid/shipped, checkout abandoned). */
   SHOP_EVENTS: 'shop-events',
-  /** Periodic shop polling (orders/abandoned checkouts) when push is absent. */
+  /** Initial full store sync after bind (customers → list, paid orders). */
   SHOP_SYNC: 'shop-sync',
   /** Delayed abandoned-cart recovery sends (delay = automation.delayMinutes). */
   SHOP_ABANDONED: 'shop-abandoned',
