@@ -322,16 +322,19 @@ export class IntegrationsService {
     });
   }
 
+  private shopyyWebhookReceiverUrl(): string {
+    const rawBase =
+      this.config.get<string>('SHOPYY_WEBHOOK_BASE_URL') ??
+      `${this.config.getOrThrow<string>('API_BASE_URL')}/api`;
+    return `${rawBase.replace(/\/+$/, '')}/webhooks/shopyy`;
+  }
+
   private async installWebhooks(conn: {
     externalStoreId: string;
     openapiDomain: string;
     devToken: string;
     webhookSecret: string;
   }): Promise<void> {
-    const rawBase =
-      this.config.get<string>('SHOPYY_WEBHOOK_BASE_URL') ??
-      `${this.config.getOrThrow<string>('API_BASE_URL')}/api`;
-    const base = rawBase.replace(/\/+$/, '');
     const client = this.shopyyClient(conn.openapiDomain, conn.devToken);
 
     // Reuse an existing webhook row for the same event when it already points at
@@ -340,7 +343,7 @@ export class IntegrationsService {
     const existing = await client.listWebhooks().catch(() => [] as Awaited<
       ReturnType<typeof client.listWebhooks>
     >);
-    const ourPrefix = `${base}/webhooks/shopyy`;
+    const ourPrefix = this.shopyyWebhookReceiverUrl();
 
     const items = SHOPYY_WEBHOOK_EVENTS.map((e) => {
       // Per-store opaque key authenticates inbound webhooks; topic is encoded so
@@ -387,6 +390,68 @@ export class IntegrationsService {
           }`,
         );
       }
+    }
+  }
+
+  private isManagedWebhook(
+    webhook: { url: string; event_id: number },
+    receiverUrl: string,
+    webhookSecret: string | null,
+  ): boolean {
+    if (!SHOPYY_WEBHOOK_EVENTS.some((e) => e.eventId === webhook.event_id)) return false;
+
+    let key: string | null = null;
+    let topic: string | null = null;
+    try {
+      const url = new URL(webhook.url);
+      key = url.searchParams.get('key');
+      topic = url.searchParams.get('topic');
+    } catch {
+      // Fall back to prefix-only matching below for malformed historic rows.
+    }
+
+    if (webhookSecret && key !== webhookSecret) return false;
+    if (topic && !SHOPYY_WEBHOOK_EVENTS.some((e) => e.topic === topic)) return false;
+
+    return webhook.url.startsWith(receiverUrl) || (!!webhookSecret && key === webhookSecret);
+  }
+
+  private async uninstallWebhooks(conn: ShopConnection): Promise<void> {
+    if (!conn.openapiDomain || !conn.devToken) {
+      throw new BadRequestException(
+        '店铺连接缺少 API 凭证，无法删除 Shopyy Webhook，请重新授权后再解绑',
+      );
+    }
+
+    const client = this.shopyyClient(conn.openapiDomain, conn.devToken);
+    const receiverUrl = this.shopyyWebhookReceiverUrl();
+    let webhooks;
+    try {
+      webhooks = await client.listWebhooks();
+    } catch (err) {
+      if (err instanceof ShopyyAuthError) {
+        await this.prisma.shopConnection.update({
+          where: { id: conn.id },
+          data: { status: 'expired' },
+        });
+        throw new BadRequestException(
+          '店铺授权已失效，无法删除 Shopyy Webhook，请重新授权后再解绑',
+        );
+      }
+      const msg = err instanceof ShopyyError ? err.message : String(err);
+      throw new BadRequestException(`拉取 Shopyy Webhook 失败：${msg}`);
+    }
+
+    const ids = webhooks
+      .filter((w) => this.isManagedWebhook(w, receiverUrl, conn.webhookSecret ?? null))
+      .map((w) => w.id);
+    if (ids.length === 0) return;
+
+    try {
+      await client.batchDeleteWebhooks(ids);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new BadRequestException(`删除 Shopyy Webhook 失败：${reason}`);
     }
   }
 
@@ -763,6 +828,7 @@ export class IntegrationsService {
       where: { id, accountId },
     });
     if (!conn) throw new NotFoundException('店铺连接不存在');
+    await this.uninstallWebhooks(conn);
     // Soft-revoke: keep the row (and its orders/automations) for history; the
     // connection just stops being usable until re-authorized.
     await this.prisma.shopConnection.update({

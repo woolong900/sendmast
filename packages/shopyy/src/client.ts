@@ -215,6 +215,11 @@ export class ShopyyClient {
     });
   }
 
+  /** Delete webhook rows in one call (`POST /webhooks/batchdelete`). */
+  batchDeleteWebhooks(ids: number[]): Promise<unknown> {
+    return this.post('/webhooks/batchdelete', { ids });
+  }
+
   /** Fetch a single order's full detail by the store's order id. */
   getOrder(externalOrderId: string): Promise<ShopyyRawOrder> {
     return this.get<ShopyyRawOrder>(`/orders/${encodeURIComponent(externalOrderId)}`);
