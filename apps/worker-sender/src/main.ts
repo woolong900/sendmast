@@ -650,6 +650,10 @@ async function runSend(job: Job<SendJobData>) {
         }
       : undefined,
     trackClicks: c.trackClicks,
+    // Hard-attribution id: the store echoes this link's query in the order's
+    // landing_page, letting the order webhook attribute the conversion to this
+    // exact recipient regardless of click tracking or checkout email.
+    smMid: r.id,
   });
 
   let transport;

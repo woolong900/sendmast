@@ -53,8 +53,12 @@ function lowerOrderStatuses(target: string): string[] {
   return Object.keys(ORDER_STATUS_RANK).filter((s) => ORDER_STATUS_RANK[s]! < rank);
 }
 
-/** Read the recall-link `sm_mid` (a flow send id) from the order's landing page. */
-function landingPageSendId(payload: Record<string, unknown>): string | null {
+/**
+ * Read the `sm_mid` hard-attribution id from the order's landing page. Both
+ * flow recall links and campaign links stamp it; it resolves to either a
+ * `shop_automation_sends.id` (flow) or a `campaign_recipients.id` (campaign).
+ */
+function landingPageMid(payload: Record<string, unknown>): string | null {
   const lp = payload['landing_page'];
   if (typeof lp !== 'string' || !lp) return null;
   try {
@@ -66,23 +70,40 @@ function landingPageSendId(payload: Record<string, unknown>): string | null {
 }
 
 /**
- * Hard attribution: resolve the order's `sm_mid` landing-page param to the flow
- * send that drove it. Works regardless of which email the buyer used at
- * checkout (unlike last-click, which matches on the order's email). Scoped to
- * the order's account so a stale/forged id can't cross tenants.
+ * Hard attribution: resolve a `sm_mid` to the flow send that drove it. Works
+ * regardless of which email the buyer used at checkout (unlike last-click,
+ * which matches on the order's email). Scoped to the account so a stale/forged
+ * id can't cross tenants.
  */
 async function resolveFlowAttribution(
-  job: ShopEventJob,
+  accountId: string,
+  mid: string,
 ): Promise<{ automationId: string; sendId: string } | null> {
-  const sendId = landingPageSendId(job.payload);
-  if (!sendId) return null;
   const send = await prisma.shopAutomationSend
     .findFirst({
-      where: { id: sendId, accountId: job.accountId },
+      where: { id: mid, accountId },
       select: { id: true, automationId: true },
     })
     .catch(() => null);
   return send ? { automationId: send.automationId, sendId: send.id } : null;
+}
+
+/**
+ * Hard attribution for campaigns: resolve a `sm_mid` to the campaign recipient
+ * it was stamped on. Like the flow case, this is independent of the checkout
+ * email and of click tracking (the id rides the link's query string).
+ */
+async function resolveCampaignAttribution(
+  accountId: string,
+  mid: string,
+): Promise<{ campaignId: string; contactId: string } | null> {
+  const rec = await prisma.campaignRecipient
+    .findFirst({
+      where: { id: mid, accountId },
+      select: { campaignId: true, contactId: true },
+    })
+    .catch(() => null);
+  return rec ? { campaignId: rec.campaignId, contactId: rec.contactId } : null;
 }
 
 /** Upsert a contact by (accountId, email); shopyy buyers source = 'shopyy'. */
@@ -112,17 +133,33 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
   const contactId = await upsertContact(job.accountId, order.email);
   const newStatus = shipped ? 'shipped' : 'paid';
 
-  // Last-click attribution: only meaningful for the paid event (the conversion).
-  const attribution = shipped
-    ? null
-    : await findLastClick(ch, {
-        accountId: job.accountId,
-        contactId,
-        withinDays: ATTRIBUTION_WINDOW_DAYS,
-      }).catch(() => null);
+  // Attribution is only meaningful on the paid event (the conversion). The
+  // landing-page sm_mid resolves to exactly one of a flow send or a campaign
+  // recipient (each is a distinct random UUID), so we try flow first.
+  const mid = shipped ? null : landingPageMid(job.payload);
+  const flowAttr = mid ? await resolveFlowAttribution(job.accountId, mid).catch(() => null) : null;
+  const campaignHard =
+    mid && !flowAttr
+      ? await resolveCampaignAttribution(job.accountId, mid).catch(() => null)
+      : null;
 
-  // Flow (hard) attribution via the recall link's sm_mid — also paid-event only.
-  const flowAttr = shipped ? null : await resolveFlowAttribution(job).catch(() => null);
+  // Last-click is the soft fallback for campaigns; the hard sm_mid match wins
+  // when present (works even if the buyer checked out with a different email).
+  const lastClick =
+    shipped || campaignHard
+      ? null
+      : await findLastClick(ch, {
+          accountId: job.accountId,
+          contactId,
+          withinDays: ATTRIBUTION_WINDOW_DAYS,
+        }).catch(() => null);
+
+  // Resolved campaign attribution (hard sm_mid match, else last-click).
+  const campaignAttr = campaignHard
+    ? { campaignId: campaignHard.campaignId, contactId: campaignHard.contactId, model: 'hard_sm_mid' }
+    : lastClick
+      ? { campaignId: lastClick.campaignId, contactId, model: 'last_click_7d' }
+      : null;
 
   const saved = await prisma.shopOrder.upsert({
     where: {
@@ -145,9 +182,9 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       // monotonic guard below — never here in the update branch.
       status: newStatus,
       orderTime: order.orderTime,
-      attributedCampaignId: attribution?.campaignId ?? null,
-      attributedContactId: attribution ? contactId : null,
-      attributionModel: attribution ? 'last_click_7d' : null,
+      attributedCampaignId: campaignAttr?.campaignId ?? null,
+      attributedContactId: campaignAttr?.contactId ?? null,
+      attributionModel: campaignAttr?.model ?? null,
       attributedAutomationId: flowAttr?.automationId ?? null,
       attributedSendId: flowAttr?.sendId ?? null,
       raw: job.payload as object,
@@ -162,11 +199,11 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       currency: order.currency,
       orderTime: order.orderTime,
       // Don't overwrite an existing attribution on a later (e.g. shipped) event.
-      ...(attribution
+      ...(campaignAttr
         ? {
-            attributedCampaignId: attribution.campaignId,
-            attributedContactId: contactId,
-            attributionModel: 'last_click_7d',
+            attributedCampaignId: campaignAttr.campaignId,
+            attributedContactId: campaignAttr.contactId,
+            attributionModel: campaignAttr.model,
           }
         : {}),
       ...(flowAttr
@@ -206,13 +243,15 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
     },
   ]).catch((e) => console.error('[shop-sync] CH orders insert failed:', e));
 
-  if (attribution) {
+  // The attributions side-table records the click→order path, so it only
+  // applies to last-click (hard sm_mid attribution has no click event).
+  if (lastClick) {
     await insertAttributions(ch, [
       {
         account_id: job.accountId,
-        campaign_id: attribution.campaignId,
+        campaign_id: lastClick.campaignId,
         contact_id: contactId,
-        click_time: attribution.clickTime,
+        click_time: lastClick.clickTime,
         order_id: order.externalOrderId,
         order_value: order.value,
         model: 'last_click_7d',

@@ -24,6 +24,14 @@ export interface RewriteOptions {
    * downstream analytics (GA, etc.) keep working. Defaults to true.
    */
   trackClicks?: boolean;
+  /**
+   * When set, `sm_mid=<id>` is appended to every http(s) link's destination so
+   * a downstream conversion can be hard-attributed back to this exact send: the
+   * store echoes the link's query string in the order's `landing_page`, which
+   * the order webhook resolves to the recipient. Independent of click tracking
+   * (lives on the destination URL, so it survives the /t/c 302 inside `?u=`).
+   */
+  smMid?: string;
 }
 
 export interface RewriteResult {
@@ -48,6 +56,17 @@ function applyUtm(url: string, utm?: UtmParams): string {
   }
 }
 
+function applySmMid(url: string, smMid?: string): string {
+  if (!smMid) return url;
+  try {
+    const u = new URL(url);
+    u.searchParams.set('sm_mid', smMid);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 /** Wrap http(s) hrefs in /t/c/{token}?u=ENC(url). Adds {pixel} at the body end. */
 export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
   const links: Array<{ index: number; url: string }> = [];
@@ -58,7 +77,7 @@ export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
   const rewritten = html.replace(HREF_REGEX, (match, q1: string, url: string) => {
     if (!/^https?:\/\//i.test(url)) return match;
     if (url.includes('{{unsubscribe_url}}')) return match;
-    const finalUrl = applyUtm(url, opts.utm);
+    const finalUrl = applySmMid(applyUtm(url, opts.utm), opts.smMid);
     // Click tracking off → write the (UTM-tagged) URL straight back so the
     // user lands on the destination directly, with no /t/c redirect and no
     // token issued. UTM still goes through because that's the destination's
