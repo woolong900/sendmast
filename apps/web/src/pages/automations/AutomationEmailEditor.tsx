@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Eye, LayoutTemplate, Save, X } from 'lucide-react';
+import { Eye, LayoutTemplate, Save, X } from 'lucide-react';
 import { ConfigProvider } from '@arco-design/web-react';
 import zhCN from '@arco-design/web-react/es/locale/zh-CN';
 import {
@@ -12,7 +12,7 @@ import {
 import { StandardLayout } from 'easy-email-extensions';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { VariablesHelper } from '@/components/VariablesHelper';
+import { FullscreenEmailEditor } from '@/components/FullscreenEmailEditor';
 import { api } from '@/lib/api';
 import { easyEmailZhCN } from '@/lib/easy-email-locale';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
@@ -117,13 +117,9 @@ export function AutomationEmailEditor({
       >
         {(_props, helper) =>
           createPortal(
-          <div className="fixed inset-0 z-50 flex flex-col bg-background">
-            <div className="flex items-center gap-3 border-b bg-background py-2 pr-4">
-              <Button variant="outline" onClick={onClose}>
-                <ArrowLeft className="mr-1.5 size-4" />
-                返回
-              </Button>
-              <VariablesHelper variant="button" size="default" />
+          <FullscreenEmailEditor
+            onExit={onClose}
+            toolbar={
               <div className="ml-auto flex items-center gap-3">
                 <Button variant="outline" onClick={() => setPickerOpen(true)}>
                   <LayoutTemplate className="mr-1.5 size-4" />
@@ -144,8 +140,8 @@ export function AutomationEmailEditor({
                   {saving ? '保存中...' : '保存'}
                 </Button>
               </div>
-            </div>
-
+            }
+          >
             {previewHtml && (
               <div
                 className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
@@ -254,7 +250,7 @@ export function AutomationEmailEditor({
                 <EmailEditor />
               </StandardLayout>
             </div>
-          </div>,
+          </FullscreenEmailEditor>,
           document.body,
           )
         }

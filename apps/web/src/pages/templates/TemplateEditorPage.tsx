@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Eye, Save, X } from 'lucide-react';
+import { LogOut, Save } from 'lucide-react';
 import { ConfigProvider } from '@arco-design/web-react';
 import zhCN from '@arco-design/web-react/es/locale/zh-CN';
 import {
@@ -14,17 +14,13 @@ import { JsonToMjml } from 'easy-email-core';
 import mjml2html from 'mjml-browser';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { VariablesHelper } from '@/components/VariablesHelper';
+import { FullscreenEmailEditor } from '@/components/FullscreenEmailEditor';
 import { api, apiErrMessage } from '@/lib/api';
 import { easyEmailZhCN } from '@/lib/easy-email-locale';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
 import { captureAndUploadThumbnail } from '@/lib/thumbnail';
 import { applyMergePreviewSamples } from '@/lib/email-merge-preview';
-import {
-  blockCategories,
-  compilePreviewHtml,
-  emptyEmailTemplate,
-} from '@/lib/easy-email-editor-shared';
+import { blockCategories, emptyEmailTemplate } from '@/lib/easy-email-editor-shared';
 
 import 'easy-email-editor/lib/style.css';
 import 'easy-email-extensions/lib/style.css';
@@ -50,7 +46,6 @@ export function TemplateEditorPage() {
   const qc = useQueryClient();
   const [name, setName] = useState('未命名模板');
   const [error, setError] = useState<string | null>(null);
-  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
 
   const detail = useQuery<TemplateView>({
     queryKey: ['templates', id],
@@ -123,9 +118,9 @@ export function TemplateEditorPage() {
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-background">
         <div className="flex items-center gap-3 border-b bg-background px-4 py-2">
-          <Button variant="outline" size="sm" onClick={() => navigate('/templates')}>
-            <ArrowLeft className="mr-1 size-4" />
-            返回
+          <Button variant="outline" onClick={() => navigate('/templates')}>
+            <LogOut className="mr-1.5 size-4" />
+            退出编辑
           </Button>
           <div className="truncate text-sm font-medium">{detail.data.name}</div>
           <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
@@ -159,85 +154,36 @@ export function TemplateEditorPage() {
         onSubmit={(values) => saveMut.mutate(values)}
       >
         {(_props, helper) => (
-          // `fixed inset-0 z-50` lifts the editor out of Layout's
-          // sidebar/topbar/centered-container chrome so the canvas owns the
-          // full viewport. State stays mounted under Layout — only visual.
-          <div className="fixed inset-0 z-50 flex flex-col bg-background">
-            <div className="flex items-center gap-3 border-b bg-background px-4 py-2">
-              <Button variant="outline" size="sm" onClick={() => navigate('/templates')}>
-                <ArrowLeft className="mr-1 size-4" />
-                返回
-              </Button>
-              <VariablesHelper variant="button" />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const values = helper.getState().values as IEmailTemplate;
-                  setPreviewHtml(compilePreviewHtml(values));
-                }}
-              >
-                <Eye className="mr-1 size-4" />
-                预览
-              </Button>
-              <div className="flex-1" />
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="模板名称"
-                className="h-8 w-[220px]"
-              />
-              <Button
-                size="sm"
-                disabled={saveMut.isPending}
-                onClick={() => helper.submit()}
-              >
-                <Save className="mr-1 size-4" />
-                {saveMut.isPending ? '保存中...' : '保存'}
-              </Button>
-            </div>
-            {previewHtml && (
-              <div
-                className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
-                onClick={() => setPreviewHtml(null)}
-              >
-                <div
-                  className="flex max-h-[92vh] w-full max-w-3xl flex-col rounded-xl bg-card shadow-xl"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="flex items-center justify-between border-b px-4 py-3">
-                    <div>
-                      <h3 className="text-sm font-semibold">邮件预览</h3>
-                      <p className="text-xs text-muted-foreground">
-                        商品列表与变量为示例数据，实际发送时由系统自动填充
-                      </p>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={() => setPreviewHtml(null)}>
-                      <X className="size-4" />
-                    </Button>
-                  </div>
-                  <div className="overflow-auto bg-muted/30 p-4">
-                    <iframe
-                      title="template-preview"
-                      srcDoc={previewHtml}
-                      className="mx-auto min-h-[640px] w-full max-w-[640px] rounded-lg border bg-white shadow-sm"
-                      sandbox=""
-                    />
-                  </div>
+          <FullscreenEmailEditor
+            onExit={() => navigate('/templates')}
+            toolbar={
+              <div className="ml-auto flex items-center gap-3">
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="模板名称"
+                  className="w-[220px]"
+                />
+                <Button disabled={saveMut.isPending} onClick={() => helper.submit()}>
+                  <Save className="mr-1.5 size-4" />
+                  {saveMut.isPending ? '保存中...' : '保存'}
+                </Button>
+              </div>
+            }
+            banner={
+              error ? (
+                <div className="border-b bg-destructive/5 px-4 py-2 text-xs text-destructive">
+                  {error}
                 </div>
-              </div>
-            )}
-            {error && (
-              <div className="border-b bg-destructive/5 px-4 py-2 text-xs text-destructive">
-                {error}
-              </div>
-            )}
+              ) : null
+            }
+          >
             <div className="flex-1 overflow-hidden">
               <StandardLayout categories={blockCategories} showSourceCode>
                 <EmailEditor />
               </StandardLayout>
             </div>
-          </div>
+          </FullscreenEmailEditor>
         )}
       </EmailEditorProvider>
     </ConfigProvider>

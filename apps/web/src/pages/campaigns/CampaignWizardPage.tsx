@@ -15,7 +15,6 @@ import {
   Code as CodeIcon,
   HelpCircle,
   LayoutTemplate,
-  LogOut,
   Monitor,
   Search,
   Send,
@@ -63,6 +62,7 @@ import { easyEmailZhCN } from '@/lib/easy-email-locale';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
 import { formatNumber } from '@/lib/utils';
 import { VariablesHelper } from '@/components/VariablesHelper';
+import { FullscreenEmailEditor } from '@/components/FullscreenEmailEditor';
 import { type SegmentView, type SenderDomainView } from '@sendmast/shared';
 import { useQuota } from '@/hooks/useQuota';
 
@@ -1135,53 +1135,50 @@ export function CampaignWizardPage() {
             };
 
             return (
-              // `fixed inset-0 z-50` lifts the editor out of Layout's
-              // sidebar/topbar/centered-container chrome so the canvas owns
-              // the full viewport. Step 0/1/3 still render under Layout
-              // because their wrappers are not fixed.
-              <div className="fixed inset-0 z-50 flex flex-col bg-background">
-                <div className="flex items-center gap-3 border-b bg-background py-2 pr-4">
-                  <Button variant="outline" onClick={handleExit}>
-                    <LogOut className="mr-1.5 size-4" />
-                    退出编辑
-                  </Button>
-                  <VariablesHelper variant="button" size="default" />
-                  {saveContentMut.isError && (
-                    <div className="ml-auto mr-2 truncate text-xs text-destructive">
-                      {apiErrMessage(saveContentMut.error)}
+              <FullscreenEmailEditor
+                onExit={handleExit}
+                banner={
+                  isLegacyCampaign ? (
+                    <div className="flex items-start gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-800">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                      <span>
+                        此活动由旧编辑器创建,可视化数据已无法导入到 Easy Email。
+                        当前画布为空白,保存后将覆盖旧的 HTML 内容。
+                      </span>
                     </div>
-                  )}
-                  <div
-                    className={
-                      'flex items-center gap-3 ' +
-                      (saveContentMut.isError ? '' : 'ml-auto')
-                    }
-                  >
-                    <Button
-                      variant="outline"
-                      onClick={() => setTemplatePickerOpen(true)}
+                  ) : null
+                }
+                toolbar={
+                  <>
+                    {saveContentMut.isError && (
+                      <div className="ml-auto mr-2 truncate text-xs text-destructive">
+                        {apiErrMessage(saveContentMut.error)}
+                      </div>
+                    )}
+                    <div
+                      className={
+                        'flex items-center gap-3 ' +
+                        (saveContentMut.isError ? '' : 'ml-auto')
+                      }
                     >
-                      <LayoutTemplate className="mr-1.5 size-4" />
-                      选择模板
-                    </Button>
-                    <Button
-                      onClick={() => persist('advance')}
-                      disabled={saveContentMut.isPending}
-                    >
-                      {saveContentMut.isPending ? '保存中...' : '保存并下一步'}
-                      <ArrowRight className="ml-1 size-4" />
-                    </Button>
-                  </div>
-                </div>
-                {isLegacyCampaign && (
-                  <div className="flex items-start gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-800">
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    <span>
-                      此活动由旧编辑器创建,可视化数据已无法导入到 Easy Email。
-                      当前画布为空白,保存后将覆盖旧的 HTML 内容。
-                    </span>
-                  </div>
-                )}
+                      <Button
+                        variant="outline"
+                        onClick={() => setTemplatePickerOpen(true)}
+                      >
+                        <LayoutTemplate className="mr-1.5 size-4" />
+                        选择模板
+                      </Button>
+                      <Button
+                        onClick={() => persist('advance')}
+                        disabled={saveContentMut.isPending}
+                      >
+                        {saveContentMut.isPending ? '保存中...' : '保存并下一步'}
+                        <ArrowRight className="ml-1 size-4" />
+                      </Button>
+                    </div>
+                  </>
+                }
+              >
                 <div className="flex-1 overflow-hidden">
                   <StandardLayout categories={blockCategories} showSourceCode>
                     <EmailEditor />
@@ -1212,7 +1209,7 @@ export function CampaignWizardPage() {
                     if (templateReplacePending) commitTemplatePick(templateReplacePending);
                   }}
                 />
-              </div>
+              </FullscreenEmailEditor>
             );
           }}
         </EmailEditorProvider>
@@ -2059,24 +2056,23 @@ function HtmlEditorStep({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
-      <div className="flex items-center gap-3 border-b bg-background py-2 pr-4">
-        <Button variant="outline" onClick={handleExit}>
-          <LogOut className="mr-1.5 size-4" />
-          退出编辑
-        </Button>
-        <VariablesHelper variant="button" size="default" />
-        <span className="text-xs text-muted-foreground">HTML 模式</span>
-        {saveError && (
-          <div className="ml-auto mr-2 truncate text-xs text-destructive">{saveError}</div>
-        )}
-        <div className={saveError ? '' : 'ml-auto'}>
-          <Button onClick={() => onSave(html, 'advance')} disabled={saving}>
-            {saving ? '保存中...' : '保存并下一步'}
-            <ArrowRight className="ml-1 size-4" />
-          </Button>
-        </div>
-      </div>
+    <FullscreenEmailEditor
+      onExit={handleExit}
+      toolbar={
+        <>
+          <span className="text-xs text-muted-foreground">HTML 模式</span>
+          {saveError && (
+            <div className="ml-auto mr-2 truncate text-xs text-destructive">{saveError}</div>
+          )}
+          <div className={saveError ? '' : 'ml-auto'}>
+            <Button onClick={() => onSave(html, 'advance')} disabled={saving}>
+              {saving ? '保存中...' : '保存并下一步'}
+              <ArrowRight className="ml-1 size-4" />
+            </Button>
+          </div>
+        </>
+      }
+    >
       <div className="grid flex-1 grid-cols-2 gap-0 overflow-hidden">
         <div className="flex min-h-0 flex-col border-r">
           <div className="border-b bg-muted/30 px-4 py-1.5 text-xs font-medium text-muted-foreground">
@@ -2122,7 +2118,7 @@ function HtmlEditorStep({
         }}
         onSave={() => onSave(html, 'exit')}
       />
-    </div>
+    </FullscreenEmailEditor>
   );
 }
 
