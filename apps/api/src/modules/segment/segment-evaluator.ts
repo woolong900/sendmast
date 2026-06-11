@@ -24,9 +24,21 @@ export interface EventConstraint {
   since: Date;
 }
 
+/**
+ * "Has placed a paid order" — resolved from PG shop_orders, but kept out of
+ * `pgWhere` because ShopOrder.contactId has no Prisma relation to Contact;
+ * the service intersects/excludes the derived contactId set like events.
+ */
+export interface OrderConstraint {
+  mode: 'has' | 'notHas';
+  /** Only orders at/after this instant count; undefined = any time. */
+  since?: Date;
+}
+
 export interface CompiledSegment {
   pgWhere: Prisma.ContactWhereInput;
   eventConstraints: EventConstraint[];
+  orderConstraints: OrderConstraint[];
 }
 
 /**
@@ -39,14 +51,16 @@ export interface CompiledSegment {
 export function compileSegment(def: SegmentDefinition): CompiledSegment {
   const andClauses: Prisma.ContactWhereInput[] = [];
   const eventConstraints: EventConstraint[] = [];
+  const orderConstraints: OrderConstraint[] = [];
 
   for (const rule of def.rules) {
-    compileRule(rule, andClauses, eventConstraints);
+    compileRule(rule, andClauses, eventConstraints, orderConstraints);
   }
 
   return {
     pgWhere: andClauses.length === 0 ? {} : { AND: andClauses },
     eventConstraints,
+    orderConstraints,
   };
 }
 
@@ -54,6 +68,7 @@ function compileRule(
   rule: SegmentRule,
   andClauses: Prisma.ContactWhereInput[],
   eventConstraints: EventConstraint[],
+  orderConstraints: OrderConstraint[],
 ): void {
   switch (rule.type) {
     case 'attribute': {
@@ -124,6 +139,15 @@ function compileRule(
         event: rule.event,
         campaignId: rule.campaignId,
         since,
+      });
+      return;
+    }
+    case 'order': {
+      orderConstraints.push({
+        mode: rule.op,
+        since: rule.lastDays
+          ? new Date(Date.now() - rule.lastDays * 86_400_000)
+          : undefined,
       });
       return;
     }

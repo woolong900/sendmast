@@ -17,7 +17,11 @@ import type {
   SegmentView,
   UpdateSegmentInput,
 } from '@sendmast/shared';
-import { compileSegment, type EventConstraint } from './segment-evaluator';
+import {
+  compileSegment,
+  type EventConstraint,
+  type OrderConstraint,
+} from './segment-evaluator';
 
 /**
  * Cap on how many contactIds we'll round-trip through application memory
@@ -160,10 +164,10 @@ export class SegmentService {
     accountId: string,
     def: SegmentDefinition,
   ): Promise<Set<string>> {
-    const { pgWhere, eventConstraints } = compileSegment(def);
+    const { pgWhere, eventConstraints, orderConstraints } = compileSegment(def);
 
-    // Apply event constraints first so we can narrow the PG query with `id IN`.
-    // For 'has' constraints: intersect the event-derived contactId set.
+    // Apply event/order constraints first so we can narrow the PG query with
+    // `id IN`. For 'has' constraints: intersect the derived contactId set.
     // For 'notHas' constraints: collect to exclude later.
     const hasSets: Set<string>[] = [];
     const notHasIds: string[] = [];
@@ -171,6 +175,15 @@ export class SegmentService {
     for (const ec of eventConstraints) {
       const ids = await this.contactIdsFromEvent(accountId, ec);
       if (ec.mode === 'has') {
+        hasSets.push(ids);
+      } else {
+        notHasIds.push(...ids);
+      }
+    }
+
+    for (const oc of orderConstraints) {
+      const ids = await this.contactIdsFromOrders(accountId, oc);
+      if (oc.mode === 'has') {
         hasSets.push(ids);
       } else {
         notHasIds.push(...ids);
@@ -339,6 +352,30 @@ export class SegmentService {
       for (const l of links) contactIds.add(l.contactId);
     }
     return contactIds;
+  }
+
+  /**
+   * Contacts who have placed a paid order (shop_orders, status paid/shipped
+   * — shipped implies paid). Ingested orders always carry contactId, so the
+   * email→contact mapping is already resolved at write time.
+   */
+  private async contactIdsFromOrders(
+    accountId: string,
+    oc: OrderConstraint,
+  ): Promise<Set<string>> {
+    const rows = await this.prisma.shopOrder.findMany({
+      where: {
+        accountId,
+        status: { in: ['paid', 'shipped'] },
+        contactId: { not: null },
+        ...(oc.since ? { orderTime: { gte: oc.since } } : {}),
+      },
+      select: { contactId: true },
+      distinct: ['contactId'],
+    });
+    const out = new Set<string>();
+    for (const r of rows) if (r.contactId) out.add(r.contactId);
+    return out;
   }
 
   // ---------------------------------------------------------------------------

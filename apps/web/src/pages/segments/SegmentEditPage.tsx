@@ -40,6 +40,7 @@ const RULE_TYPE_LABELS: Record<SegmentRule['type'], string> = {
   tag: '标签',
   createdAt: '注册时间',
   event: '行为',
+  order: '下单',
 };
 
 const ATTRIBUTE_FIELD_LABELS: Record<string, string> = {
@@ -73,6 +74,7 @@ const ADDABLE_RULE_TYPES: Array<{ type: SegmentRule['type']; label: string }> = 
   { type: 'list', label: '列表成员' },
   { type: 'createdAt', label: '注册时间' },
   { type: 'event', label: '行为(打开/点击)' },
+  { type: 'order', label: '下单(店铺订单)' },
 ];
 
 function makeDefaultRule(type: SegmentRule['type']): SegmentRule {
@@ -89,6 +91,8 @@ function makeDefaultRule(type: SegmentRule['type']): SegmentRule {
       return { type: 'createdAt', op: 'lastDays', days: 30 };
     case 'event':
       return { type: 'event', event: 'open', op: 'has', lastDays: 30 };
+    case 'order':
+      return { type: 'order', op: 'has' };
   }
 }
 
@@ -341,6 +345,7 @@ function RuleCard({
       {rule.type === 'event' && (
         <EventRuleEditor rule={rule} onChange={onChange} campaigns={campaigns} />
       )}
+      {rule.type === 'order' && <OrderRuleEditor rule={rule} onChange={onChange} />}
     </div>
   );
 }
@@ -597,6 +602,61 @@ function EventRuleEditor({
   );
 }
 
+function OrderRuleEditor({
+  rule,
+  onChange,
+}: {
+  rule: Extract<SegmentRule, { type: 'order' }>;
+  onChange: (r: SegmentRule) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <FilterSelect
+        className="w-[200px]"
+        value={rule.op}
+        onChange={(v) => onChange({ ...rule, op: v as typeof rule.op })}
+        options={[
+          { value: 'has', label: '有过付款订单' },
+          { value: 'notHas', label: '没有付款订单' },
+        ]}
+      />
+      <FilterSelect
+        className="w-[160px]"
+        value={rule.lastDays === undefined ? 'any' : 'lastDays'}
+        onChange={(v) =>
+          onChange(
+            v === 'any'
+              ? { type: 'order', op: rule.op }
+              : { type: 'order', op: rule.op, lastDays: 30 },
+          )
+        }
+        options={[
+          { value: 'any', label: '任意时间' },
+          { value: 'lastDays', label: '最近 N 天内' },
+        ]}
+      />
+      {rule.lastDays !== undefined && (
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={1}
+            max={3650}
+            value={rule.lastDays}
+            onChange={(e) =>
+              onChange({ ...rule, lastDays: Number(e.target.value) || 1 })
+            }
+            className="w-24"
+          />
+          <span className="text-sm text-muted-foreground">天</span>
+        </div>
+      )}
+      <div className="w-full text-xs text-muted-foreground">
+        基于已绑定店铺同步的订单(已支付/已发货)进行匹配
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Preview (debounced)
 // ---------------------------------------------------------------------------
@@ -713,5 +773,7 @@ function isRuleComplete(r: SegmentRule): boolean {
       return Boolean(r.from || r.to);
     case 'event':
       return r.lastDays > 0;
+    case 'order':
+      return r.lastDays === undefined || r.lastDays > 0;
   }
 }

@@ -88,6 +88,18 @@ const EventRule = z.object({
   lastDays: z.number().int().min(1).max(3650),
 });
 
+/**
+ * Matched against shop_orders (paid/shipped) ingested from connected stores —
+ * "has placed a paid order". Backfilled on store bind, kept current by the
+ * order webhooks.
+ */
+const OrderRule = z.object({
+  type: z.literal('order'),
+  op: z.enum(['has', 'notHas']),
+  /** Look-back window in days; absent = any time. */
+  lastDays: z.number().int().min(1).max(3650).optional(),
+});
+
 export const SegmentRuleSchema = z.union([
   AttributeRuleScalar,
   AttributeRuleList,
@@ -97,6 +109,7 @@ export const SegmentRuleSchema = z.union([
   CreatedAtBetween,
   CreatedAtLastDays,
   EventRule,
+  OrderRule,
 ]);
 export type SegmentRule = z.infer<typeof SegmentRuleSchema>;
 
