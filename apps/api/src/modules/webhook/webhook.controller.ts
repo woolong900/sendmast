@@ -33,10 +33,10 @@ export class WebhookController {
   async azureEventGrid(
     @Body() body: EventGridEvent[] | EventGridEvent,
     @Headers('aeg-event-type') aegEventType: string | undefined,
-    @Headers('x-sendmast-webhook-key') headerKey: string | undefined,
+    @Headers('authorization') authorization: string | undefined,
     @Query('key') key: string | undefined,
   ) {
-    this.assertAuthorized(headerKey ?? key);
+    this.assertAuthorized(bearerToken(authorization) ?? key);
     const events = Array.isArray(body) ? body : [body];
     const result = await this.svc.handleEventGrid(events);
     if (aegEventType === 'SubscriptionValidation' && result.subscriptionValidationResponse) {
@@ -47,9 +47,9 @@ export class WebhookController {
 
   /**
    * Reject the request unless the shared key matches EVENTGRID_WEBHOOK_KEY.
-   * The header is preferred because query strings are commonly written to
-   * access logs. Query-key support remains for a zero-downtime migration from
-   * the previous Event Grid endpoint configuration.
+   * The Authorization header is preferred because Caddy redacts it from access
+   * logs. Query-key support remains for a zero-downtime migration from the
+   * previous Event Grid endpoint configuration.
    */
   private assertAuthorized(key: string | undefined): void {
     const expected = this.config.get<string>('EVENTGRID_WEBHOOK_KEY');
@@ -62,4 +62,9 @@ export class WebhookController {
       throw new UnauthorizedException('invalid webhook key');
     }
   }
+}
+
+function bearerToken(authorization: string | undefined): string | undefined {
+  const match = authorization?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1];
 }
