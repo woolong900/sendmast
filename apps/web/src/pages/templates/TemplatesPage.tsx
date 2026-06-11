@@ -129,9 +129,10 @@ function TemplateGrid({
                 </Link>
               </div>
               {deletable && onDelete && (
-                <Button
-                  size="icon"
-                  variant="ghost"
+                <button
+                  type="button"
+                  title="删除"
+                  className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
                   disabled={deleting}
                   onClick={async () => {
                     const ok = await confirm({
@@ -147,8 +148,8 @@ function TemplateGrid({
                     if (ok) onDelete(t.id);
                   }}
                 >
-                  <Trash2 className="size-4 text-destructive" />
-                </Button>
+                  <Trash2 className="size-4" />
+                </button>
               )}
             </div>
           </CardContent>

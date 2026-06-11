@@ -175,9 +175,9 @@ export function SenderDomainsPage() {
                           <RefreshCw className="mr-1 size-3" />
                           重新检测
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
+                        <button
+                          type="button"
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
                           // Disable this row's button while it's being deleted
                           // (avoid double-click) AND while another row is being
                           // deleted (the upstream LRO is single-flight-ish and
@@ -201,11 +201,11 @@ export function SenderDomainsPage() {
                           }}
                         >
                           {isDeleting ? (
-                            <Loader2 className="size-4 animate-spin text-destructive" />
+                            <Loader2 className="size-4 animate-spin" />
                           ) : (
-                            <Trash2 className="size-4 text-destructive" />
+                            <Trash2 className="size-4" />
                           )}
-                        </Button>
+                        </button>
                       </div>
                     </td>
                   </tr>

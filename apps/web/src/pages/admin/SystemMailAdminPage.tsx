@@ -371,10 +371,14 @@ function TemplatesCard() {
                     {formatDateTime(t.updatedAt)}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Button size="sm" variant="ghost" onClick={() => setEditing(t)}>
-                      <Pencil className="mr-1 size-3.5" />
-                      编辑
-                    </Button>
+                    <button
+                      type="button"
+                      title="编辑"
+                      className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                      onClick={() => setEditing(t)}
+                    >
+                      <Pencil className="size-4" />
+                    </button>
                   </td>
                 </tr>
               ))}

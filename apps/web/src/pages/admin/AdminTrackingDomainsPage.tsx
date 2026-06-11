@@ -258,15 +258,15 @@ export function AdminTrackingDomainsPage() {
                           <Copy className="mr-1 size-3.5" />
                           Caddy 片段
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
+                        <button
+                          type="button"
                           onClick={() => handleDelete(d)}
                           disabled={deleteMut.isPending}
                           title="删除域名"
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
                         >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
+                          <Trash2 className="size-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>

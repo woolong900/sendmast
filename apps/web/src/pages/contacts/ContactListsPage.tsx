@@ -191,9 +191,10 @@ export function ContactListsPage() {
                     <td className="px-4 py-3">{formatNumber(l.contactsCount)}</td>
                     <td className="px-4 py-3 text-muted-foreground">{formatDateTime(l.createdAt)}</td>
                     <td className="px-4 py-3 text-right">
-                      <Button
-                        size="icon"
-                        variant="ghost"
+                      <button
+                        type="button"
+                        title="删除"
+                        className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
                         disabled={deleteMut.isPending}
                         onClick={async (e) => {
                           // Don't navigate when interacting with the delete
@@ -213,8 +214,8 @@ export function ContactListsPage() {
                           if (ok) deleteMut.mutate(l.id);
                         }}
                       >
-                        <Trash2 className="size-4 text-destructive" />
-                      </Button>
+                        <Trash2 className="size-4" />
+                      </button>
                     </td>
                   </tr>
                 );

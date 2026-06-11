@@ -187,9 +187,10 @@ export function AcsAccountListPage() {
                           设为默认
                         </Button>
                       )}
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <button
+                        type="button"
+                        title="编辑"
+                        className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
                         onClick={async () => {
                           const full = (
                             await api.get<AcsAccountView>(`/api/admin/acs-accounts/${a.id}`)
@@ -212,12 +213,12 @@ export function AcsAccountListPage() {
                           });
                         }}
                       >
-                        <Pencil className="mr-1 size-3" />
-                        编辑
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
+                        <Pencil className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        title="删除"
+                        className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
                         disabled={deleteMut.isPending}
                         onClick={async () => {
                           const ok = await confirm({
@@ -233,8 +234,8 @@ export function AcsAccountListPage() {
                           if (ok) deleteMut.mutate(a.id);
                         }}
                       >
-                        <Trash2 className="size-4 text-destructive" />
-                      </Button>
+                        <Trash2 className="size-4" />
+                      </button>
                     </div>
                   </td>
                 </tr>

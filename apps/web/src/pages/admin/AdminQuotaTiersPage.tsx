@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, X, Check, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, X, Check, RefreshCw, Pencil } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -223,9 +223,9 @@ export function AdminQuotaTiersPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
+                        <button
+                          type="button"
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
                           onClick={() =>
                             setDraft({
                               id: t.id,
@@ -236,18 +236,19 @@ export function AdminQuotaTiersPage() {
                             })
                           }
                           disabled={!!draft}
+                          title="编辑"
                         >
-                          编辑
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
+                          <Pencil className="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
                           onClick={() => handleDelete(t)}
                           disabled={deleteMut.isPending || !!draft}
                           title="删除档位"
                         >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
+                          <Trash2 className="size-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>

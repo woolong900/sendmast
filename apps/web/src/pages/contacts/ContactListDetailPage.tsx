@@ -182,10 +182,9 @@ export function ContactListDetailPage() {
 
   return (
     <div className="space-y-4">
-      <Button variant="outline" size="sm" asChild>
-        <Link to="/contacts">
-          <ArrowLeft className="mr-1 size-4" />
-          返回列表
+      <Button variant="outline" size="icon" asChild className="shrink-0">
+        <Link to="/contacts" aria-label="返回列表">
+          <ArrowLeft className="size-5" />
         </Link>
       </Button>
 
@@ -372,9 +371,10 @@ export function ContactListDetailPage() {
                         {formatDateTime(c.createdAt)}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Button
-                          size="icon"
-                          variant="ghost"
+                        <button
+                          type="button"
+                          title="删除"
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
                           disabled={deleteMut.isPending}
                           onClick={async () => {
                             const ok = await confirm({
@@ -391,8 +391,8 @@ export function ContactListDetailPage() {
                             if (ok) deleteMut.mutate(c.id);
                           }}
                         >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
+                          <Trash2 className="size-4" />
+                        </button>
                       </td>
                     </tr>
                   );

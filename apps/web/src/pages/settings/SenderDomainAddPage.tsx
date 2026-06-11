@@ -102,10 +102,9 @@ export function SenderDomainAddPage() {
 
   return (
     <div className="space-y-4">
-      <Button variant="outline" size="sm" asChild>
-        <Link to="/settings/domains">
-          <ArrowLeft className="mr-1 size-4" />
-          返回
+      <Button variant="outline" size="icon" asChild className="shrink-0">
+        <Link to="/settings/domains" aria-label="返回域名列表">
+          <ArrowLeft className="size-5" />
         </Link>
       </Button>
 
@@ -376,9 +375,10 @@ function SenderUsernamesStepCard({
                   <td className="px-4 py-2 font-mono">{u.fullAddress}</td>
                   <td className="px-4 py-2 text-muted-foreground">{u.displayName || '—'}</td>
                   <td className="px-4 py-2 text-right">
-                    <Button
-                      size="icon"
-                      variant="ghost"
+                    <button
+                      type="button"
+                      title="删除"
+                      className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
                       disabled={removeMut.isPending}
                       onClick={async () => {
                         const ok = await confirm({
@@ -394,8 +394,8 @@ function SenderUsernamesStepCard({
                         if (ok) removeMut.mutate(u.id);
                       }}
                     >
-                      <Trash2 className="size-4 text-destructive" />
-                    </Button>
+                      <Trash2 className="size-4" />
+                    </button>
                   </td>
                 </tr>
               ))}

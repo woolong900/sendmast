@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, Plus, Sparkles, Trash2, Users } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, Trash2, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -162,12 +162,11 @@ export function SegmentEditPage() {
     <div className="space-y-6 pb-12">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Link
-            to="/segments"
-            className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <ChevronLeft className="size-5" />
-          </Link>
+          <Button variant="outline" size="icon" asChild className="shrink-0">
+            <Link to="/segments" aria-label="返回分群">
+              <ArrowLeft className="size-5" />
+            </Link>
+          </Button>
           <h1 className="text-xl font-semibold">{isEdit ? '编辑分群' : '创建分群'}</h1>
         </div>
         <div className="flex items-center gap-2">

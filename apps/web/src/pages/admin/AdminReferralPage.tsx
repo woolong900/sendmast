@@ -239,9 +239,9 @@ function ChannelsTab() {
                           <Copy className="mr-1 size-3.5" />
                           推荐链接
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
+                        <button
+                          type="button"
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
                           onClick={() =>
                             setDraft({
                               id: c.id,
@@ -257,16 +257,16 @@ function ChannelsTab() {
                           title="编辑"
                         >
                           <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
                           onClick={() => handleDelete(c)}
                           disabled={deleteMut.isPending || !!draft}
                           title="删除"
                         >
-                          <Trash2 className="size-4 text-destructive" />
-                        </Button>
+                          <Trash2 className="size-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
