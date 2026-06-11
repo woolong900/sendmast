@@ -276,7 +276,7 @@ function EmailThumb({
 }
 
 function FieldLabel({ children }: { children: ReactNode }) {
-  return <span className="mb-1.5 block text-[13px] font-medium text-foreground">{children}</span>;
+  return <span className="mb-2 block text-sm font-semibold text-foreground">{children}</span>;
 }
 
 /**
@@ -691,30 +691,30 @@ function FlowEditor({
           onApply={applyContent}
         />
       )}
-      <div className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <button
-              type="button"
-              onClick={onBack}
-              className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <ArrowLeft className="size-4" />
-              返回自动化
-            </button>
-            <h2 className="text-xl font-semibold tracking-tight">
-              编辑{SHOP_AUTOMATION_LABELS[automation.type]}
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">{TRIGGERS[automation.type]}</p>
-          </div>
-          <div className="flex items-center gap-3">
+      <div className="space-y-4 pb-4">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onBack}
+            aria-label="返回自动化"
+            className="shrink-0"
+          >
+            <ArrowLeft className="size-5" />
+          </Button>
+          <h1 className="text-xl font-semibold">
+            编辑{SHOP_AUTOMATION_LABELS[automation.type]}
+          </h1>
+          <div className="ml-auto flex items-center gap-2">
             <span className="text-sm text-muted-foreground">{enabled ? '已启用' : '已关闭'}</span>
             <Switch checked={enabled} onCheckedChange={setEnabled} />
           </div>
         </div>
 
         <Card>
-          <CardContent className="space-y-6 p-5">
+          <CardContent className="space-y-6 p-6">
+              <p className="text-sm text-muted-foreground">{TRIGGERS[automation.type]}</p>
+
               {!isAbandoned && (
                 <EmailContentBlock
                   thumbnail={content.thumbnail}
