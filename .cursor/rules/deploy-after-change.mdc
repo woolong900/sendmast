@@ -1,0 +1,15 @@
+---
+description: Commit and deploy after every change
+alwaysApply: true
+---
+
+# 修改后必须提交并部署
+
+每次完成代码修改并验证（typecheck/测试）通过后：
+
+1. `git commit`（遵循仓库现有的 conventional commit 风格）并 `git push origin main`
+2. 部署到生产服务器：`ssh root@74.208.77.128 'cd /root/sendmast && ./scripts/deploy.sh'`
+   - 脚本会自动 git pull、构建镜像、执行 Prisma 迁移、滚动重启容器
+3. 部署后在服务器上做基本验证（容器状态、关键日志、必要时查询数据库确认）
+
+仅修改文档/规则等不影响运行时的文件时，提交推送即可，无需触发部署。
