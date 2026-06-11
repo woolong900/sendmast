@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -71,15 +71,20 @@ export function AutomationsPage() {
   const active = (data?.connections ?? []).filter((c) => c.status === 'active');
   const [storeId, setStoreId] = useState<string | null>(null);
   const selected = active.find((c) => c.id === storeId) ?? active[0] ?? null;
+  // Hide the page header/store picker while a flow is being edited so the
+  // editor reads like other edit pages (back button + edited object name only).
+  const [editing, setEditing] = useState(false);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">自动化</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          为店铺事件配置自动化邮件流程：买家下单、支付、发货时自动触发，无需手动发送。
-        </p>
-      </div>
+      {!editing && (
+        <div>
+          <h1 className="text-xl font-semibold">自动化</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            为店铺事件配置自动化邮件流程：买家下单、支付、发货时自动触发，无需手动发送。
+          </p>
+        </div>
+      )}
 
       {isLoading && (
         <Card>
@@ -106,7 +111,7 @@ export function AutomationsPage() {
 
       {!isLoading && active.length > 0 && selected && (
         <div className="space-y-4">
-          {active.length > 1 && (
+          {active.length > 1 && !editing && (
             <div className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">店铺</span>
               <FilterSelect
@@ -120,15 +125,29 @@ export function AutomationsPage() {
               />
             </div>
           )}
-          <FlowList key={selected.id} connectionId={selected.id} />
+          <FlowList
+            key={selected.id}
+            connectionId={selected.id}
+            onEditingChange={setEditing}
+          />
         </div>
       )}
     </div>
   );
 }
 
-function FlowList({ connectionId }: { connectionId: string }) {
+function FlowList({
+  connectionId,
+  onEditingChange,
+}: {
+  connectionId: string;
+  onEditingChange?: (editing: boolean) => void;
+}) {
   const [editingType, setEditingType] = useState<ShopAutomationType | null>(null);
+  useEffect(() => {
+    onEditingChange?.(editingType !== null);
+    return () => onEditingChange?.(false);
+  }, [editingType, onEditingChange]);
   const automations = useQuery<ShopAutomationView[]>({
     queryKey: ['shop-automations', connectionId],
     queryFn: async () =>
