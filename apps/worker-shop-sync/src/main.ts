@@ -42,6 +42,17 @@ const deps: AutomationDeps = { prisma, sendQueue, abandonedQueue };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// shop_orders.status is monotonic: pending → paid → shipped. The guard below
+// only ever advances it forward, so an out-of-order or duplicate paid/shipped
+// webhook (workers run concurrently) can never regress a more-advanced order.
+const ORDER_STATUS_RANK: Record<string, number> = { pending: 0, paid: 1, shipped: 2 };
+
+/** Statuses ranked strictly below `target` (the only ones it may advance from). */
+function lowerOrderStatuses(target: string): string[] {
+  const rank = ORDER_STATUS_RANK[target] ?? 0;
+  return Object.keys(ORDER_STATUS_RANK).filter((s) => ORDER_STATUS_RANK[s]! < rank);
+}
+
 /** Read the recall-link `sm_mid` (a flow send id) from the order's landing page. */
 function landingPageSendId(payload: Record<string, unknown>): string | null {
   const lp = payload['landing_page'];
@@ -99,6 +110,7 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
     return;
   }
   const contactId = await upsertContact(job.accountId, order.email);
+  const newStatus = shipped ? 'shipped' : 'paid';
 
   // Last-click attribution: only meaningful for the paid event (the conversion).
   const attribution = shipped
@@ -128,10 +140,10 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       contactId,
       value: order.value,
       currency: order.currency,
-      // This handler runs for the paid/shipped events, so the status is known —
-      // canonicalise it so the abandoned-order recall can reliably tell a paid
-      // order from a still-pending one.
-      status: shipped ? 'shipped' : 'paid',
+      // First touch (e.g. a paid/shipped webhook arriving before create): seed
+      // the row at this event's status. Subsequent events advance it via the
+      // monotonic guard below — never here in the update branch.
+      status: newStatus,
       orderTime: order.orderTime,
       attributedCampaignId: attribution?.campaignId ?? null,
       attributedContactId: attribution ? contactId : null,
@@ -140,13 +152,14 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       attributedSendId: flowAttr?.sendId ?? null,
       raw: job.payload as object,
     },
+    // Note: `status` is deliberately NOT set here — it's advanced separately by
+    // the monotonic guard so a late/duplicate paid can't downgrade a shipped order.
     update: {
       orderNo: order.orderNo ?? null,
       customerEmail: order.email,
       contactId,
       value: order.value,
       currency: order.currency,
-      status: shipped ? 'shipped' : 'paid',
       orderTime: order.orderTime,
       // Don't overwrite an existing attribution on a later (e.g. shipped) event.
       ...(attribution
@@ -162,6 +175,20 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       raw: job.payload as object,
     },
   });
+
+  // Advance status forward only. A single atomic UPDATE … WHERE status IN
+  // (<lower ranks>) means a duplicate paid/shipped is a no-op, and an
+  // out-of-order paid arriving after shipped can't regress the row.
+  if (lowerOrderStatuses(newStatus).length > 0) {
+    await prisma.shopOrder.updateMany({
+      where: {
+        shopConnectionId: job.connectionId,
+        externalOrderId: order.externalOrderId,
+        status: { in: lowerOrderStatuses(newStatus) },
+      },
+      data: { status: newStatus },
+    });
+  }
 
   // ClickHouse analytics rows (orders is ReplacingMergeTree → safe to re-insert).
   await insertOrders(ch, [
