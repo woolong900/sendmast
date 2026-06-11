@@ -18,6 +18,7 @@ import { type IEmailTemplate } from 'easy-email-editor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { FilterSelect } from '@/components/ui/filter-select';
 import { useToast } from '@/components/ui/toast';
@@ -211,11 +212,48 @@ function FlowList({
 function AutomationLoading() {
   return (
     <AutomationTable>
-      <tr>
-        <td colSpan={7} className="px-6 py-10 text-center text-muted-foreground">
-          加载中...
-        </td>
-      </tr>
+      {Array.from({ length: 3 }, (_, i) => (
+        <tr key={i} className="border-b last:border-b-0">
+          <td className="px-6 py-4 align-middle">
+            <div className="flex items-center gap-3">
+              <Skeleton className="size-9 shrink-0 rounded-lg" />
+              <div className="space-y-2">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-3 w-48" />
+              </div>
+            </div>
+          </td>
+          <td className="px-6 py-4 align-middle">
+            <Skeleton className="h-5 w-14 rounded-full" />
+          </td>
+          <td className="px-6 py-4 align-middle">
+            <div className="flex justify-end">
+              <Skeleton className="h-4 w-8" />
+            </div>
+          </td>
+          <td className="px-6 py-4 align-middle">
+            <div className="flex justify-end">
+              <Skeleton className="h-4 w-10" />
+            </div>
+          </td>
+          <td className="px-6 py-4 align-middle">
+            <div className="flex justify-end">
+              <Skeleton className="h-4 w-10" />
+            </div>
+          </td>
+          <td className="px-6 py-4 align-middle">
+            <div className="flex justify-end">
+              <Skeleton className="h-4 w-14" />
+            </div>
+          </td>
+          <td className="px-6 py-4 align-middle">
+            <div className="flex items-center justify-end gap-3">
+              <Skeleton className="h-5 w-9 rounded-full" />
+              <Skeleton className="size-7" />
+            </div>
+          </td>
+        </tr>
+      ))}
     </AutomationTable>
   );
 }
