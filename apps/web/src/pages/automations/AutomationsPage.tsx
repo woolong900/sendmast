@@ -594,7 +594,6 @@ function FlowEditor({
     queryFn: async () => (await api.get(`/api/integrations/shopyy/${connectionId}/coupons`)).data,
     enabled: isAbandoned,
     retry: false,
-    staleTime: 60_000,
   });
 
   const [enabled, setEnabled] = useState(automation.enabled);

@@ -55,7 +55,6 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
     queryKey: ['fx', 'usd-cny'],
     queryFn: async () => (await api.get('/api/fx/usd-cny')).data,
     enabled: open,
-    staleTime: 5 * 60 * 1000,
   });
 
   // Auto-select the first tier when data arrives so the price footer isn't

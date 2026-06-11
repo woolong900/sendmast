@@ -29,7 +29,6 @@ export function VariablesHelper({
     queryKey: ['custom-tags'],
     queryFn: async () => (await api.get('/api/custom-tags')).data,
     enabled: open,
-    staleTime: 60_000,
   });
 
   const copy = async (text: string) => {

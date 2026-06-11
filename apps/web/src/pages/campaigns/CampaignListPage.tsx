@@ -346,16 +346,12 @@ function ThumbnailWithHover({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // `enabled: open` keeps the fetch off until the user actually hovers; once
-  // fired, react-query caches the result keyed by campaign id so re-hovering
-  // is free. `staleTime: Infinity` — HTML only changes on re-edit, which
-  // invalidates ['campaigns'] and remounts these rows.
+  // `enabled: open` keeps the fetch off until the user actually hovers.
   const preview = useQuery<{ html: string | null }>({
     queryKey: ['campaign-html', campaignId],
     queryFn: async () =>
       (await api.get(`/api/campaigns/${campaignId}`)).data,
     enabled: open,
-    staleTime: Infinity,
   });
 
   useEffect(() => () => {
