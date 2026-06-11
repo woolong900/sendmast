@@ -502,7 +502,10 @@ function FlowTableRow({
   const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 1000) / 10}%` : '—');
 
   return (
-    <tr className="border-b last:border-b-0">
+    <tr
+      className="group cursor-pointer border-b transition-colors last:border-b-0 hover:bg-muted/30"
+      onClick={onEdit}
+    >
       <td className="px-6 py-4 align-middle">
         <div className="flex items-center gap-3">
           <div
@@ -515,7 +518,7 @@ function FlowTableRow({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-foreground">
+              <span className="font-medium text-foreground transition-colors group-hover:text-primary">
                 {SHOP_AUTOMATION_LABELS[automation.type]}
               </span>
               {isAbandoned && <Badge variant="muted">{automation.steps.length || 1} 轮</Badge>}
@@ -548,7 +551,7 @@ function FlowTableRow({
         {formatMoney(s.revenue, s.currency)}
       </td>
       <td className="px-6 py-4 align-middle">
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-end gap-3" onClick={(e) => e.stopPropagation()}>
           <Switch
             checked={automation.enabled}
             onCheckedChange={(next) => toggle.mutate(next)}
