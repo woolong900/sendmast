@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { api, apiErrMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import type { ShopConnectionView } from '@sendmast/shared';
+
+interface ShopConnectionsResponse {
+  configured: boolean;
+  connections: ShopConnectionView[];
+}
 
 /**
  * Landing page for the shopyy authorize redirect. Shopyy sends the merchant
@@ -14,6 +21,7 @@ import { Button } from '@/components/ui/button';
 export function ShopyyCallbackPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [state, setState] = useState<'working' | 'ok' | 'error'>('working');
   const [message, setMessage] = useState('正在完成店铺授权...');
   const ran = useRef(false);
@@ -35,7 +43,23 @@ export function ShopyyCallbackPage() {
     api
       .post('/api/integrations/shopyy/connect', { code, authorizeTokenUrl })
       .then((res) => {
-        const name = res.data?.shopName ?? res.data?.shopDomain ?? '店铺';
+        const conn = res.data as ShopConnectionView;
+        const name = conn.shopName ?? conn.shopDomain ?? '店铺';
+        // Re-bind updates the same row (revoked → active). Without busting the
+        // persisted shop-connections cache the settings/automation pages keep
+        // showing "尚未连接" for up to staleTime after a successful authorize.
+        qc.setQueryData<ShopConnectionsResponse>(['shop-connections'], (old) => {
+          const base = old ?? { configured: true, connections: [] };
+          const i = base.connections.findIndex(
+            (c) => c.id === conn.id || c.externalStoreId === conn.externalStoreId,
+          );
+          const connections =
+            i >= 0
+              ? base.connections.map((c, j) => (j === i ? conn : c))
+              : [conn, ...base.connections];
+          return { ...base, connections };
+        });
+        void qc.invalidateQueries({ queryKey: ['shop-connections'] });
         setState('ok');
         setMessage(`已成功连接「${name}」。`);
         setTimeout(() => navigate('/settings/shop', { replace: true }), 1200);
@@ -44,7 +68,7 @@ export function ShopyyCallbackPage() {
         setState('error');
         setMessage(apiErrMessage(err));
       });
-  }, [code, authorizeTokenUrl, navigate]);
+  }, [code, authorizeTokenUrl, navigate, qc]);
 
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
