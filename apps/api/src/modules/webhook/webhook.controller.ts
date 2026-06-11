@@ -19,7 +19,7 @@ import { WebhookService, type EventGridEvent } from './webhook.service';
 // Azure Event Grid delivers delivery/bounce reports in high-volume bursts from
 // a pool of Azure IPs; the global 240/min per-IP throttle would 429 (and drop)
 // legitimate reports during a large send. This endpoint is authenticated by the
-// shared ?key= secret, so it's safe to exempt from IP rate limiting.
+// shared secret header, so it's safe to exempt from IP rate limiting.
 @SkipThrottle()
 export class WebhookController {
   constructor(
@@ -33,9 +33,10 @@ export class WebhookController {
   async azureEventGrid(
     @Body() body: EventGridEvent[] | EventGridEvent,
     @Headers('aeg-event-type') aegEventType: string | undefined,
+    @Headers('x-sendmast-webhook-key') headerKey: string | undefined,
     @Query('key') key: string | undefined,
   ) {
-    this.assertAuthorized(key);
+    this.assertAuthorized(headerKey ?? key);
     const events = Array.isArray(body) ? body : [body];
     const result = await this.svc.handleEventGrid(events);
     if (aegEventType === 'SubscriptionValidation' && result.subscriptionValidationResponse) {
@@ -45,11 +46,10 @@ export class WebhookController {
   }
 
   /**
-   * Reject the request unless `?key=` matches EVENTGRID_WEBHOOK_KEY. Without
-   * this, anyone could POST forged delivery/bounce/complaint events and skew
-   * analytics or trip hard-bounce suppression on real contacts. The handshake
-   * (SubscriptionValidation) also carries the key, so validation still passes.
-   * Production config validation also refuses to boot without this secret.
+   * Reject the request unless the shared key matches EVENTGRID_WEBHOOK_KEY.
+   * The header is preferred because query strings are commonly written to
+   * access logs. Query-key support remains for a zero-downtime migration from
+   * the previous Event Grid endpoint configuration.
    */
   private assertAuthorized(key: string | undefined): void {
     const expected = this.config.get<string>('EVENTGRID_WEBHOOK_KEY');
