@@ -551,9 +551,14 @@ function FlowTableRow({
             onCheckedChange={(next) => toggle.mutate(next)}
             disabled={toggle.isPending}
           />
-          <Button variant={configured ? 'ghost' : 'outline'} size="sm" onClick={onEdit}>
-            {configured ? '编辑' : '配置'}
-          </Button>
+          <button
+            type="button"
+            onClick={onEdit}
+            title={configured ? '编辑' : '配置'}
+            className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            <Pencil className="size-4" />
+          </button>
         </div>
       </td>
     </tr>
