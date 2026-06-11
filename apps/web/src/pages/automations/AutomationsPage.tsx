@@ -766,22 +766,9 @@ function FlowEditor({
 
             {isAbandoned && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-1.5 text-[13px] font-semibold text-muted-foreground">
-                    <Clock className="size-4 shrink-0" />
-                    <span>召回节奏 · 最多 {MAX_ABANDONED_ROUNDS} 轮，延迟须逐轮递增</span>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0"
-                    disabled={rounds.length >= MAX_ABANDONED_ROUNDS}
-                    onClick={addRound}
-                  >
-                    <Plus className="mr-1 size-3.5" />
-                    添加一轮
-                  </Button>
+                <div className="flex items-center gap-1.5 text-[13px] font-semibold text-muted-foreground">
+                  <Clock className="size-4 shrink-0" />
+                  <span>召回节奏 · 最多 {MAX_ABANDONED_ROUNDS} 轮，延迟须逐轮递增</span>
                 </div>
                 {rounds.map((r, i) => {
                   const badDelay = i > 0 && r.delayMinutes <= rounds[i - 1]!.delayMinutes;
@@ -892,10 +879,23 @@ function FlowEditor({
                   {configured && <CheckCircle2 className="size-3.5 text-emerald-600" />}
                   {configured ? '已配置完成' : '请设置邮件内容与发件人后保存'}
                 </span>
-                <Button onClick={() => save.mutate()} disabled={save.isPending || !roundsValid}>
-                  <Save className="mr-1 size-4" />
-                  保存流程
-                </Button>
+                <div className="flex items-center gap-2">
+                  {isAbandoned && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={rounds.length >= MAX_ABANDONED_ROUNDS}
+                      onClick={addRound}
+                    >
+                      <Plus className="mr-1 size-4" />
+                      添加一轮
+                    </Button>
+                  )}
+                  <Button onClick={() => save.mutate()} disabled={save.isPending || !roundsValid}>
+                    <Save className="mr-1 size-4" />
+                    保存流程
+                  </Button>
+                </div>
               </div>
           </CardContent>
         </Card>
