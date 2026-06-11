@@ -196,8 +196,11 @@ export function injectPreheader(html: string, text: string): string {
   const esc = t.replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
-  // Spacer hides the following body content from the preview snippet.
-  const spacer = '&#847;&zwnj;&nbsp;'.repeat(60);
+  // Spacer fills the inbox preview window so body text isn't appended after the
+  // preview snippet. Each unit is a non-collapsing space (zero-width joiners
+  // stop clients merging the nbsp run); ~150 units comfortably covers the
+  // longest preview widths (Gmail ~100 chars, Apple Mail/Outlook longer).
+  const spacer = '&#847;&zwnj;&nbsp;'.repeat(150);
   const span =
     `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;` +
     `font-size:1px;line-height:1px;color:#ffffff;opacity:0;">${esc}${spacer}</div>`;
