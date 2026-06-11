@@ -17,6 +17,7 @@ import type {
   CreateAcsAccountInput,
 } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 
 type FormState = CreateAcsAccountInput & { id?: string };
 
@@ -96,13 +97,7 @@ export function AcsAccountListPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={6} />}
               {!isLoading && data && data.length === 0 && <EmptyStateRow colSpan={6} />}
               {data?.map((a) => (
                 <tr key={a.id} className="border-b last:border-0">

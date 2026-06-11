@@ -11,6 +11,7 @@ import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import type { SenderDomainView, TenantAcsAccountView } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 
 type DomainView = SenderDomainView;
 
@@ -85,13 +86,7 @@ export function SenderDomainsPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={colCount} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={colCount} />}
               {!isLoading && data && data.length === 0 && <EmptyStateRow colSpan={colCount} />}
               {data?.map((d) => {
                 // Domain is fully usable once DNS is verified AND there's at

@@ -17,6 +17,7 @@ import type {
   SendLogView,
 } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 
 interface Filters {
   accountId: string;
@@ -193,13 +194,7 @@ export function SendLogsAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
-                    加载中…
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={9} cellClassName="px-4 py-3" />}
               {!isLoading && data?.rows.length === 0 && <EmptyStateRow colSpan={9} />}
               {data?.rows.map((r) => (
                 <tr

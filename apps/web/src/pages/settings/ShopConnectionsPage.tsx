@@ -3,6 +3,7 @@ import { Store, Unplug, Info, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { Link } from 'react-router-dom';
@@ -78,7 +79,16 @@ export function ShopConnectionsPage() {
       <div className="space-y-3">
         {isLoading && (
           <Card>
-            <CardContent className="p-6 text-sm text-muted-foreground">加载中...</CardContent>
+            <CardContent className="flex items-center justify-between gap-4 p-5">
+              <div className="flex min-w-0 items-center gap-3">
+                <Skeleton className="size-10 shrink-0 rounded-lg" />
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-52 max-w-full" />
+                </div>
+              </div>
+              <Skeleton className="h-8 w-16 shrink-0" />
+            </CardContent>
           </Card>
         )}
 

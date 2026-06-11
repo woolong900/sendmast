@@ -4,6 +4,7 @@ import { Users, Send, ShoppingCart, MailOpen, Plus, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
 import { formatNumber } from '@/lib/utils';
 import { useAuth } from '@/store/auth';
@@ -62,7 +63,7 @@ export function DashboardPage() {
         <StatCard
           icon={<Wallet className="size-5" />}
           label="剩余发送额度"
-          value={quota ? formatNumber(quota.remaining) : '...'}
+          value={quota ? formatNumber(quota.remaining) : <Skeleton className="h-7 w-24" />}
           tone={
             quota?.remaining === 0
               ? 'destructive'
@@ -75,14 +76,18 @@ export function DashboardPage() {
         <StatCard
           icon={<Users className="size-5" />}
           label="联系人总数"
-          value={isLoading ? '...' : formatNumber(data?.contacts.total ?? 0)}
+          value={
+            isLoading ? <Skeleton className="h-7 w-20" /> : formatNumber(data?.contacts.total ?? 0)
+          }
           tone="emerald"
           link="/contacts"
         />
         <StatCard
           icon={<Send className="size-5" />}
           label="近 30 日发送量"
-          value={isLoading ? '...' : formatNumber(data?.metrics30d.sent ?? 0)}
+          value={
+            isLoading ? <Skeleton className="h-7 w-20" /> : formatNumber(data?.metrics30d.sent ?? 0)
+          }
           tone="blue"
           link="/campaigns"
         />
@@ -90,9 +95,11 @@ export function DashboardPage() {
           icon={<MailOpen className="size-5" />}
           label="近 30 日打开率"
           value={
-            isLoading
-              ? '...'
-              : `${((data?.metrics30d.openRate ?? 0) * 100).toFixed(1)}%`
+            isLoading ? (
+              <Skeleton className="h-7 w-20" />
+            ) : (
+              `${((data?.metrics30d.openRate ?? 0) * 100).toFixed(1)}%`
+            )
           }
           tone="amber"
         />
@@ -107,12 +114,20 @@ export function DashboardPage() {
                 <Link to="/campaigns">查看全部</Link>
               </Button>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <StatusItem label="草稿" value={data?.campaigns.draft ?? 0} variant="muted" />
-              <StatusItem label="已定时" value={data?.campaigns.scheduled ?? 0} variant="warning" />
-              <StatusItem label="发送中" value={data?.campaigns.sending ?? 0} variant="default" />
-              <StatusItem label="已完成" value={data?.campaigns.sent ?? 0} variant="success" />
-            </div>
+            {isLoading ? (
+              <div className="grid grid-cols-2 gap-4">
+                {Array.from({ length: 4 }, (_, i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <StatusItem label="草稿" value={data?.campaigns.draft ?? 0} variant="muted" />
+                <StatusItem label="已定时" value={data?.campaigns.scheduled ?? 0} variant="warning" />
+                <StatusItem label="发送中" value={data?.campaigns.sending ?? 0} variant="default" />
+                <StatusItem label="已完成" value={data?.campaigns.sent ?? 0} variant="success" />
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -124,7 +139,13 @@ export function DashboardPage() {
                 <Link to="/settings/shop">店铺设置</Link>
               </Button>
             </div>
-            {data?.shopConnected ? (
+            {isLoading ? (
+              <div className="grid grid-cols-3 gap-4">
+                {Array.from({ length: 3 }, (_, i) => (
+                  <Skeleton key={i} className="h-16 w-full" />
+                ))}
+              </div>
+            ) : data?.shopConnected ? (
               <div className="grid grid-cols-3 gap-4">
                 <SalesStat label="近 30 日营收" value={formatUsd(data.sales.revenue)} />
                 <SalesStat label="订单数" value={formatNumber(data.sales.orders)} />

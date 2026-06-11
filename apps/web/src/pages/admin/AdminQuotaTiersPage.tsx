@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { Skeleton, TableSkeletonRows } from '@/components/ui/skeleton';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/utils';
 import type {
@@ -137,7 +138,7 @@ export function AdminQuotaTiersPage() {
                   <span className="tabular-nums">¥{fx.rate.toFixed(4)}</span>
                 </>
               ) : (
-                <span className="text-muted-foreground">汇率加载中...</span>
+                <Skeleton className="h-4 w-40" />
               )}
             </div>
             {fx && (
@@ -175,13 +176,7 @@ export function AdminQuotaTiersPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={6} />}
               {!isLoading && tiers.length === 0 && !draft && (
                 <EmptyStateRow colSpan={6} />
               )}

@@ -10,6 +10,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/utils';
 
@@ -145,13 +146,7 @@ export function ContactListsPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={4} />}
               {!isLoading && data && data.items.length === 0 && <EmptyStateRow colSpan={4} />}
               {data?.items.map((l) => {
                 const href = `/contacts/lists/${l.id}`;

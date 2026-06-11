@@ -11,6 +11,7 @@ import { FilterSelect } from '@/components/ui/filter-select';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { Skeleton, TableSkeletonRows } from '@/components/ui/skeleton';
 import { api, apiErrMessage } from '@/lib/api';
 import { cn, formatDateTime, formatNumber } from '@/lib/utils';
 import type {
@@ -202,13 +203,7 @@ function ChannelsTab() {
                 </tr>
               </thead>
               <tbody>
-                {isLoading && (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                      加载中...
-                    </td>
-                  </tr>
-                )}
+                {isLoading && <TableSkeletonRows columns={7} />}
                 {!isLoading && channels.length === 0 && !draft && (
                   <EmptyStateRow colSpan={7} title="暂无推荐渠道 — 点右上角「新增渠道」开始" />
                 )}
@@ -416,7 +411,18 @@ function SettingsTab() {
   if (isLoading) {
     return (
       <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">加载中...</CardContent>
+        <CardContent className="space-y-4 p-6">
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-9 w-28" />
+            <Skeleton className="h-3 w-36" />
+          </div>
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-9 w-32" />
+          </div>
+          <Skeleton className="h-9 w-20" />
+        </CardContent>
       </Card>
     );
   }
@@ -664,13 +670,7 @@ function CommissionsTab() {
                 </tr>
               </thead>
               <tbody>
-                {detailLoading && (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                      加载中...
-                    </td>
-                  </tr>
-                )}
+                {detailLoading && <TableSkeletonRows columns={6} cellClassName="px-4 py-3" />}
                 {!detailLoading && detail.length === 0 && (
                   <EmptyStateRow colSpan={6} title="该月份暂无返佣记录" />
                 )}

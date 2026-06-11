@@ -14,6 +14,7 @@ import { useAuth } from '@/store/auth';
 import type { DateRange } from '@/components/ui/date-range-picker';
 import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 
 interface CampaignListItem {
   id: string;
@@ -175,13 +176,7 @@ export function CampaignListPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={2} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={2} />}
               {isError && !isLoading && (
                 <tr>
                   <td colSpan={2} className="px-4 py-8 text-center text-sm text-muted-foreground">

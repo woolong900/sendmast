@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton, TableSkeletonRows } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
@@ -135,7 +136,17 @@ function SmtpConfigCard() {
         </div>
 
         {isLoading ? (
-          <div className="text-sm text-muted-foreground">加载中…</div>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              {Array.from({ length: 8 }, (_, i) => (
+                <div key={i} className="space-y-2">
+                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-9 w-full" />
+                </div>
+              ))}
+            </div>
+            <Skeleton className="h-9 w-24" />
+          </div>
         ) : (
           <>
             <div className="grid grid-cols-2 gap-4">
@@ -339,13 +350,7 @@ function TemplatesCard() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={5} />}
               {templates?.map((t) => (
                 <tr key={t.code} className="border-b last:border-0">
                   <td className="px-4 py-3">

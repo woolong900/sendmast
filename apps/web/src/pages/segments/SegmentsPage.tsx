@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { api, apiErrMessage } from '@/lib/api';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 import { formatNumber } from '@/lib/utils';
 import type { SegmentView } from '@sendmast/shared';
 
@@ -68,13 +69,7 @@ export function SegmentsPage() {
             </tr>
           </thead>
           <tbody>
-            {list.isLoading && (
-              <tr>
-                <td colSpan={5} className="px-6 py-10 text-center text-muted-foreground">
-                  加载中...
-                </td>
-              </tr>
-            )}
+            {list.isLoading && <TableSkeletonRows columns={5} cellClassName="px-6 py-4" />}
             {!list.isLoading && (list.data?.length ?? 0) === 0 && (
               <EmptyStateRow colSpan={5} />
             )}

@@ -14,6 +14,7 @@ import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/utils';
 import { ImportContactsDialog } from '@/pages/contacts/ImportContactsDialog';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 
 type Status = 'subscribed' | 'unsubscribed' | 'bounced' | 'complained' | 'pending';
 
@@ -336,13 +337,7 @@ export function ContactListDetailPage() {
                 )}
               </thead>
               <tbody>
-                {contacts.isLoading && (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                      加载中...
-                    </td>
-                  </tr>
-                )}
+                {contacts.isLoading && <TableSkeletonRows columns={6} />}
                 {contacts.data?.items.length === 0 && <EmptyStateRow colSpan={6} />}
                 {items.map((c) => {
                   const checked = selectedIds.has(c.id);

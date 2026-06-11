@@ -9,6 +9,7 @@ import { useConfirm } from '@/components/ui/confirm-dialog';
 import { api, apiErrMessage } from '@/lib/api';
 import type { CustomTagView } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 
 type EditorState =
   | { mode: 'closed' }
@@ -102,13 +103,7 @@ export function CustomTagsPage() {
             </tr>
           </thead>
           <tbody>
-            {list.isLoading && (
-              <tr>
-                <td colSpan={4} className="px-6 py-10 text-center text-muted-foreground">
-                  加载中...
-                </td>
-              </tr>
-            )}
+            {list.isLoading && <TableSkeletonRows columns={4} cellClassName="px-6 py-4" />}
             {!list.isLoading && (list.data?.length ?? 0) === 0 && (
               <EmptyStateRow colSpan={4} />
             )}

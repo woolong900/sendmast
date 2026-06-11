@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Wallet, Plus, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { UpgradeQuotaModal } from '@/components/UpgradeQuotaModal';
 import { formatNumber } from '@/lib/utils';
 import { useAuth } from '@/store/auth';
@@ -48,7 +49,7 @@ export function QuotaPage() {
           <div>
             <div className="text-xs text-muted-foreground">当前剩余</div>
             <div className={`mt-1 text-3xl font-semibold tabular-nums ${tone}`}>
-              {isLoading ? '...' : formatNumber(remaining)}
+              {isLoading ? <Skeleton className="h-9 w-32" /> : formatNumber(remaining)}
             </div>
           </div>
         </CardContent>

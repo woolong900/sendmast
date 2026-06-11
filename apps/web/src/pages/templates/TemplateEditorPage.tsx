@@ -14,6 +14,7 @@ import { JsonToMjml } from 'easy-email-core';
 import mjml2html from 'mjml-browser';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { FullscreenEmailEditor } from '@/components/FullscreenEmailEditor';
 import { api, apiErrMessage } from '@/lib/api';
 import { easyEmailZhCN } from '@/lib/easy-email-locale';
@@ -106,8 +107,23 @@ export function TemplateEditorPage() {
 
   if (!initialData) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background text-sm text-muted-foreground">
-        加载中…
+      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        <div className="flex h-14 items-center gap-3 border-b px-4">
+          <Skeleton className="h-9 w-24" />
+          <Skeleton className="h-9 w-56" />
+          <Skeleton className="ml-auto h-9 w-20" />
+        </div>
+        <div className="flex min-h-0 flex-1">
+          <div className="hidden w-64 space-y-4 border-r p-4 md:block">
+            <Skeleton className="h-8 w-full" />
+            {Array.from({ length: 6 }, (_, i) => (
+              <Skeleton key={i} className="h-14 w-full" />
+            ))}
+          </div>
+          <div className="flex flex-1 justify-center bg-muted/30 p-6">
+            <Skeleton className="h-full w-full max-w-3xl rounded-none bg-background" />
+          </div>
+        </div>
       </div>
     );
   }

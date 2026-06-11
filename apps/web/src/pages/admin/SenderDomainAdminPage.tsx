@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 
 interface AdminSenderDomain {
   id: string;
@@ -43,13 +44,7 @@ export function SenderDomainAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={5} />}
               {!isLoading && domains && domains.length === 0 && <EmptyStateRow colSpan={5} />}
               {domains?.map((d) => (
                 <tr key={d.id} className="border-b last:border-0">

@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import type {
@@ -202,13 +203,7 @@ export function AdminTrackingDomainsPage() {
                 </tr>
               </thead>
               <tbody>
-                {isLoading && (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                      加载中...
-                    </td>
-                  </tr>
-                )}
+                {isLoading && <TableSkeletonRows columns={5} />}
                 {!isLoading && domains.length === 0 && (
                   <EmptyStateRow colSpan={5} title="暂无追踪域名 — 点右上角「添加域名」开始" />
                 )}

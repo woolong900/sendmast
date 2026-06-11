@@ -18,6 +18,7 @@ import {
   type SetAccountStatusInput,
 } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 
 const STATUS_LABEL: Record<AdminAccountView['status'], string> = {
   pending_activation: '待激活',
@@ -229,13 +230,7 @@ export function AdminAccountsPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={7} />}
               {!isLoading && accounts && accounts.length === 0 && (
                 <EmptyStateRow colSpan={7} />
               )}

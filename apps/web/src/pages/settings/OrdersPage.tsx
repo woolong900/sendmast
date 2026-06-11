@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { EmptyStateRow } from '@/components/ui/empty-state';
+import { TableSkeletonRows } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { api } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/utils';
@@ -51,8 +52,6 @@ export function OrdersPage() {
       void qc.invalidateQueries({ queryKey: ['me', 'quota'] });
       setParams({});
     }
-    // toast / setParams identity is stable per render but quiet ESLint
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [justReturnedOrder?.status, justReturnedOrder?.emails]);
 
   // Show the just-returned order at the top if the list query is slower
@@ -91,13 +90,7 @@ export function OrdersPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
-                    加载中...
-                  </td>
-                </tr>
-              )}
+              {isLoading && <TableSkeletonRows columns={7} />}
               {!isLoading && merged.length === 0 && <EmptyStateRow colSpan={7} />}
               {merged.map((o) => (
                 <tr key={o.id} className="border-b last:border-0">
