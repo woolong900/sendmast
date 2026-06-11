@@ -155,6 +155,20 @@ async function upsertContact(
   return row.id;
 }
 
+/**
+ * Record the contact's latest PAID-order time (drives the segment 下单 rule).
+ * Monotonic max: an out-of-order older webhook can't move the marker back.
+ */
+async function markContactOrdered(contactId: string, orderTime: Date): Promise<void> {
+  await prisma.contact.updateMany({
+    where: {
+      id: contactId,
+      OR: [{ lastOrderedAt: null }, { lastOrderedAt: { lt: orderTime } }],
+    },
+    data: { lastOrderedAt: orderTime },
+  });
+}
+
 async function touchSync(connectionId: string): Promise<void> {
   await prisma.shopConnection
     .update({ where: { id: connectionId }, data: { lastSyncAt: new Date() } })
@@ -204,6 +218,10 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
     firstName: order.firstName,
     lastName: order.lastName,
   });
+  // paid (and shipped, which implies paid) → the buyer counts as 已下单.
+  await markContactOrdered(contactId, order.orderTime).catch((e) =>
+    console.error('[shop-sync] mark ordered failed:', e),
+  );
   const newStatus = shipped ? 'shipped' : 'paid';
 
   // Attribution is only meaningful on the paid event (the conversion). The
@@ -572,6 +590,7 @@ async function runInitialSync(job: Job<ShopSyncJob>): Promise<void> {
           lastName: order.lastName,
         });
         await addToCustomerList(conn.customerListId, [contactId]);
+        await markContactOrdered(contactId, order.orderTime);
 
         await prisma.shopOrder.upsert({
           where: {

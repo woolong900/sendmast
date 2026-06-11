@@ -524,6 +524,9 @@ model Contact {
   subscriptionStatus SubscriptionStatus @default(subscribed) @map("subscription_status")
   source             String?
   unsubscribedAt     DateTime?          @map("unsubscribed_at")
+  /// Latest PAID shop-order time (null = never ordered). Denormalised from
+  /// shop_orders at ingest/backfill; drives the segment `order` rule.
+  lastOrderedAt      DateTime?          @map("last_ordered_at")
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
 
@@ -533,6 +536,7 @@ model Contact {
 
   @@unique([accountId, email])
   @@index([accountId, subscriptionStatus])
+  @@index([accountId, lastOrderedAt])
   // NOTE: no [accountId, email] non-unique index — the @@unique above already
   // produces a btree on (accountId, email) which PG will use for prefix /
   // equality lookups. Keeping a duplicate non-unique would just double write
