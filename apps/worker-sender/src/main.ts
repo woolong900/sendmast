@@ -633,7 +633,16 @@ async function runSend(job: Job<SendJobData>) {
   const subjectSys = applySystemTags(c.subject, sysCtx, 'text');
   const bodyHtmlSys = applySystemTags(ensureUnsubscribeFooter(c.html), sysCtx, 'html');
   const subject = applyCustomTags(subjectSys, tagIndex, 'text');
-  const bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
+  let bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
+
+  // Inbox preview text (preheader): resolve tags, then inject a hidden span at
+  // the top of the body so clients show it as the preview snippet — same as the
+  // automation send path (runFlowSend).
+  const preheaderRaw = (c.preheader ?? '').trim();
+  if (preheaderRaw) {
+    const ph = applyCustomTags(applySystemTags(preheaderRaw, sysCtx, 'text'), tagIndex, 'text');
+    bodyHtml = injectPreheader(bodyHtml, ph);
+  }
 
   const { html } = rewriteHtml(bodyHtml, {
     baseUrl: trackingBaseUrl,
