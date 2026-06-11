@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient, ShopAutomationType } from '@prisma/client';
 import type { Queue } from 'bullmq';
+import {
+  SHOP_AUTOMATION_DEFAULT_SUBJECT,
+  SHOP_AUTOMATION_DEFAULT_PREHEADER,
+} from '@sendmast/shared';
 import { enqueueTransactional, formatMoney } from './transactional.js';
 import { mapLineItems, type LineItem } from './mapper.js';
 
@@ -103,11 +107,8 @@ interface ResolvedAutomation {
   delayMinutes: number;
 }
 
-const DEFAULT_SUBJECT: Record<ShopAutomationType, string> = {
-  order_paid: 'Your order is confirmed',
-  order_shipped: 'Your order has shipped',
-  abandoned_cart: 'Complete your purchase',
-};
+const DEFAULT_SUBJECT = SHOP_AUTOMATION_DEFAULT_SUBJECT;
+const DEFAULT_PREHEADER = SHOP_AUTOMATION_DEFAULT_PREHEADER;
 
 /** Resolve {{shop_name}} from the connected store record. */
 async function shopNameMergeVar(
@@ -161,7 +162,7 @@ async function loadAutomation(
     fromName: a.fromName ?? a.fromEmail.split('@')[0] ?? 'Store',
     subject: a.subject?.trim() || DEFAULT_SUBJECT[type],
     html,
-    preheader: a.preheader ?? null,
+    preheader: a.preheader?.trim() || DEFAULT_PREHEADER[type],
     delayMinutes: a.delayMinutes,
   };
 }
@@ -617,6 +618,7 @@ export async function runAbandonedFromOrder(
 
   const fromName = a.fromName ?? a.fromEmail.split('@')[0] ?? 'Store';
   const subject = job.subject?.trim() || a.subject?.trim() || DEFAULT_SUBJECT.abandoned_cart;
+  const effectivePreheader = preheader?.trim() || DEFAULT_PREHEADER.abandoned_cart;
 
   await enqueueTransactional(deps, {
     accountId: job.accountId,
@@ -630,7 +632,7 @@ export async function runAbandonedFromOrder(
     fromEmail: a.fromEmail,
     fromName,
     html,
-    preheader,
+    preheader: effectivePreheader,
     mergeVars,
   });
 }

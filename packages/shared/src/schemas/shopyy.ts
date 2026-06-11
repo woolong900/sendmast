@@ -27,6 +27,27 @@ export const SHOP_AUTOMATION_LABELS: Record<ShopAutomationType, string> = {
 };
 
 /**
+ * Default email subject per automation, used when the merchant leaves the
+ * subject blank. Shown pre-filled in the editor and used as the send-time
+ * fallback (worker `DEFAULT_SUBJECT`).
+ */
+export const SHOP_AUTOMATION_DEFAULT_SUBJECT: Record<ShopAutomationType, string> = {
+  order_paid: 'Your order is confirmed',
+  order_shipped: 'Your order has shipped',
+  abandoned_cart: 'Complete your purchase',
+};
+
+/**
+ * Default preview text (preheader) per automation. Shown pre-filled in the
+ * editor and injected as the send-time fallback when left blank.
+ */
+export const SHOP_AUTOMATION_DEFAULT_PREHEADER: Record<ShopAutomationType, string> = {
+  order_paid: 'Thanks for your order — here are the details.',
+  order_shipped: 'Your package is on the way — track your delivery.',
+  abandoned_cart: 'You left something behind — complete your purchase.',
+};
+
+/**
  * Body the SPA posts after shopyy redirects the merchant back to our
  * frontend callback page with `code` + `authorize_token_url`. The SPA holds
  * the logged-in JWT, so the bind happens against the current tenant.

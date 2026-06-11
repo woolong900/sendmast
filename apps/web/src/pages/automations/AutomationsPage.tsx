@@ -25,6 +25,8 @@ import { cn, formatNumber } from '@/lib/utils';
 import { api, apiErrMessage } from '@/lib/api';
 import {
   SHOP_AUTOMATION_LABELS,
+  SHOP_AUTOMATION_DEFAULT_SUBJECT,
+  SHOP_AUTOMATION_DEFAULT_PREHEADER,
   MAX_ABANDONED_ROUNDS,
   type CouponDiscountKind,
   type ShopAutomationType,
@@ -441,8 +443,8 @@ function initialRounds(a: ShopAutomationView): Round[] {
       mjml: null,
       designJson: (s.designJson as IEmailTemplate | null) ?? null,
       thumbnail: s.thumbnail,
-      preheader: s.preheader ?? '',
-      subject: s.subject ?? '',
+      preheader: s.preheader || SHOP_AUTOMATION_DEFAULT_PREHEADER.abandoned_cart,
+      subject: s.subject || SHOP_AUTOMATION_DEFAULT_SUBJECT.abandoned_cart,
       couponCode: s.couponCode ?? '',
       couponDiscountKind: s.couponDiscountKind,
       couponDiscountValue: s.couponDiscountValue,
@@ -455,8 +457,8 @@ function initialRounds(a: ShopAutomationView): Round[] {
       mjml: null,
       designJson: (a.designJson as IEmailTemplate | null) ?? null,
       thumbnail: a.thumbnail,
-      preheader: a.preheader ?? '',
-      subject: a.subject ?? '',
+      preheader: a.preheader || SHOP_AUTOMATION_DEFAULT_PREHEADER.abandoned_cart,
+      subject: a.subject || SHOP_AUTOMATION_DEFAULT_SUBJECT.abandoned_cart,
       couponCode: '',
       couponDiscountKind: null,
       couponDiscountValue: null,
@@ -592,8 +594,14 @@ function FlowEditor({
 
   const [enabled, setEnabled] = useState(automation.enabled);
   const [fromEmail, setFromEmail] = useState(automation.fromEmail ?? '');
-  const [subject, setSubject] = useState(automation.subject ?? '');
-  const [preheader, setPreheader] = useState(automation.preheader ?? '');
+  // Pre-fill subject/preview with the per-automation defaults when the merchant
+  // hasn't customised them yet, so the editor shows what will actually be sent.
+  const [subject, setSubject] = useState(
+    automation.subject || SHOP_AUTOMATION_DEFAULT_SUBJECT[automation.type],
+  );
+  const [preheader, setPreheader] = useState(
+    automation.preheader || SHOP_AUTOMATION_DEFAULT_PREHEADER[automation.type],
+  );
   // Inline email content for single-template flows (order paid / shipped).
   const [content, setContent] = useState<EmailContent>(() => ({
     html: automation.html,
@@ -628,8 +636,8 @@ function FlowEditor({
           mjml: prev?.mjml ?? null,
           designJson: prev?.designJson ?? null,
           thumbnail: prev?.thumbnail ?? null,
-          preheader: '',
-          subject: '',
+          preheader: prev?.preheader || SHOP_AUTOMATION_DEFAULT_PREHEADER.abandoned_cart,
+          subject: prev?.subject || SHOP_AUTOMATION_DEFAULT_SUBJECT.abandoned_cart,
           couponCode: '',
           couponDiscountKind: null,
           couponDiscountValue: null,
