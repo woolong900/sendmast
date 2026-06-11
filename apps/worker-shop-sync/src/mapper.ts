@@ -72,12 +72,58 @@ export interface NormalizedOrder {
   currency: string;
   status: string;
   orderTime: Date;
+  /** Buyer's given name, when present — used to populate the contact's name. */
+  firstName?: string;
+  /** Buyer's family name, when present. */
+  lastName?: string;
   /** Logistics tracking URL, when present on a shipped/fulfilled payload. */
   trackingUrl?: string;
   /** Logistics tracking number, when present on a shipped/fulfilled payload. */
   trackingNumber?: string;
   /** Pay-now / view-order URL, used by the abandoned-order recall email. */
   payUrl?: string;
+}
+
+/** Split a single full-name string into first + (remaining) last name. */
+function splitFullName(full: string): { firstName?: string; lastName?: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return {};
+  if (parts.length === 1) return { firstName: parts[0] };
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+}
+
+/**
+ * Pull the buyer's first/last name from an order/checkout payload. Prefers
+ * explicit first_name/last_name (on the order, shipping address, or customer
+ * object); falls back to splitting a single full-name string. Used to set the
+ * contact's name so `{{full_name}}`/`{{first_name}}` render the real recipient
+ * instead of the email local-part fallback. Note: the bare `name` key is only
+ * read off the address/customer objects (on the order itself it's the order no).
+ */
+export function mapBuyerName(payload: Json): { firstName?: string; lastName?: string } {
+  const o = unwrap(payload, ['order', 'checkout', 'cart', 'data', 'resource']);
+  const address =
+    asObject(o.shipping_address) ??
+    asObject(o.shippingAddress) ??
+    asObject(o.address) ??
+    asObject(o.delivery_address) ??
+    asObject(o.consignee) ??
+    asObject(o.receiver);
+  const customer = asObject(o.customer) ?? asObject(o.buyer) ?? asObject(o.contact);
+
+  for (const c of [o, address, customer]) {
+    if (!c) continue;
+    const firstName = pickStr(c, ['first_name', 'firstName', 'given_name', 'givenName']);
+    const lastName = pickStr(c, ['last_name', 'lastName', 'family_name', 'familyName', 'surname']);
+    if (firstName || lastName) return { firstName, lastName };
+  }
+  for (const c of [address, customer]) {
+    if (!c) continue;
+    const full = pickStr(c, ['name', 'full_name', 'fullName', 'consignee', 'receiver', 'recipient', 'contact_name']);
+    if (full) return splitFullName(full);
+  }
+  const customerName = pickStr(o, ['customer_name', 'customerName', 'buyer_name']);
+  return customerName ? splitFullName(customerName) : {};
 }
 
 const TRACKING_NUMBER_KEYS = [
@@ -221,10 +267,13 @@ export function mapOrder(payload: Json): NormalizedOrder | null {
     pickStr(o, ['id', 'order_id', 'orderId', 'order_no', 'orderNo', 'sn', 'order_sn']);
   const email = pickEmail(o) ?? pickEmail(payload);
   if (!externalOrderId || !email) return null;
+  const buyer = mapBuyerName(payload);
   return {
     externalOrderId,
     orderNo: pickStr(o, ['order_number', 'order_no', 'orderNo', 'order_sn', 'sn', 'number', 'name']),
     email,
+    firstName: buyer.firstName,
+    lastName: buyer.lastName,
     value:
       pickNum(o, [
         'total_price',
@@ -295,6 +344,10 @@ export interface NormalizedCheckout {
   currency?: string;
   recoveryUrl?: string;
   abandonedAt: Date;
+  /** Buyer's given name, when present — used to populate the contact's name. */
+  firstName?: string;
+  /** Buyer's family name, when present. */
+  lastName?: string;
 }
 
 export function mapCheckout(payload: Json): NormalizedCheckout | null {
@@ -309,9 +362,12 @@ export function mapCheckout(payload: Json): NormalizedCheckout | null {
   ]);
   const email = pickEmail(c) ?? pickEmail(payload);
   if (!externalCheckoutId || !email) return null;
+  const buyer = mapBuyerName(payload);
   return {
     externalCheckoutId,
     email,
+    firstName: buyer.firstName,
+    lastName: buyer.lastName,
     value: pickNum(c, ['total_price', 'totalPrice', 'total', 'amount', 'subtotal']),
     currency: pickStr(c, ['currency', 'currency_code', 'currencyCode']) ?? undefined,
     recoveryUrl: pickStr(c, ['abandoned_checkout_url', 'recovery_url', 'recoveryUrl', 'url', 'checkout_url']),

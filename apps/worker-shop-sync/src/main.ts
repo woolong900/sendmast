@@ -106,13 +106,27 @@ async function resolveCampaignAttribution(
   return rec ? { campaignId: rec.campaignId, contactId: rec.contactId } : null;
 }
 
-/** Upsert a contact by (accountId, email); shopyy buyers source = 'shopyy'. */
-async function upsertContact(accountId: string, email: string): Promise<string> {
+/**
+ * Upsert a contact by (accountId, email); shopyy buyers source = 'shopyy'.
+ * Refreshes firstName/lastName from the latest order payload on every event so
+ * `{{full_name}}`/`{{first_name}}` render the real recipient (else the system
+ * tag falls back to the email local-part). Only writes name fields that are
+ * actually present so a name-less payload never wipes an existing name.
+ */
+async function upsertContact(
+  accountId: string,
+  email: string,
+  name?: { firstName?: string; lastName?: string },
+): Promise<string> {
   const normalized = email.toLowerCase().trim();
+  const nameData = {
+    ...(name?.firstName ? { firstName: name.firstName } : {}),
+    ...(name?.lastName ? { lastName: name.lastName } : {}),
+  };
   const row = await prisma.contact.upsert({
     where: { accountId_email: { accountId, email: normalized } },
-    update: {},
-    create: { accountId, email: normalized, source: 'shopyy' },
+    update: nameData,
+    create: { accountId, email: normalized, source: 'shopyy', ...nameData },
     select: { id: true },
   });
   return row.id;
@@ -130,7 +144,10 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
     console.warn(`[shop-sync] order payload missing id/email (store conn ${job.connectionId})`);
     return;
   }
-  const contactId = await upsertContact(job.accountId, order.email);
+  const contactId = await upsertContact(job.accountId, order.email, {
+    firstName: order.firstName,
+    lastName: order.lastName,
+  });
   const newStatus = shipped ? 'shipped' : 'paid';
 
   // Attribution is only meaningful on the paid event (the conversion). The
@@ -295,7 +312,10 @@ async function handleOrderCreated(job: ShopEventJob): Promise<void> {
     console.warn(`[shop-sync] created-order payload missing id/email (store conn ${job.connectionId})`);
     return;
   }
-  const contactId = await upsertContact(job.accountId, order.email);
+  const contactId = await upsertContact(job.accountId, order.email, {
+    firstName: order.firstName,
+    lastName: order.lastName,
+  });
 
   await prisma.shopOrder.upsert({
     where: {
@@ -355,7 +375,10 @@ async function handleAbandoned(job: ShopEventJob): Promise<void> {
     console.warn(`[shop-sync] checkout payload missing id/email (store conn ${job.connectionId})`);
     return;
   }
-  const contactId = await upsertContact(job.accountId, checkout.email);
+  const contactId = await upsertContact(job.accountId, checkout.email, {
+    firstName: checkout.firstName,
+    lastName: checkout.lastName,
+  });
 
   await prisma.shopAbandonedCheckout.upsert({
     where: {
