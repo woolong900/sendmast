@@ -35,6 +35,7 @@ import {
   type ShopConnectionView,
   type ShopCouponView,
   type ShopSyncJob,
+  type UpdateShopConnectionInput,
   type UpdateShopAutomationInput,
 } from '@sendmast/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -152,6 +153,7 @@ function toView(c: ShopConnection): ShopConnectionView {
     shopName: c.shopName,
     shopDomain: c.shopDomain,
     mainDomain: c.mainDomain,
+    storeUrl: c.storeUrl,
     status: c.status,
     storeExpiredAt: c.storeExpiredAt ? c.storeExpiredAt.toISOString() : null,
     connectedAt: c.connectedAt.toISOString(),
@@ -183,6 +185,23 @@ export class IntegrationsService {
       orderBy: { connectedAt: 'desc' },
     });
     return { configured: this.isConfigured(), connections: rows.map(toView) };
+  }
+
+  async updateConnection(
+    accountId: string,
+    connectionId: string,
+    input: UpdateShopConnectionInput,
+  ): Promise<ShopConnectionView> {
+    await this.assertConnection(accountId, connectionId);
+    const raw = input.storeUrl?.trim() ?? '';
+    const storeUrl = raw
+      ? new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).toString()
+      : null;
+    const updated = await this.prisma.shopConnection.update({
+      where: { id: connectionId },
+      data: { storeUrl },
+    });
+    return toView(updated);
   }
 
   /**

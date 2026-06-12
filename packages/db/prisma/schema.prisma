@@ -1072,6 +1072,9 @@ model ShopConnection {
   shopName        String?              @map("shop_name")
   shopDomain      String?              @map("shop_domain")
   mainDomain      String?              @map("main_domain")
+  /// Merchant-confirmed public storefront URL. Preferred over provider domains
+  /// in customer-facing automation links.
+  storeUrl        String?              @map("store_url")
   brandId         String?              @map("brand_id")
   timeZone        String?              @map("time_zone")
   openapiDomain   String               @map("openapi_domain")

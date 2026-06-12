@@ -17,6 +17,7 @@ import {
   SHOP_AUTOMATION_TYPES,
   ShopAutomationSendQuerySchema,
   UpdateShopAutomationSchema,
+  UpdateShopConnectionSchema,
   type ShopAutomationType,
 } from '@sendmast/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -78,6 +79,17 @@ export class IntegrationsController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
     return this.svc.repairWebhooks(user.accountId, id);
+  }
+
+  @Patch(':id')
+  updateConnection(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+  ) {
+    const r = UpdateShopConnectionSchema.safeParse(body);
+    if (!r.success) throw new BadRequestException(firstZodError(r.error));
+    return this.svc.updateConnection(user.accountId, id, r.data);
   }
 
   @Get('automation-sends/list')

@@ -1,8 +1,20 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Store, Unplug, Info, CheckCircle2, AlertTriangle, RefreshCw, Wrench } from 'lucide-react';
+import {
+  Store,
+  Unplug,
+  Info,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
+  Wrench,
+  Save,
+  ExternalLink,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
@@ -130,6 +142,7 @@ function ConnectionCard({
 }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const [storeUrl, setStoreUrl] = useState(connection.storeUrl ?? '');
   const badge = STATUS_BADGE[connection.status];
   const health = useQuery<ShopConnectionHealthView>({
     queryKey: ['shop-connection-health', connection.id],
@@ -142,6 +155,20 @@ function ConnectionCard({
       qc.invalidateQueries({ queryKey: ['shop-connection-health', connection.id] });
       qc.invalidateQueries({ queryKey: ['shop-connections'] });
       toast('Webhook 已修复', 'success');
+    },
+    onError: (err) => toast(apiErrMessage(err), 'error'),
+  });
+  const saveStoreUrl = useMutation({
+    mutationFn: async () =>
+      (
+        await api.patch<ShopConnectionView>(`/api/integrations/shopyy/${connection.id}`, {
+          storeUrl: storeUrl.trim() || null,
+        })
+      ).data,
+    onSuccess: (updated) => {
+      setStoreUrl(updated.storeUrl ?? '');
+      qc.invalidateQueries({ queryKey: ['shop-connections'] });
+      toast('店铺访问地址已保存', 'success');
     },
     onError: (err) => toast(apiErrMessage(err), 'error'),
   });
@@ -197,6 +224,50 @@ function ConnectionCard({
             <Button variant="outline" size="sm" onClick={onDisconnect}>
               <Unplug className="mr-1 size-4" />
               解绑
+            </Button>
+          </div>
+        </div>
+        <div className="border-t pt-4">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <label
+                htmlFor={`store-url-${connection.id}`}
+                className="text-sm font-medium text-foreground"
+              >
+                店铺访问地址
+              </label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                用于欢迎邮件等顾客可见链接，请填写店铺真实使用的域名。
+              </p>
+            </div>
+            {connection.storeUrl && (
+              <a
+                href={connection.storeUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                打开店铺
+                <ExternalLink className="size-3" />
+              </a>
+            )}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              id={`store-url-${connection.id}`}
+              value={storeUrl}
+              onChange={(e) => setStoreUrl(e.target.value)}
+              placeholder="https://www.example.com"
+              autoComplete="url"
+            />
+            <Button
+              size="sm"
+              className="shrink-0"
+              onClick={() => saveStoreUrl.mutate()}
+              disabled={saveStoreUrl.isPending}
+            >
+              <Save className="mr-1 size-4" />
+              保存地址
             </Button>
           </div>
         </div>

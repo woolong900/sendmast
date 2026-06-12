@@ -95,11 +95,37 @@ export interface ShopConnectionView {
   shopName: string | null;
   shopDomain: string | null;
   mainDomain: string | null;
+  storeUrl: string | null;
   status: ShopConnectionStatus;
   storeExpiredAt: string | null;
   connectedAt: string;
   lastSyncAt: string | null;
 }
+
+function validStoreUrl(value: string | null): boolean {
+  if (value === null || value === '') return true;
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    return (
+      ['http:', 'https:'].includes(url.protocol) &&
+      !!url.hostname &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
+}
+
+export const UpdateShopConnectionSchema = z.object({
+  storeUrl: z
+    .string()
+    .trim()
+    .max(2048)
+    .nullable()
+    .refine(validStoreUrl, '请输入有效的店铺访问地址'),
+});
+export type UpdateShopConnectionInput = z.infer<typeof UpdateShopConnectionSchema>;
 
 export type ShopConnectionHealthStatus = 'healthy' | 'degraded' | 'expired' | 'revoked';
 

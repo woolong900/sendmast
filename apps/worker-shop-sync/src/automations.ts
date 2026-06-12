@@ -125,10 +125,11 @@ async function shopNameMergeVar(
 ): Promise<Record<string, string>> {
   const conn = await prisma.shopConnection.findUnique({
     where: { id: shopConnectionId },
-    select: { shopName: true, shopDomain: true, mainDomain: true },
+    select: { shopName: true, shopDomain: true, mainDomain: true, storeUrl: true },
   });
   const name = conn?.shopName?.trim() || conn?.shopDomain?.trim() || '';
-  const rawDomain = conn?.mainDomain?.trim() || conn?.shopDomain?.trim() || '';
+  const rawDomain =
+    conn?.storeUrl?.trim() || conn?.mainDomain?.trim() || conn?.shopDomain?.trim() || '';
   const shopUrl = rawDomain
     ? /^https?:\/\//i.test(rawDomain)
       ? rawDomain
