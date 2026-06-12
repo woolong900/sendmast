@@ -35,6 +35,8 @@ export interface OrderContext {
   value: number;
   currency: string;
   trackingUrl?: string;
+  /** Store account page URL, derived from the order landing page when possible. */
+  orderUrl?: string;
   /** Logistics tracking number, present on shipped orders. */
   trackingNumber?: string;
   /** Order line items, rendered into the `{{order_items}}` merge var. */
@@ -135,10 +137,31 @@ async function shopNameMergeVar(
       ? rawDomain
       : `https://${rawDomain}`
     : '';
+  const orderUrl = accountUrlFrom(shopUrl);
   return {
     ...(name ? { shop_name: name } : {}),
     ...(shopUrl ? { shop_url: shopUrl } : {}),
+    ...(orderUrl ? { order_url: orderUrl } : {}),
   };
+}
+
+/** Build the public account page from a trusted HTTP(S) storefront URL. */
+export function accountUrlFrom(value: string | null | undefined): string | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  const normalized = /^https?:\/\//i.test(raw)
+    ? raw
+    : /^[a-z0-9.-]+(?::\d+)?(?:\/|$)/i.test(raw)
+      ? `https://${raw}`
+      : undefined;
+  if (!normalized) return undefined;
+  try {
+    const url = new URL(normalized);
+    if (!['http:', 'https:'].includes(url.protocol)) return undefined;
+    return `${url.origin}/account`;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Resolve an email template's html by id (legacy fallback for null inline content). */
@@ -324,6 +347,7 @@ function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Re
     order_no: ctx.orderNo ?? ctx.externalOrderId,
     order_total: formatMoney(ctx.value, ctx.currency),
     order_currency: ctx.currency,
+    ...(ctx.orderUrl ? { order_url: ctx.orderUrl } : {}),
     ...(ctx.trackingUrl ? { tracking_url: ctx.trackingUrl } : {}),
     ...(ctx.trackingNumber ? { tracking_number: ctx.trackingNumber } : {}),
     ...(itemsHtml ? { order_items: itemsHtml } : {}),

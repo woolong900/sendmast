@@ -118,6 +118,12 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
     description: '电商自动化邮件专用：订单货币代码（如 USD）',
   },
   {
+    name: 'order_url',
+    placeholder: '{{order_url}}',
+    label: '订单链接',
+    description: '电商自动化邮件专用：店铺账户页面链接，优先使用订单 landing_page 的域名',
+  },
+  {
     name: 'tracking_url',
     placeholder: '{{tracking_url}}',
     label: '物流追踪链接',
@@ -166,6 +172,7 @@ export const MERGE_VAR_TAG_NAMES = [
   'order_no',
   'order_total',
   'order_currency',
+  'order_url',
   'tracking_url',
   'tracking_number',
 ] as const;

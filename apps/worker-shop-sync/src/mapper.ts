@@ -82,6 +82,8 @@ export interface NormalizedOrder {
   trackingNumber?: string;
   /** Pay-now / view-order URL, used by the abandoned-order recall email. */
   payUrl?: string;
+  /** Storefront page the buyer landed on before ordering. */
+  landingPage?: string;
 }
 
 /** Split a single full-name string into first + (remaining) last name. */
@@ -301,6 +303,9 @@ export function mapOrder(payload: Json): NormalizedOrder | null {
     trackingUrl: pickTrackingUrl(o),
     trackingNumber: pickTrackingNumber(o),
     payUrl: pickRecoveryUrl(o),
+    landingPage:
+      pickStr(o, ['landing_page', 'landingPage']) ??
+      pickStr(payload, ['landing_page', 'landingPage']),
   };
 }
 

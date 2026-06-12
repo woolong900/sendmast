@@ -1,20 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import {
-  abandonedCartDesignJson,
   abandonedCartHtml,
-  abandonedCartMjml,
-} from './abandoned-cart-template';
-import {
-  orderConfirmationDesignJson,
+  customerRegisteredHtml,
   orderConfirmationHtml,
-  orderConfirmationMjml,
-} from './order-confirmation-template';
-import {
-  orderShippedDesignJson,
   orderShippedHtml,
-  orderShippedMjml,
-} from './order-shipped-template';
+} from './automation-default-templates';
 
 const prisma = new PrismaClient();
 
@@ -40,21 +31,19 @@ const SYSTEM_TEMPLATES: Array<{
   },
   {
     name: '弃单召回（默认）',
-    mjml: abandonedCartMjml,
     html: abandonedCartHtml,
-    designJson: abandonedCartDesignJson,
   },
   {
     name: '订单确认通知（默认）',
-    mjml: orderConfirmationMjml,
     html: orderConfirmationHtml,
-    designJson: orderConfirmationDesignJson,
   },
   {
     name: '订单发货通知（默认）',
-    mjml: orderShippedMjml,
     html: orderShippedHtml,
-    designJson: orderShippedDesignJson,
+  },
+  {
+    name: '顾客注册欢迎（默认）',
+    html: customerRegisteredHtml,
   },
 ];
 
@@ -89,6 +78,7 @@ function deterministicId(name: string): string {
     '弃单召回（默认）': '00000000-0000-4000-8000-000000000004',
     '订单确认通知（默认）': '00000000-0000-4000-8000-000000000005',
     '订单发货通知（默认）': '00000000-0000-4000-8000-000000000006',
+    '顾客注册欢迎（默认）': '00000000-0000-4000-8000-000000000007',
   };
   return map[name] ?? randomUUID();
 }
