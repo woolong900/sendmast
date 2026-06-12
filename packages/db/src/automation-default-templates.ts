@@ -24,7 +24,7 @@ function shell(content: string, reason: string): string {
 }
 
 export const customerRegisteredHtml = shell(
-  `<img src="${APP_ASSET_BASE}/automation-welcome-banner-v1.jpg" width="600" alt="Welcome" style="display:block;width:100%;height:auto;border:0;">
+  `<img src="${APP_ASSET_BASE}/automation-welcome-banner-v2.jpg" width="600" alt="Welcome" style="display:block;width:100%;height:auto;border:0;">
 <div class="pad" style="padding:38px 42px 42px;">
 <h1 style="margin:0 0 14px;font-size:28px;line-height:1.25;font-weight:600;">Welcome to {{shop_name}}</h1>
 <p style="margin:0 0 26px;font-size:16px;line-height:1.65;color:#6d7175;">Hi {{full_name}}, thanks for creating an account with us. You can now check out faster and keep track of your orders in one place.</p>
