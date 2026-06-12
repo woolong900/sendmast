@@ -193,9 +193,27 @@ export class ShopyyClient {
 
   // ── Domain helpers ──────────────────────────────────────────────────────────
 
-  /** List the store's currently-registered webhooks. */
-  listWebhooks(): Promise<ShopyyWebhook[]> {
-    return this.get<ShopyyWebhook[]>('/webhooks');
+  /**
+   * List all currently-registered webhooks. The endpoint defaults to its first
+   * page, so walk the `since_id` cursor or newly-created rows may be missed.
+   */
+  async listWebhooks(): Promise<ShopyyWebhook[]> {
+    const rows: ShopyyWebhook[] = [];
+    const limit = 50;
+    let sinceId: number | undefined;
+
+    while (true) {
+      const page = await this.get<ShopyyWebhook[]>('/webhooks', {
+        since_id: sinceId,
+        limit,
+      });
+      rows.push(...page);
+      if (page.length < limit) return rows;
+
+      const nextSinceId = Math.max(...page.map((webhook) => webhook.id));
+      if (nextSinceId === sinceId) return rows;
+      sinceId = nextSinceId;
+    }
   }
 
   /**
