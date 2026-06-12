@@ -412,30 +412,27 @@ export class IntegrationsService {
 
   private async uninstallWebhooks(conn: ShopConnection): Promise<void> {
     if (!conn.openapiDomain || !conn.devToken) {
-      throw new BadRequestException(
-        '店铺连接缺少 API 凭证，无法删除 Shopyy Webhook，请重新授权后再解绑',
+      this.logger.warn(
+        `Skipping Shopyy webhook deletion for store ${conn.externalStoreId}: missing API credentials`,
       );
+      return;
+    }
+
+    if (conn.webhookIds.length === 0) {
+      this.logger.warn(
+        `Skipping Shopyy webhook deletion for store ${conn.externalStoreId}: no recorded webhook IDs`,
+      );
+      return;
     }
 
     const client = this.shopyyClient(conn.openapiDomain, conn.devToken);
-    if (conn.webhookIds.length === 0) {
-      throw new BadRequestException('未记录该店铺的 Shopyy Webhook ID，请重新授权店铺后再解绑');
-    }
-
     try {
       await client.batchDeleteWebhooks(conn.webhookIds);
     } catch (err) {
-      if (err instanceof ShopyyAuthError) {
-        await this.prisma.shopConnection.update({
-          where: { id: conn.id },
-          data: { status: 'expired' },
-        });
-        throw new BadRequestException(
-          '店铺授权已失效，无法删除 Shopyy Webhook，请重新授权后再解绑',
-        );
-      }
       const reason = err instanceof Error ? err.message : String(err);
-      throw new BadRequestException(`删除 Shopyy Webhook 失败：${reason}`);
+      this.logger.warn(
+        `Ignoring Shopyy webhook deletion failure for store ${conn.externalStoreId}: ${reason}`,
+      );
     }
   }
 
