@@ -1071,6 +1071,9 @@ model ShopConnection {
   appName         String?              @map("app_name")
   devToken        String               @map("dev_token") @db.Text
   webhookSecret   String?              @map("webhook_secret")
+  /// Shopyy webhook row IDs created/owned by this connection. Persisted at bind
+  /// time so disconnect can delete exactly these rows without URL heuristics.
+  webhookIds      Int[]                @default([]) @map("webhook_ids")
   status          ShopConnectionStatus @default(active)
   storeExpiredAt  DateTime?            @map("store_expired_at")
   connectedAt     DateTime             @default(now()) @map("connected_at")

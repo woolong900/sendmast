@@ -246,8 +246,9 @@ export class IntegrationsService {
     // usable — so treat install failure as a bind failure rather than silently
     // persisting a misleading "active" connection. Install first using the
     // freshly-exchanged credentials; only persist once webhooks are in place.
+    let webhookIds: number[];
     try {
-      await this.installWebhooks({
+      webhookIds = await this.installWebhooks({
         externalStoreId,
         openapiDomain: data.openapiDomain,
         devToken: data.devToken,
@@ -268,9 +269,10 @@ export class IntegrationsService {
         provider: 'shopyy',
         externalStoreId,
         connectedAt: new Date(),
+        webhookIds,
         ...data,
       },
-      update: { ...data, connectedAt: new Date() },
+      update: { ...data, webhookIds, connectedAt: new Date() },
     });
 
     // Auto-provision the tenant's "店铺客户" contact list and remember it on the
@@ -334,7 +336,7 @@ export class IntegrationsService {
     openapiDomain: string;
     devToken: string;
     webhookSecret: string;
-  }): Promise<void> {
+  }): Promise<number[]> {
     const client = this.shopyyClient(conn.openapiDomain, conn.devToken);
 
     // Reuse an existing webhook row for the same event when it already points at
@@ -391,29 +393,18 @@ export class IntegrationsService {
         );
       }
     }
-  }
 
-  private isManagedWebhook(
-    webhook: { url: string; event_id: number },
-    receiverUrl: string,
-    webhookSecret: string | null,
-  ): boolean {
-    if (!SHOPYY_WEBHOOK_EVENTS.some((e) => e.eventId === webhook.event_id)) return false;
-
-    let key: string | null = null;
-    let topic: string | null = null;
-    try {
-      const url = new URL(webhook.url);
-      key = url.searchParams.get('key');
-      topic = url.searchParams.get('topic');
-    } catch {
-      // Fall back to prefix-only matching below for malformed historic rows.
+    // batchsave's response shape is not stable across Shopyy gateways. Read the
+    // canonical list back and persist the IDs matching the exact URLs from this
+    // install attempt.
+    const installedUrls = new Set(items.map((item) => item.url));
+    const webhookIds = (await client.listWebhooks())
+      .filter((webhook) => installedUrls.has(webhook.url))
+      .map((webhook) => webhook.id);
+    if (webhookIds.length === 0) {
+      throw new ShopyyError('created webhooks could not be found after batchsave', 'not-found');
     }
-
-    if (webhookSecret && key !== webhookSecret) return false;
-    if (topic && !SHOPYY_WEBHOOK_EVENTS.some((e) => e.topic === topic)) return false;
-
-    return webhook.url.startsWith(receiverUrl) || (!!webhookSecret && key === webhookSecret);
+    return webhookIds;
   }
 
   private async uninstallWebhooks(conn: ShopConnection): Promise<void> {
@@ -424,10 +415,12 @@ export class IntegrationsService {
     }
 
     const client = this.shopyyClient(conn.openapiDomain, conn.devToken);
-    const receiverUrl = this.shopyyWebhookReceiverUrl();
-    let webhooks;
+    if (conn.webhookIds.length === 0) {
+      throw new BadRequestException('未记录该店铺的 Shopyy Webhook ID，请重新授权店铺后再解绑');
+    }
+
     try {
-      webhooks = await client.listWebhooks();
+      await client.batchDeleteWebhooks(conn.webhookIds);
     } catch (err) {
       if (err instanceof ShopyyAuthError) {
         await this.prisma.shopConnection.update({
@@ -438,18 +431,6 @@ export class IntegrationsService {
           '店铺授权已失效，无法删除 Shopyy Webhook，请重新授权后再解绑',
         );
       }
-      const msg = err instanceof ShopyyError ? err.message : String(err);
-      throw new BadRequestException(`拉取 Shopyy Webhook 失败：${msg}`);
-    }
-
-    const ids = webhooks
-      .filter((w) => this.isManagedWebhook(w, receiverUrl, conn.webhookSecret ?? null))
-      .map((w) => w.id);
-    if (ids.length === 0) return;
-
-    try {
-      await client.batchDeleteWebhooks(ids);
-    } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       throw new BadRequestException(`删除 Shopyy Webhook 失败：${reason}`);
     }
@@ -833,7 +814,7 @@ export class IntegrationsService {
     // connection just stops being usable until re-authorized.
     await this.prisma.shopConnection.update({
       where: { id },
-      data: { status: 'revoked' },
+      data: { status: 'revoked', webhookIds: [] },
     });
     return { ok: true };
   }
