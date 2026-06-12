@@ -253,6 +253,7 @@ export class IntegrationsService {
         openapiDomain: data.openapiDomain,
         devToken: data.devToken,
         webhookSecret,
+        appId: result.app.id,
       });
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
@@ -336,6 +337,7 @@ export class IntegrationsService {
     openapiDomain: string;
     devToken: string;
     webhookSecret: string;
+    appId: string | number;
   }): Promise<number[]> {
     const client = this.shopyyClient(conn.openapiDomain, conn.devToken);
 
@@ -367,6 +369,7 @@ export class IntegrationsService {
         webhookName: e.name,
         url,
         eventId: e.eventId,
+        fromId: conn.appId,
       };
     });
 

@@ -229,6 +229,8 @@ export class ShopyyClient {
         url: w.url,
         event_id: w.eventId,
         delay_time: w.delayTime ?? 0,
+        webhook_type: 2,
+        from_id: w.fromId,
       })),
     });
   }
@@ -344,4 +346,6 @@ export interface ShopyyWebhookUpsert {
   /** shopyy event id (5 = orders/paid, 7 = orders/fulfilled, …). */
   eventId: number;
   delayTime?: number;
+  /** The app that owns this webhook (`APP_ID` from the authorize response). */
+  fromId: string | number;
 }
