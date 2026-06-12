@@ -49,7 +49,7 @@ export class IntegrationsController {
     return this.svc.connectShopyy(user.accountId, r.data);
   }
 
-  /** The three fixed automations for a store (lazily created). */
+  /** The fixed automations for a store (lazily created). */
   @Get(':id/automations')
   listAutomations(
     @CurrentUser() user: AuthenticatedUser,

@@ -12,11 +12,17 @@ export type ShopProvider = (typeof SHOP_PROVIDERS)[number];
 export const SHOP_CONNECTION_STATUSES = ['active', 'expired', 'revoked'] as const;
 export type ShopConnectionStatus = (typeof SHOP_CONNECTION_STATUSES)[number];
 
-export const SHOP_AUTOMATION_TYPES = ['order_paid', 'order_shipped', 'abandoned_cart'] as const;
+export const SHOP_AUTOMATION_TYPES = [
+  'customer_registered',
+  'order_paid',
+  'order_shipped',
+  'abandoned_cart',
+] as const;
 export type ShopAutomationType = (typeof SHOP_AUTOMATION_TYPES)[number];
 
-/** Chinese labels for the three fixed automations (settings UI). */
+/** Chinese labels for the fixed automations (settings UI). */
 export const SHOP_AUTOMATION_LABELS: Record<ShopAutomationType, string> = {
+  customer_registered: '顾客注册欢迎',
   order_paid: '订单支付通知',
   order_shipped: '订单发货通知',
   abandoned_cart: '弃单召回',
@@ -29,6 +35,7 @@ export const SHOP_AUTOMATION_LABELS: Record<ShopAutomationType, string> = {
  * generic fallback — per-round defaults live in `ABANDONED_CART_DEFAULT_ROUNDS`.
  */
 export const SHOP_AUTOMATION_DEFAULT_SUBJECT: Record<ShopAutomationType, string> = {
+  customer_registered: 'Welcome to {{shop_name}}',
   order_paid: 'Your order is confirmed',
   order_shipped: 'Your order has shipped',
   abandoned_cart: 'Did you forget something?',
@@ -39,6 +46,7 @@ export const SHOP_AUTOMATION_DEFAULT_SUBJECT: Record<ShopAutomationType, string>
  * editor and injected as the send-time fallback when left blank.
  */
 export const SHOP_AUTOMATION_DEFAULT_PREHEADER: Record<ShopAutomationType, string> = {
+  customer_registered: 'Thanks for joining us — we are glad you are here.',
   order_paid: 'Thanks for your order — here are the details.',
   order_shipped: 'Your package is on the way — track your delivery.',
   abandoned_cart: 'Are you still interested in these items?',

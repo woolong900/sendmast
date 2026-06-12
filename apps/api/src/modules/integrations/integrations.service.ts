@@ -85,6 +85,7 @@ const ABANDONED_CART_DEFAULT_SUBJECT = 'Complete your purchase';
  * inline so each flow becomes self-contained and editable in place.
  */
 const DEFAULT_TEMPLATE_ID: Record<ShopAutomationType, string> = {
+  customer_registered: '00000000-0000-4000-8000-000000000007',
   order_paid: '00000000-0000-4000-8000-000000000005',
   order_shipped: '00000000-0000-4000-8000-000000000006',
   abandoned_cart: ABANDONED_CART_DEFAULT_TEMPLATE_ID,
@@ -477,8 +478,8 @@ export class IntegrationsService {
   }
 
   /**
-   * Return the three fixed automations for a store, lazily creating any that
-   * don't yet exist so the settings UI always renders all three cards.
+   * Return the fixed automations for a store, lazily creating any that don't
+   * yet exist so the settings UI always renders every supported flow.
    */
   async listAutomations(accountId: string, connectionId: string): Promise<ShopAutomationView[]> {
     await this.assertConnection(accountId, connectionId);

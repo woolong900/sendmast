@@ -13,6 +13,7 @@ import {
   Plus,
   Trash2,
   Clock,
+  UserPlus,
 } from 'lucide-react';
 import { type IEmailTemplate } from 'easy-email-editor';
 import { Button } from '@/components/ui/button';
@@ -45,6 +46,7 @@ interface ShopConnectionsResponse {
 }
 
 const ICONS: Record<ShopAutomationType, typeof Mail> = {
+  customer_registered: UserPlus,
   order_paid: Mail,
   order_shipped: Truck,
   abandoned_cart: ShoppingCart,
@@ -52,6 +54,7 @@ const ICONS: Record<ShopAutomationType, typeof Mail> = {
 
 /** Soft tinted icon tile per flow. */
 const ACCENTS: Record<ShopAutomationType, string> = {
+  customer_registered: 'bg-violet-50 text-violet-600',
   order_paid: 'bg-emerald-50 text-emerald-600',
   order_shipped: 'bg-sky-50 text-sky-600',
   abandoned_cart: 'bg-amber-50 text-amber-600',
@@ -61,6 +64,7 @@ const ACCENTS: Record<ShopAutomationType, string> = {
 const FIELD = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm';
 
 const TRIGGERS: Record<ShopAutomationType, string> = {
+  customer_registered: '当顾客注册店铺账户时立即发送',
   order_paid: '当买家完成支付时立即发送',
   order_shipped: '当订单发货时立即发送',
   abandoned_cart: '当订单创建后超过设定时间仍未支付时发送召回',
@@ -210,7 +214,7 @@ function FlowList({
 function AutomationLoading() {
   return (
     <AutomationTable>
-      {Array.from({ length: 3 }, (_, i) => (
+      {Array.from({ length: 4 }, (_, i) => (
         <tr key={i} className="border-b last:border-b-0">
           <td className="px-6 py-4 align-middle">
             <div className="flex items-center gap-3">
@@ -652,7 +656,7 @@ function FlowEditor({
   const [preheader, setPreheader] = useState(
     automation.preheader || SHOP_AUTOMATION_DEFAULT_PREHEADER[automation.type],
   );
-  // Inline email content for single-template flows (order paid / shipped).
+  // Inline email content for single-template flows.
   const [content, setContent] = useState<EmailContent>(() => ({
     html: automation.html,
     mjml: null,

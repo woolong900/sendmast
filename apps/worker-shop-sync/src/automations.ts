@@ -10,8 +10,8 @@ import { enqueueTransactional, formatMoney } from './transactional.js';
 import { mapLineItems, type LineItem } from './mapper.js';
 
 /**
- * Automation triggers. order_paid / order_shipped fire an immediate
- * transactional send; abandoned_cart schedules a delayed recovery on the
+ * Automation triggers. Customer registration and order events fire an
+ * immediate flow send; abandoned_cart schedules a delayed recovery on the
  * `shop-abandoned` queue (handled in main.ts) which re-checks for conversion
  * before sending. All are best-effort — callers wrap them in try/catch so a
  * failure here never fails order/checkout ingestion.
@@ -52,6 +52,13 @@ export interface CheckoutContext {
   value?: number;
   currency?: string;
   recoveryUrl?: string;
+}
+
+export interface CustomerContext {
+  accountId: string;
+  shopConnectionId: string;
+  email: string;
+  contactId: string;
 }
 
 /**
@@ -118,10 +125,19 @@ async function shopNameMergeVar(
 ): Promise<Record<string, string>> {
   const conn = await prisma.shopConnection.findUnique({
     where: { id: shopConnectionId },
-    select: { shopName: true, shopDomain: true },
+    select: { shopName: true, shopDomain: true, mainDomain: true },
   });
   const name = conn?.shopName?.trim() || conn?.shopDomain?.trim() || '';
-  return name ? { shop_name: name } : {};
+  const rawDomain = conn?.mainDomain?.trim() || conn?.shopDomain?.trim() || '';
+  const shopUrl = rawDomain
+    ? /^https?:\/\//i.test(rawDomain)
+      ? rawDomain
+      : `https://${rawDomain}`
+    : '';
+  return {
+    ...(name ? { shop_name: name } : {}),
+    ...(shopUrl ? { shop_url: shopUrl } : {}),
+  };
 }
 
 /** Resolve an email template's html by id (legacy fallback for null inline content). */
@@ -333,6 +349,28 @@ export async function triggerOrderPaid(
     html: a.html,
     preheader: a.preheader,
     mergeVars: orderMergeVars(ctx, shopName),
+  });
+}
+
+export async function triggerCustomerRegistered(
+  deps: AutomationDeps,
+  ctx: CustomerContext,
+): Promise<void> {
+  const a = await loadAutomation(deps.prisma, ctx.shopConnectionId, 'customer_registered');
+  if (!a) return;
+  const shopName = await shopNameMergeVar(deps.prisma, ctx.shopConnectionId);
+  await enqueueTransactional(deps, {
+    accountId: ctx.accountId,
+    automationId: a.id,
+    dedupKey: `registered:${ctx.email.trim().toLowerCase()}`,
+    contactId: ctx.contactId,
+    email: ctx.email,
+    subject: a.subject,
+    fromEmail: a.fromEmail,
+    fromName: a.fromName,
+    html: a.html,
+    preheader: a.preheader,
+    mergeVars: shopName,
   });
 }
 

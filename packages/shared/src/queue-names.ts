@@ -4,7 +4,7 @@ export const QUEUE_NAMES = {
   SEND_EMAIL: 'send-email',
   SEND_TICK: 'send-tick',
   EVENTS_INGEST: 'events-ingest',
-  /** Inbound shopyy webhook events (order paid/shipped, checkout abandoned). */
+  /** Inbound shopyy webhook events (customer registration, orders, checkout abandonment). */
   SHOP_EVENTS: 'shop-events',
   /** Initial full store sync after bind (customers → list, paid orders). */
   SHOP_SYNC: 'shop-sync',

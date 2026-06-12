@@ -845,7 +845,7 @@ async function runFlowSend(job: Job<SendJobData>) {
     return;
   }
 
-  // Marketing flows (abandoned cart) respect opt-out; transactional ones
+  // Marketing flows (registration welcome / abandoned cart) respect opt-out; transactional ones
   // (order paid/shipped) send regardless — order confirmations are exempt.
   const contact = await prisma.contact.findUnique({
     where: { id: send.contactId ?? '00000000-0000-0000-0000-000000000000' },

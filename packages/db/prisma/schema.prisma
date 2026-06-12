@@ -1042,7 +1042,7 @@ model ReferralSetting {
 // A tenant connects an external e-commerce store via an OAuth-like flow. We
 // store the developer-app `devToken` used to call the OpenAPI gateway, ingest
 // order/checkout webhooks, attribute revenue back to email campaigns, and run
-// three fixed buyer-facing automations (paid / shipped / abandoned-cart).
+// fixed buyer-facing automations (registration / paid / shipped / abandoned-cart).
 // ============================================================================
 
 enum ShopProvider {
@@ -1145,6 +1145,7 @@ model ShopOrder {
 }
 
 enum ShopAutomationType {
+  customer_registered
   order_paid
   order_shipped
   abandoned_cart

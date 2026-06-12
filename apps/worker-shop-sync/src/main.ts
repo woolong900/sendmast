@@ -28,6 +28,7 @@ import {
   runAbandonedRecovery,
   scheduleAbandonedFromOrder,
   scheduleAbandonedRecovery,
+  triggerCustomerRegistered,
   triggerOrderPaid,
   triggerOrderShipped,
   type AbandonedJob,
@@ -206,6 +207,16 @@ async function handleCustomerCreated(job: ShopEventJob): Promise<void> {
   const contactId = await upsertContact(job.accountId, customer.email, customer);
   await addToCustomerList(await customerListIdOf(job.connectionId), [contactId]);
   await touchSync(job.connectionId);
+  try {
+    await triggerCustomerRegistered(deps, {
+      accountId: job.accountId,
+      shopConnectionId: job.connectionId,
+      email: customer.email,
+      contactId,
+    });
+  } catch (e) {
+    console.error('[shop-sync] customer registration automation trigger failed:', e);
+  }
 }
 
 async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
