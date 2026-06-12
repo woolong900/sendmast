@@ -933,6 +933,9 @@ async function runFlowSend(job: Job<SendJobData>) {
     recipientId: send.id,
     source: 'automation',
     trackClicks: true,
+    // Keep flow sends attributable in the same way as campaign recipients:
+    // the store echoes sm_mid from the landing URL back in the order webhook.
+    smMid: send.id,
   });
 
   let transport;
