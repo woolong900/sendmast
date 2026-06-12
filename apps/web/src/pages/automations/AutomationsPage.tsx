@@ -13,7 +13,6 @@ import {
   Plus,
   Trash2,
   Clock,
-  ListChecks,
 } from 'lucide-react';
 import { type IEmailTemplate } from 'easy-email-editor';
 import { Button } from '@/components/ui/button';
@@ -91,12 +90,6 @@ export function AutomationsPage() {
               为店铺事件配置自动化邮件流程：买家下单、支付、发货时自动触发，无需手动发送。
             </p>
           </div>
-          <Button asChild variant="outline" size="sm">
-            <Link to="/automations/sends">
-              <ListChecks className="mr-1 size-4" />
-              发送记录
-            </Link>
-          </Button>
         </div>
       )}
 
