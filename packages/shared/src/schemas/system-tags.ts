@@ -91,7 +91,13 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
     name: 'shop_name',
     placeholder: '{{shop_name}}',
     label: '店铺名称',
-    description: '电商自动化邮件专用：触发店铺的名称（仅订单/弃单自动化邮件中有值）',
+    description: '电商自动化邮件专用：触发店铺的名称',
+  },
+  {
+    name: 'shop_url',
+    placeholder: '{{shop_url}}',
+    label: '店铺链接',
+    description: '电商自动化邮件专用：触发店铺的首页链接，建议放在按钮或链接的 href 中',
   },
   {
     name: 'order_no',
@@ -156,6 +162,7 @@ export const SYSTEM_TAG_NAMES = SYSTEM_TAGS.map((t) => t.name);
  */
 export const MERGE_VAR_TAG_NAMES = [
   'shop_name',
+  'shop_url',
   'order_no',
   'order_total',
   'order_currency',
