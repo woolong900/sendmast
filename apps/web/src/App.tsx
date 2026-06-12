@@ -53,6 +53,11 @@ const CampaignWizardPage = lazy(() =>
 const AutomationsPage = lazy(() =>
   import('@/pages/automations/AutomationsPage').then((m) => ({ default: m.AutomationsPage })),
 );
+const AutomationSendsPage = lazy(() =>
+  import('@/pages/automations/AutomationSendsPage').then((m) => ({
+    default: m.AutomationSendsPage,
+  })),
+);
 const ContactListsPage = lazy(() =>
   import('@/pages/contacts/ContactListsPage').then((m) => ({ default: m.ContactListsPage })),
 );
@@ -193,6 +198,7 @@ export default function App() {
               <Route path="campaigns/:id/recipients" element={<CampaignRecipientsPage />} />
 
               <Route path="automations" element={<AutomationsPage />} />
+              <Route path="automations/sends" element={<AutomationSendsPage />} />
 
               <Route path="templates" element={<TemplatesPage />} />
               <Route path="templates/new" element={<TemplateEditorPage />} />

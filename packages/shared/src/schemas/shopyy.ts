@@ -12,11 +12,7 @@ export type ShopProvider = (typeof SHOP_PROVIDERS)[number];
 export const SHOP_CONNECTION_STATUSES = ['active', 'expired', 'revoked'] as const;
 export type ShopConnectionStatus = (typeof SHOP_CONNECTION_STATUSES)[number];
 
-export const SHOP_AUTOMATION_TYPES = [
-  'order_paid',
-  'order_shipped',
-  'abandoned_cart',
-] as const;
+export const SHOP_AUTOMATION_TYPES = ['order_paid', 'order_shipped', 'abandoned_cart'] as const;
 export type ShopAutomationType = (typeof SHOP_AUTOMATION_TYPES)[number];
 
 /** Chinese labels for the three fixed automations (settings UI). */
@@ -97,6 +93,18 @@ export interface ShopConnectionView {
   lastSyncAt: string | null;
 }
 
+export type ShopConnectionHealthStatus = 'healthy' | 'degraded' | 'expired' | 'revoked';
+
+export interface ShopConnectionHealthView {
+  status: ShopConnectionHealthStatus;
+  authorizationValid: boolean;
+  expectedWebhookCount: number;
+  installedWebhookCount: number;
+  missingWebhookIds: number[];
+  checkedAt: string;
+  message: string | null;
+}
+
 /** Per-flow engagement rollup (Klaviyo-style flow performance). */
 export interface FlowStatsView {
   /** Sends accepted by ACS (shop_automation_sends.status='sent'). */
@@ -172,6 +180,39 @@ export interface ShopAutomationView {
   steps: ShopAutomationStepView[];
   /** Lifetime performance for this flow. */
   stats: FlowStatsView;
+}
+
+export const ShopAutomationSendQuerySchema = z.object({
+  connectionId: z.string().uuid().optional(),
+  automationType: z.enum(SHOP_AUTOMATION_TYPES).optional(),
+  status: z.enum(['pending', 'queued', 'sent', 'failed', 'skipped']).optional(),
+  email: z.string().trim().min(1).max(320).optional(),
+  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+export type ShopAutomationSendQuery = z.infer<typeof ShopAutomationSendQuerySchema>;
+
+export interface ShopAutomationSendView {
+  id: string;
+  connectionId: string;
+  shopName: string | null;
+  automationId: string;
+  automationType: ShopAutomationType;
+  email: string;
+  subject: string | null;
+  status: string;
+  errorMessage: string | null;
+  messageId: string | null;
+  orderNo: string | null;
+  sentAt: string | null;
+  createdAt: string;
+}
+
+export interface ShopAutomationSendListResponse {
+  rows: ShopAutomationSendView[];
+  total: number;
+  offset: number;
+  limit: number;
 }
 
 /**
@@ -251,12 +292,10 @@ export function normalizeShopTopic(raw: string | undefined | null): ShopEventTop
   // `customers/create` — the only customer event we subscribe to.
   if (t.includes('customer')) return 'customer_created';
   if (t.includes('paid') || t.includes('pay')) return 'order_paid';
-  if (t.includes('ship') || t.includes('fulfill') || t.includes('deliver'))
-    return 'order_shipped';
+  if (t.includes('ship') || t.includes('fulfill') || t.includes('deliver')) return 'order_shipped';
   if (t.includes('abandon') || t.includes('checkout')) return 'checkout_abandoned';
   // `orders/create` + `orderonepeges/create` (single-page flow).
-  if (t.includes('create') && (t.includes('order') || t.includes('peg')))
-    return 'order_created';
+  if (t.includes('create') && (t.includes('order') || t.includes('peg'))) return 'order_created';
   return null;
 }
 

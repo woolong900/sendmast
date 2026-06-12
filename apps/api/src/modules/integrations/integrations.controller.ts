@@ -8,12 +8,14 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import {
   ConnectShopyySchema,
   SHOP_AUTOMATION_TYPES,
+  ShopAutomationSendQuerySchema,
   UpdateShopAutomationSchema,
   type ShopAutomationType,
 } from '@sendmast/shared';
@@ -65,6 +67,26 @@ export class IntegrationsController {
     return this.svc.listCoupons(user.accountId, id);
   }
 
+  @Get(':id/health')
+  health(@CurrentUser() user: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) {
+    return this.svc.checkConnectionHealth(user.accountId, id);
+  }
+
+  @Post(':id/repair-webhooks')
+  repairWebhooks(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.svc.repairWebhooks(user.accountId, id);
+  }
+
+  @Get('automation-sends/list')
+  listAutomationSends(@CurrentUser() user: AuthenticatedUser, @Query() query: unknown) {
+    const r = ShopAutomationSendQuerySchema.safeParse(query);
+    if (!r.success) throw new BadRequestException(firstZodError(r.error));
+    return this.svc.listAutomationSends(user.accountId, r.data);
+  }
+
   @Patch(':id/automations/:type')
   updateAutomation(
     @CurrentUser() user: AuthenticatedUser,
@@ -77,19 +99,11 @@ export class IntegrationsController {
     }
     const r = UpdateShopAutomationSchema.safeParse(body);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
-    return this.svc.updateAutomation(
-      user.accountId,
-      id,
-      type as ShopAutomationType,
-      r.data,
-    );
+    return this.svc.updateAutomation(user.accountId, id, type as ShopAutomationType, r.data);
   }
 
   @Delete(':id')
-  remove(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', new ParseUUIDPipe()) id: string,
-  ) {
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.disconnect(user.accountId, id);
   }
 }

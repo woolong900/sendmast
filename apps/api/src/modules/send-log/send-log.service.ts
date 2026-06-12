@@ -12,6 +12,7 @@ export class SendLogService {
 
     if (query.accountId) where.accountId = query.accountId;
     if (query.acsAccountId) where.acsAccountId = query.acsAccountId;
+    if (query.source) where.source = query.source;
     if (typeof query.ok === 'boolean') where.ok = query.ok;
     if (query.domain) {
       // Match the trailing `@<domain>` portion of from_address. The domain
@@ -37,6 +38,13 @@ export class SendLogService {
           account: { select: { id: true, name: true, slug: true } },
           acsAccount: { select: { id: true, name: true } },
           campaign: { select: { id: true, name: true } },
+          automation: {
+            select: {
+              id: true,
+              type: true,
+              shopConnection: { select: { shopName: true } },
+            },
+          },
         },
       }),
     ]);
@@ -53,7 +61,7 @@ export class SendLogService {
 function toView(r: {
   id: string;
   sentAt: Date;
-  recipientId: string;
+  recipientId: string | null;
   fromAddress: string;
   fromName: string | null;
   toAddress: string;
@@ -64,9 +72,12 @@ function toView(r: {
   errorMessage: string | null;
   latencyMs: number | null;
   responsePayload: Prisma.JsonValue | null;
+  source: string;
+  automationSendId: string | null;
   account: { id: string; name: string; slug: string };
   acsAccount: { id: string; name: string } | null;
-  campaign: { id: string; name: string };
+  campaign: { id: string; name: string } | null;
+  automation: { id: string; type: string; shopConnection: { shopName: string | null } } | null;
 }): SendLogView {
   return {
     id: r.id,
@@ -74,7 +85,16 @@ function toView(r: {
     account: r.account,
     acsAccount: r.acsAccount,
     campaign: r.campaign,
+    source: r.source as SendLogView['source'],
+    automation: r.automation
+      ? {
+          id: r.automation.id,
+          type: r.automation.type,
+          shopName: r.automation.shopConnection.shopName,
+        }
+      : null,
     recipientId: r.recipientId,
+    automationSendId: r.automationSendId,
     fromAddress: r.fromAddress,
     fromName: r.fromName,
     toAddress: r.toAddress,

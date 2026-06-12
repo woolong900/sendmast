@@ -121,32 +121,32 @@ model QuotaPricingTier {
 /// amounts are also captured at order time so later edits to the tier table
 /// don't rewrite history.
 model QuotaOrder {
-  id              String   @id @default(uuid()) @db.Uuid
-  accountId       String   @map("account_id") @db.Uuid
-  tierId          String?  @map("tier_id") @db.Uuid
+  id              String    @id @default(uuid()) @db.Uuid
+  accountId       String    @map("account_id") @db.Uuid
+  tierId          String?   @map("tier_id") @db.Uuid
   emails          Int
-  amountUsd       Decimal  @map("amount_usd") @db.Decimal(10, 2)
+  amountUsd       Decimal   @map("amount_usd") @db.Decimal(10, 2)
   /// CNY actually charged at order creation time. Gateway settles in CNY,
   /// so this is what the buyer's Alipay/WeChat is billed for.
-  amountCny       Decimal  @map("amount_cny") @db.Decimal(10, 2)
+  amountCny       Decimal   @map("amount_cny") @db.Decimal(10, 2)
   /// FX rate used to compute amountCny from amountUsd. Snapshot at order
   /// time so a later rate change doesn't rewrite history.
-  fxRate          Decimal  @map("fx_rate")    @db.Decimal(12, 6)
-  status          String   @default("pending")
+  fxRate          Decimal   @map("fx_rate") @db.Decimal(12, 6)
+  status          String    @default("pending")
   /// Which gateway placed this order — `shouqianba` for current orders,
   /// `alipay` for legacy ones. Default reflects history; new code always
   /// sets it explicitly.
-  provider        String   @default("alipay")
+  provider        String    @default("alipay")
   /// Our outgoing reference (Shouqianba calls this `client_sn`, Alipay
   /// called it `out_trade_no`). UNIQUE so retried notify callbacks land
   /// on the same row.
-  providerOrderId String   @unique @map("provider_order_id")
+  providerOrderId String    @unique @map("provider_order_id")
   /// Gateway's internal trade id, returned in the notify body once paid.
-  providerTradeNo String?  @map("provider_trade_no")
+  providerTradeNo String?   @map("provider_trade_no")
   paidAt          DateTime? @map("paid_at")
-  createdBy       String?  @map("created_by") @db.Uuid
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  createdBy       String?   @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   account Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
   tier    QuotaPricingTier? @relation(fields: [tierId], references: [id], onDelete: SetNull)
@@ -230,22 +230,22 @@ model NotificationTemplate {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @map("user_id") @db.Uuid
-  tokenHash String    @unique @map("token_hash")
-  userAgent String?   @map("user_agent")
-  ip        String?
-  expiresAt DateTime  @map("expires_at")
-  revokedAt DateTime? @map("revoked_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  tokenHash      String    @unique @map("token_hash")
+  userAgent      String?   @map("user_agent")
+  ip             String?
+  expiresAt      DateTime  @map("expires_at")
+  revokedAt      DateTime? @map("revoked_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
   /// Workspace this token's access tokens grant. Nullable for legacy rows
   /// issued before the impersonation feature — refresh falls back to the
   /// user's first AccountUser membership in that case.
-  accountId String?   @map("account_id") @db.Uuid
+  accountId      String?   @map("account_id") @db.Uuid
   /// Set when a Platform Admin used this session to "代登录" another tenant.
   /// Stores the admin's own user id so refresh keeps the impersonation
   /// context alive across access-token rotations and the UI banner.
-  impersonatedBy String? @map("impersonated_by") @db.Uuid
+  impersonatedBy String?   @map("impersonated_by") @db.Uuid
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -295,22 +295,22 @@ model Account {
   createdAt           DateTime      @default(now()) @map("created_at")
   updatedAt           DateTime      @updatedAt @map("updated_at")
 
-  members            AccountUser[]
-  senderDomains      SenderDomain[]
-  contactLists       ContactList[]
-  contacts           Contact[]
-  suppressions       SuppressionEntry[]
-  tags               Tag[]
-  templates          EmailTemplate[]
-  campaigns          Campaign[]
-  campaignRecipients CampaignRecipient[]
-  sendLogs           SendLog[]
-  importJobs         ImportJob[]
-  customTags         CustomTag[]
-  segments           Segment[]
-  quotaOrders        QuotaOrder[]
-  commissionRecords  CommissionRecord[]
-  acsAccounts        AccountAcsAccount[]
+  members                AccountUser[]
+  senderDomains          SenderDomain[]
+  contactLists           ContactList[]
+  contacts               Contact[]
+  suppressions           SuppressionEntry[]
+  tags                   Tag[]
+  templates              EmailTemplate[]
+  campaigns              Campaign[]
+  campaignRecipients     CampaignRecipient[]
+  sendLogs               SendLog[]
+  importJobs             ImportJob[]
+  customTags             CustomTag[]
+  segments               Segment[]
+  quotaOrders            QuotaOrder[]
+  commissionRecords      CommissionRecord[]
+  acsAccounts            AccountAcsAccount[]
   shopConnections        ShopConnection[]
   shopOrders             ShopOrder[]
   shopAutomations        ShopAutomation[]
@@ -406,9 +406,9 @@ model AcsAccount {
   createdAt                     DateTime         @default(now()) @map("created_at")
   updatedAt                     DateTime         @updatedAt @map("updated_at")
 
-  senderDomains    SenderDomain[]
-  accountLinks     AccountAcsAccount[]
-  sendLogs         SendLog[]
+  senderDomains SenderDomain[]
+  accountLinks  AccountAcsAccount[]
+  sendLogs      SendLog[]
 
   @@map("acs_accounts")
 }
@@ -745,10 +745,10 @@ model Campaign {
 /// materialisation time (see CampaignRecipient.fromEmail). All senders must
 /// resolve to verified domains under the SAME ACS account as the primary.
 model CampaignSender {
-  id         String   @id @default(uuid()) @db.Uuid
-  campaignId String   @map("campaign_id") @db.Uuid
-  fromEmail  String   @map("from_email")
-  fromName   String   @map("from_name")
+  id         String @id @default(uuid()) @db.Uuid
+  campaignId String @map("campaign_id") @db.Uuid
+  fromEmail  String @map("from_email")
+  fromName   String @map("from_name")
   /// 0-based slot; position 0 mirrors Campaign.fromEmail. Drives the
   /// round-robin order (recipient i → sender at position i % senderCount).
   position   Int
@@ -881,11 +881,16 @@ model CampaignRecipient {
 /// allowed (future retries). Pre-flight failures (no html / suspended account
 /// / transport build failure) are NOT logged here — those never reach ACS.
 model SendLog {
-  id           String  @id @default(uuid()) @db.Uuid
-  accountId    String  @map("account_id") @db.Uuid // tenant
-  acsAccountId String? @map("acs_account_id") @db.Uuid // SetNull on ACS account delete to retain history
-  campaignId   String  @map("campaign_id") @db.Uuid
-  recipientId  String  @map("recipient_id") @db.Uuid
+  id               String  @id @default(uuid()) @db.Uuid
+  accountId        String  @map("account_id") @db.Uuid // tenant
+  acsAccountId     String? @map("acs_account_id") @db.Uuid // SetNull on ACS account delete to retain history
+  /// `campaign` or `automation`; kept as text so future send sources can be
+  /// added without an enum migration.
+  source           String  @default("campaign")
+  campaignId       String? @map("campaign_id") @db.Uuid
+  recipientId      String? @map("recipient_id") @db.Uuid
+  automationId     String? @map("automation_id") @db.Uuid
+  automationSendId String? @map("automation_send_id") @db.Uuid
 
   fromAddress String  @map("from_address")
   fromName    String? @map("from_name")
@@ -905,13 +910,18 @@ model SendLog {
   responsePayload Json?    @map("response_payload")
   sentAt          DateTime @default(now()) @map("sent_at")
 
-  account    Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  acsAccount AcsAccount?       @relation(fields: [acsAccountId], references: [id], onDelete: SetNull)
-  campaign   Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  recipient  CampaignRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  account              Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  acsAccount           AcsAccount?         @relation(fields: [acsAccountId], references: [id], onDelete: SetNull)
+  campaign             Campaign?           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipient            CampaignRecipient?  @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  automation           ShopAutomation?     @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  automationSend       ShopAutomationSend? @relation(fields: [automationSendId], references: [id], onDelete: Cascade)
 
   @@index([campaignId, sentAt])
   @@index([recipientId, sentAt])
+  @@index([automationId, sentAt])
+  @@index([automationSendId, sentAt])
+  @@index([source, sentAt])
   @@index([acsAccountId, ok, sentAt])
   @@index([accountId, sentAt])
   @@map("send_logs")
@@ -969,15 +979,15 @@ model ImportJob {
 /// whatever the partner gave us) — we never auto-transfer; settlement is
 /// off-platform, the per-month CSV export is the operator's source of truth.
 model ReferralChannel {
-  id          String   @id @default(uuid()) @db.Uuid
-  code        String   @unique @db.VarChar(32)
-  name        String
-  contact     String?
-  payoutInfo  String?  @map("payout_info") @db.Text
-  notes       String?  @db.Text
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id         String   @id @default(uuid()) @db.Uuid
+  code       String   @unique @db.VarChar(32)
+  name       String
+  contact    String?
+  payoutInfo String?  @map("payout_info") @db.Text
+  notes      String?  @db.Text
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   accounts          Account[]
   commissionRecords CommissionRecord[]
@@ -1101,27 +1111,27 @@ model ShopConnection {
 /// onto `attributed*`; the ClickHouse `orders`/`attributions` tables are the
 /// analytics source of truth, this PG row is the operational record.
 model ShopOrder {
-  id                   String   @id @default(uuid()) @db.Uuid
-  accountId            String   @map("account_id") @db.Uuid
-  shopConnectionId     String   @map("shop_connection_id") @db.Uuid
-  externalOrderId      String   @map("external_order_id")
-  orderNo              String?  @map("order_no")
-  customerEmail        String   @map("customer_email")
-  contactId            String?  @map("contact_id") @db.Uuid
-  value                Decimal  @db.Decimal(18, 2)
-  currency             String
-  status               String
-  orderTime            DateTime @map("order_time")
-  attributedCampaignId String?  @map("attributed_campaign_id") @db.Uuid
-  attributedContactId  String?  @map("attributed_contact_id") @db.Uuid
-  attributionModel     String?  @map("attribution_model")
+  id                     String   @id @default(uuid()) @db.Uuid
+  accountId              String   @map("account_id") @db.Uuid
+  shopConnectionId       String   @map("shop_connection_id") @db.Uuid
+  externalOrderId        String   @map("external_order_id")
+  orderNo                String?  @map("order_no")
+  customerEmail          String   @map("customer_email")
+  contactId              String?  @map("contact_id") @db.Uuid
+  value                  Decimal  @db.Decimal(18, 2)
+  currency               String
+  status                 String
+  orderTime              DateTime @map("order_time")
+  attributedCampaignId   String?  @map("attributed_campaign_id") @db.Uuid
+  attributedContactId    String?  @map("attributed_contact_id") @db.Uuid
+  attributionModel       String?  @map("attribution_model")
   /// Flow this order is hard-attributed to (recall link carried sm_mid=sendId).
-  attributedAutomationId String? @map("attributed_automation_id") @db.Uuid
+  attributedAutomationId String?  @map("attributed_automation_id") @db.Uuid
   /// The exact flow send (shop_automation_sends.id) that earned the conversion.
-  attributedSendId       String? @map("attributed_send_id") @db.Uuid
-  raw                  Json?
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+  attributedSendId       String?  @map("attributed_send_id") @db.Uuid
+  raw                    Json?
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
 
   account        Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
   shopConnection ShopConnection @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
@@ -1179,6 +1189,7 @@ model ShopAutomation {
   account        Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
   shopConnection ShopConnection       @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)
   sends          ShopAutomationSend[]
+  sendLogs       SendLog[]
   steps          ShopAutomationStep[]
 
   @@unique([shopConnectionId, type])
@@ -1192,30 +1203,30 @@ model ShopAutomation {
 /// shared sender (from address) lives on the parent `ShopAutomation`. Other
 /// automation types ignore steps and keep using the parent's template/subject.
 model ShopAutomationStep {
-  id           String   @id @default(uuid()) @db.Uuid
-  automationId String   @map("automation_id") @db.Uuid
+  id                  String   @id @default(uuid()) @db.Uuid
+  automationId        String   @map("automation_id") @db.Uuid
   /// 1-based round order; delays must strictly increase with stepIndex.
-  stepIndex    Int      @map("step_index")
+  stepIndex           Int      @map("step_index")
   /// Legacy link to a source template; content is now stored inline below.
-  templateId   String?  @map("template_id") @db.Uuid
+  templateId          String?  @map("template_id") @db.Uuid
   /// Inline email content for this round (seeded from a template, then editable).
-  html         String?  @db.Text
-  mjml         String?  @db.Text
-  designJson   Json?    @map("design_json")
-  thumbnail    String?
+  html                String?  @db.Text
+  mjml                String?  @db.Text
+  designJson          Json?    @map("design_json")
+  thumbnail           String?
   /// Optional inbox preview text (preheader) for this round.
-  preheader    String?
-  subject      String?
+  preheader           String?
+  subject             String?
   /// Store coupon code shown in this round's recall email; null = no coupon.
-  couponCode   String?  @map("coupon_code")
+  couponCode          String?  @map("coupon_code")
   /// Snapshot of the coupon's discount kind: 'percent' | 'amount' (null = unknown).
-  couponDiscountKind  String? @map("coupon_discount_kind")
+  couponDiscountKind  String?  @map("coupon_discount_kind")
   /// Snapshot of the coupon's discount value (percent off, or amount off).
-  couponDiscountValue Float?  @map("coupon_discount_value")
+  couponDiscountValue Float?   @map("coupon_discount_value")
   /// Minutes after order creation this round fires (absolute, not incremental).
-  delayMinutes Int      @map("delay_minutes")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  delayMinutes        Int      @map("delay_minutes")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
   automation ShopAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
 
@@ -1260,6 +1271,7 @@ model ShopAutomationSend {
   createdAt    DateTime  @default(now()) @map("created_at")
 
   automation ShopAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  sendLogs   SendLog[]
 
   @@unique([automationId, dedupKey])
   @@index([accountId, createdAt])

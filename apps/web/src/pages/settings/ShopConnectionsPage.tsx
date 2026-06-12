@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Store, Unplug, Info, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Store, Unplug, Info, CheckCircle2, AlertTriangle, RefreshCw, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,7 +8,7 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { Link } from 'react-router-dom';
 import { api, apiErrMessage } from '@/lib/api';
-import type { ShopConnectionView } from '@sendmast/shared';
+import type { ShopConnectionHealthView, ShopConnectionView } from '@sendmast/shared';
 
 interface ShopConnectionsResponse {
   configured: boolean;
@@ -101,48 +101,120 @@ export function ShopConnectionsPage() {
           </Card>
         )}
 
-        {active.map((c) => {
-          const badge = STATUS_BADGE[c.status];
-          return (
-            <Card key={c.id}>
-              <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
-                    <Store className="size-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{c.shopName ?? c.shopDomain ?? '店铺'}</span>
-                      <Badge variant={badge.variant}>{badge.label}</Badge>
-                    </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      {c.shopDomain ?? c.mainDomain ?? `店铺 #${c.externalStoreId}`}
-                      {' · '}连接于 {new Date(c.connectedAt).toLocaleString('zh-CN')}
-                    </div>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={async () => {
-                    const ok = await confirm({
-                      title: '解绑店铺？',
-                      description: '解绑后将停止统计该店铺订单并暂停相关自动化，历史数据保留。',
-                      variant: 'danger',
-                      confirmLabel: '解绑',
-                    });
-                    if (ok) disconnectMut.mutate(c.id);
-                  }}
-                >
-                  <Unplug className="mr-1 size-4" />
-                  解绑
-                </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
+        {active.map((c) => (
+          <ConnectionCard
+            key={c.id}
+            connection={c}
+            onDisconnect={async () => {
+              const ok = await confirm({
+                title: '解绑店铺？',
+                description: '解绑后将停止统计该店铺订单并暂停相关自动化，历史数据保留。',
+                variant: 'danger',
+                confirmLabel: '解绑',
+              });
+              if (ok) disconnectMut.mutate(c.id);
+            }}
+          />
+        ))}
       </div>
     </div>
+  );
+}
+
+function ConnectionCard({
+  connection,
+  onDisconnect,
+}: {
+  connection: ShopConnectionView;
+  onDisconnect: () => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const badge = STATUS_BADGE[connection.status];
+  const health = useQuery<ShopConnectionHealthView>({
+    queryKey: ['shop-connection-health', connection.id],
+    queryFn: async () => (await api.get(`/api/integrations/shopyy/${connection.id}/health`)).data,
+    retry: false,
+  });
+  const repair = useMutation({
+    mutationFn: () => api.post(`/api/integrations/shopyy/${connection.id}/repair-webhooks`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['shop-connection-health', connection.id] });
+      qc.invalidateQueries({ queryKey: ['shop-connections'] });
+      toast('Webhook 已修复', 'success');
+    },
+    onError: (err) => toast(apiErrMessage(err), 'error'),
+  });
+  const h = health.data;
+  const healthy = h?.status === 'healthy';
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-4 p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+              <Store className="size-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">
+                  {connection.shopName ?? connection.shopDomain ?? '店铺'}
+                </span>
+                <Badge variant={badge.variant}>{badge.label}</Badge>
+                {h && (
+                  <Badge
+                    variant={healthy ? 'success' : h.status === 'expired' ? 'danger' : 'warning'}
+                  >
+                    {healthy ? '集成正常' : h.status === 'expired' ? '授权失效' : '需要修复'}
+                  </Badge>
+                )}
+              </div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {connection.shopDomain ??
+                  connection.mainDomain ??
+                  `店铺 #${connection.externalStoreId}`}
+                {' · '}连接于 {new Date(connection.connectedAt).toLocaleString('zh-CN')}
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => health.refetch()}
+              disabled={health.isFetching}
+            >
+              <RefreshCw className={`mr-1 size-4 ${health.isFetching ? 'animate-spin' : ''}`} />
+              检查
+            </Button>
+            {h && !healthy && h.authorizationValid && (
+              <Button size="sm" onClick={() => repair.mutate()} disabled={repair.isPending}>
+                <Wrench className="mr-1 size-4" />
+                修复 Webhook
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={onDisconnect}>
+              <Unplug className="mr-1 size-4" />
+              解绑
+            </Button>
+          </div>
+        </div>
+        {h && (
+          <div
+            className={`flex items-center gap-2 border-t pt-3 text-xs ${
+              healthy ? 'text-emerald-700' : 'text-amber-700'
+            }`}
+          >
+            {healthy ? <CheckCircle2 className="size-4" /> : <AlertTriangle className="size-4" />}
+            <span>
+              {h.message ??
+                `Webhook ${h.installedWebhookCount}/${h.expectedWebhookCount} 正常，授权有效`}
+            </span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

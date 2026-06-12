@@ -22,6 +22,7 @@ import { TableSkeletonRows } from '@/components/ui/skeleton';
 interface Filters {
   accountId: string;
   acsAccountId: string;
+  source: '' | 'campaign' | 'automation';
   domain: string;
   status: '' | 'success' | 'failed';
   range: DateRange | null;
@@ -30,6 +31,7 @@ interface Filters {
 const EMPTY_FILTERS: Filters = {
   accountId: '',
   acsAccountId: '',
+  source: '',
   domain: '',
   status: '',
   range: null,
@@ -63,6 +65,7 @@ export function SendLogsAdminPage() {
     };
     if (active.accountId) params.accountId = active.accountId;
     if (active.acsAccountId) params.acsAccountId = active.acsAccountId;
+    if (active.source) params.source = active.source;
     if (active.domain.trim()) params.domain = active.domain.trim().toLowerCase();
     if (active.status === 'success') params.ok = 'true';
     if (active.status === 'failed') params.ok = 'false';
@@ -99,7 +102,7 @@ export function SendLogsAdminPage() {
       </div>
 
       <Card>
-        <CardContent className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3 lg:grid-cols-6">
+        <CardContent className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3 lg:grid-cols-7">
           <Field label="租户">
             <select
               className={selectCls}
@@ -128,6 +131,17 @@ export function SendLogsAdminPage() {
               ))}
             </select>
           </Field>
+          <Field label="来源">
+            <select
+              className={selectCls}
+              value={form.source}
+              onChange={(e) => setForm({ ...form, source: e.target.value as Filters['source'] })}
+            >
+              <option value="">全部</option>
+              <option value="campaign">营销活动</option>
+              <option value="automation">自动化</option>
+            </select>
+          </Field>
           <Field label="发件域名">
             <Input
               placeholder="例如 example.com"
@@ -140,9 +154,7 @@ export function SendLogsAdminPage() {
             <select
               className={selectCls}
               value={form.status}
-              onChange={(e) =>
-                setForm({ ...form, status: e.target.value as Filters['status'] })
-              }
+              onChange={(e) => setForm({ ...form, status: e.target.value as Filters['status'] })}
             >
               <option value="">全部</option>
               <option value="success">成功</option>
@@ -159,7 +171,7 @@ export function SendLogsAdminPage() {
             </Field>
           </div>
 
-          <div className="md:col-span-3 lg:col-span-6 flex items-center justify-end gap-2">
+          <div className="md:col-span-3 lg:col-span-7 flex items-center justify-end gap-2">
             <Button variant="ghost" onClick={reset}>
               重置
             </Button>
@@ -175,8 +187,11 @@ export function SendLogsAdminPage() {
         <CardContent className="p-0">
           <div className="flex items-center justify-between border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
             <div>
-              共 <span className="font-medium tabular-nums text-foreground">{formatNumber(data?.total ?? 0)}</span> 条
-              {isFetching && !isLoading && <span className="ml-2 opacity-60">刷新中…</span>}
+              共{' '}
+              <span className="font-medium tabular-nums text-foreground">
+                {formatNumber(data?.total ?? 0)}
+              </span>{' '}
+              条{isFetching && !isLoading && <span className="ml-2 opacity-60">刷新中…</span>}
             </div>
           </div>
           <table className="w-full text-sm">
@@ -185,6 +200,7 @@ export function SendLogsAdminPage() {
                 <th className="px-4 py-3 font-medium">时间</th>
                 <th className="px-4 py-3 font-medium">租户</th>
                 <th className="px-4 py-3 font-medium">ACS</th>
+                <th className="px-4 py-3 font-medium">来源</th>
                 <th className="px-4 py-3 font-medium">发件人</th>
                 <th className="px-4 py-3 font-medium">收件人</th>
                 <th className="px-4 py-3 font-medium">状态</th>
@@ -194,8 +210,8 @@ export function SendLogsAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && <TableSkeletonRows columns={9} cellClassName="px-4 py-3" />}
-              {!isLoading && data?.rows.length === 0 && <EmptyStateRow colSpan={9} />}
+              {isLoading && <TableSkeletonRows columns={10} cellClassName="px-4 py-3" />}
+              {!isLoading && data?.rows.length === 0 && <EmptyStateRow colSpan={10} />}
               {data?.rows.map((r) => (
                 <tr
                   key={r.id}
@@ -211,6 +227,11 @@ export function SendLogsAdminPage() {
                   </td>
                   <td className="px-4 py-2 text-muted-foreground">
                     {r.acsAccount?.name ?? <span className="opacity-60">— 已删除</span>}
+                  </td>
+                  <td className="px-4 py-2">
+                    <Badge variant={r.source === 'automation' ? 'warning' : 'muted'}>
+                      {r.source === 'automation' ? '自动化' : '营销活动'}
+                    </Badge>
                   </td>
                   <td className="px-4 py-2 text-xs text-muted-foreground">{r.fromAddress}</td>
                   <td className="px-4 py-2 text-xs">{r.toAddress}</td>
@@ -295,10 +316,21 @@ function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void 
           <Grid>
             <KV label="租户" value={`${row.account.name} (${row.account.slug})`} />
             <KV label="ACS 账号" value={row.acsAccount?.name ?? '— 已删除 —'} />
-            <KV label="活动" value={row.campaign.name} mono />
+            <KV
+              label="来源"
+              value={
+                row.source === 'automation'
+                  ? `自动化 · ${row.automation?.shopName ?? row.automation?.type ?? '未知流程'}`
+                  : `营销活动 · ${row.campaign?.name ?? '已删除'}`
+              }
+            />
             <KV label="收件人" value={row.toAddress} mono />
             <KV label="发件人" value={row.fromAddress} mono />
-            <KV label="recipient id" value={row.recipientId} mono />
+            <KV
+              label={row.source === 'automation' ? 'automation send id' : 'recipient id'}
+              value={row.automationSendId ?? row.recipientId ?? '—'}
+              mono
+            />
           </Grid>
 
           <Grid>

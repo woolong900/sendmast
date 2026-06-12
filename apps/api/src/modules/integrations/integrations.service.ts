@@ -28,6 +28,9 @@ import {
   type CouponDiscountKind,
   type FlowStatsView,
   type ShopAutomationType as ShopAutomationTypeDto,
+  type ShopAutomationSendListResponse,
+  type ShopAutomationSendQuery,
+  type ShopConnectionHealthView,
   type ShopAutomationView,
   type ShopConnectionView,
   type ShopCouponView,
@@ -140,7 +143,6 @@ function toAutomationView(
   };
 }
 
-
 function toView(c: ShopConnection): ShopConnectionView {
   return {
     id: c.id,
@@ -187,10 +189,7 @@ export class IntegrationsService {
    * by the SPA after shopyy redirects the merchant back with `code` +
    * `authorize_token_url`.
    */
-  async connectShopyy(
-    accountId: string,
-    input: ConnectShopyyInput,
-  ): Promise<ShopConnectionView> {
+  async connectShopyy(accountId: string, input: ConnectShopyyInput): Promise<ShopConnectionView> {
     const secret = this.config.get<string>('SHOPYY_APP_SECRET');
     if (!secret) {
       throw new BadRequestException(
@@ -344,9 +343,9 @@ export class IntegrationsService {
     // Reuse an existing webhook row for the same event when it already points at
     // our receiver, so re-connecting edits in place instead of duplicating
     // (duplicates would double-send the transactional emails).
-    const existing = await client.listWebhooks().catch(() => [] as Awaited<
-      ReturnType<typeof client.listWebhooks>
-    >);
+    const existing = await client
+      .listWebhooks()
+      .catch(() => [] as Awaited<ReturnType<typeof client.listWebhooks>>);
     const ourPrefix = this.shopyyWebhookReceiverUrl();
 
     const items = SHOPYY_WEBHOOK_EVENTS.map((e) => {
@@ -357,10 +356,7 @@ export class IntegrationsService {
       // topic is a fixed safe constant (`orders/create` etc.), so we leave its
       // `/` literal rather than percent-encoding it to `%2F` — both decode the
       // same at the receiver, but the literal slash reads cleaner.
-      const url =
-        `${ourPrefix}` +
-        `?key=${conn.webhookSecret}` +
-        `&topic=${e.topic}`;
+      const url = `${ourPrefix}` + `?key=${conn.webhookSecret}` + `&topic=${e.topic}`;
       const prior = existing.find(
         (w) => w.event_id === e.eventId && typeof w.url === 'string' && w.url.startsWith(ourPrefix),
       );
@@ -380,9 +376,7 @@ export class IntegrationsService {
       // (e.g. 36 = single-page checkout, absent on some stores) rejects the
       // WHOLE batch, so no webhooks get created. Fall back to per-event saves
       // so the valid events still register; skip (log) only the bad ones.
-      const results = await Promise.allSettled(
-        items.map((it) => client.batchSaveWebhooks([it])),
-      );
+      const results = await Promise.allSettled(items.map((it) => client.batchSaveWebhooks([it])));
       const failures = results.flatMap((r, i) =>
         r.status === 'rejected' ? [{ event: SHOPYY_WEBHOOK_EVENTS[i]!, reason: r.reason }] : [],
       );
@@ -437,10 +431,7 @@ export class IntegrationsService {
   }
 
   /** PG sent count + ClickHouse engagement for one flow. Best-effort on CH outage. */
-  private async automationStats(
-    accountId: string,
-    automationId: string,
-  ): Promise<FlowStatsView> {
+  private async automationStats(accountId: string, automationId: string): Promise<FlowStatsView> {
     const [sent, engagement, sales] = await Promise.all([
       this.prisma.shopAutomationSend.count({
         where: { automationId, status: 'sent' },
@@ -477,10 +468,7 @@ export class IntegrationsService {
   }
 
   /** Verify the store belongs to this tenant; throws 404 otherwise. */
-  private async assertConnection(
-    accountId: string,
-    connectionId: string,
-  ): Promise<ShopConnection> {
+  private async assertConnection(accountId: string, connectionId: string): Promise<ShopConnection> {
     const conn = await this.prisma.shopConnection.findFirst({
       where: { id: connectionId, accountId },
     });
@@ -492,10 +480,7 @@ export class IntegrationsService {
    * Return the three fixed automations for a store, lazily creating any that
    * don't yet exist so the settings UI always renders all three cards.
    */
-  async listAutomations(
-    accountId: string,
-    connectionId: string,
-  ): Promise<ShopAutomationView[]> {
+  async listAutomations(accountId: string, connectionId: string): Promise<ShopAutomationView[]> {
     await this.assertConnection(accountId, connectionId);
     const existing = await this.prisma.shopAutomation.findMany({
       where: { shopConnectionId: connectionId },
@@ -564,7 +549,12 @@ export class IntegrationsService {
   ): Promise<void> {
     const cache = new Map<
       string,
-      { html: string; mjml: string | null; designJson: Prisma.JsonValue; thumbnail: string | null } | null
+      {
+        html: string;
+        mjml: string | null;
+        designJson: Prisma.JsonValue;
+        thumbnail: string | null;
+      } | null
     >();
     const load = async (id: string) => {
       if (cache.has(id)) return cache.get(id)!;
@@ -587,18 +577,30 @@ export class IntegrationsService {
       if (!c) continue;
       const upd = await this.prisma.shopAutomation.update({
         where: { id: a.id },
-        data: { html: c.html, mjml: c.mjml, designJson: json(c.designJson), thumbnail: c.thumbnail },
+        data: {
+          html: c.html,
+          mjml: c.mjml,
+          designJson: json(c.designJson),
+          thumbnail: c.thumbnail,
+        },
       });
       Object.assign(a, upd);
     }
     for (const s of steps) {
       if (s.html != null) continue;
       const parent = automations.find((a) => a.id === s.automationId);
-      const c = await load(s.templateId ?? parent?.templateId ?? DEFAULT_TEMPLATE_ID.abandoned_cart);
+      const c = await load(
+        s.templateId ?? parent?.templateId ?? DEFAULT_TEMPLATE_ID.abandoned_cart,
+      );
       if (!c) continue;
       const upd = await this.prisma.shopAutomationStep.update({
         where: { id: s.id },
-        data: { html: c.html, mjml: c.mjml, designJson: json(c.designJson), thumbnail: c.thumbnail },
+        data: {
+          html: c.html,
+          mjml: c.mjml,
+          designJson: json(c.designJson),
+          thumbnail: c.thumbnail,
+        },
       });
       Object.assign(s, upd);
     }
@@ -732,8 +734,8 @@ export class IntegrationsService {
               subject: s.subject ?? null,
               couponCode,
               // Only keep the discount snapshot when a coupon is actually set.
-              couponDiscountKind: couponCode ? s.couponDiscountKind ?? null : null,
-              couponDiscountValue: couponCode ? s.couponDiscountValue ?? null : null,
+              couponDiscountKind: couponCode ? (s.couponDiscountKind ?? null) : null,
+              couponDiscountValue: couponCode ? (s.couponDiscountValue ?? null) : null,
               delayMinutes: s.delayMinutes,
             };
           }),
@@ -748,11 +750,7 @@ export class IntegrationsService {
           orderBy: { stepIndex: 'asc' },
         })
       : [];
-    return toAutomationView(
-      updated,
-      stepRows,
-      await this.automationStats(accountId, updated.id),
-    );
+    return toAutomationView(updated, stepRows, await this.automationStats(accountId, updated.id));
   }
 
   /**
@@ -802,6 +800,168 @@ export class IntegrationsService {
       });
     }
     return out;
+  }
+
+  /** Live authorization + webhook integrity check for the store settings page. */
+  async checkConnectionHealth(
+    accountId: string,
+    connectionId: string,
+  ): Promise<ShopConnectionHealthView> {
+    const conn = await this.assertConnection(accountId, connectionId);
+    const checkedAt = new Date().toISOString();
+    if (conn.status === 'revoked') {
+      return {
+        status: 'revoked',
+        authorizationValid: false,
+        expectedWebhookCount: conn.webhookIds.length,
+        installedWebhookCount: 0,
+        missingWebhookIds: conn.webhookIds,
+        checkedAt,
+        message: '店铺已解绑',
+      };
+    }
+
+    try {
+      const webhooks = await this.shopyyClient(conn.openapiDomain, conn.devToken).listWebhooks();
+      const receiverPrefix = this.shopyyWebhookReceiverUrl();
+      const liveIds = new Set(
+        webhooks
+          .filter(
+            (webhook) => typeof webhook.url === 'string' && webhook.url.startsWith(receiverPrefix),
+          )
+          .map((webhook) => webhook.id),
+      );
+      const missingWebhookIds = conn.webhookIds.filter((id) => !liveIds.has(id));
+      const installedWebhookCount = conn.webhookIds.length - missingWebhookIds.length;
+      const healthy = conn.webhookIds.length > 0 && missingWebhookIds.length === 0;
+      return {
+        status: healthy ? 'healthy' : 'degraded',
+        authorizationValid: true,
+        expectedWebhookCount: conn.webhookIds.length,
+        installedWebhookCount,
+        missingWebhookIds,
+        checkedAt,
+        message: healthy
+          ? null
+          : conn.webhookIds.length === 0
+            ? '未记录该店铺的 Webhook，请执行修复'
+            : `有 ${missingWebhookIds.length} 个 Webhook 缺失，请执行修复`,
+      };
+    } catch (err) {
+      const authorizationValid = !(err instanceof ShopyyAuthError);
+      if (!authorizationValid && conn.status !== 'expired') {
+        await this.prisma.shopConnection.update({
+          where: { id: conn.id },
+          data: { status: 'expired' },
+        });
+      }
+      return {
+        status: authorizationValid ? 'degraded' : 'expired',
+        authorizationValid,
+        expectedWebhookCount: conn.webhookIds.length,
+        installedWebhookCount: 0,
+        missingWebhookIds: conn.webhookIds,
+        checkedAt,
+        message: authorizationValid
+          ? `健康检查失败：${err instanceof Error ? err.message : String(err)}`
+          : '店铺授权已失效，请重新授权',
+      };
+    }
+  }
+
+  /** Recreate/update the store's owned webhooks and persist their current IDs. */
+  async repairWebhooks(accountId: string, connectionId: string): Promise<ShopConnectionHealthView> {
+    const conn = await this.assertConnection(accountId, connectionId);
+    if (conn.status === 'revoked') throw new BadRequestException('店铺已解绑，请先重新授权');
+    if (!conn.appExternalId) throw new BadRequestException('店铺连接缺少 APP_ID，请重新授权店铺');
+    const webhookSecret = conn.webhookSecret ?? randomBytes(24).toString('hex');
+    let webhookIds: number[];
+    try {
+      webhookIds = await this.installWebhooks({
+        externalStoreId: conn.externalStoreId,
+        openapiDomain: conn.openapiDomain,
+        devToken: conn.devToken,
+        webhookSecret,
+        appId: conn.appExternalId,
+      });
+    } catch (err) {
+      if (err instanceof ShopyyAuthError) {
+        await this.prisma.shopConnection.update({
+          where: { id: conn.id },
+          data: { status: 'expired' },
+        });
+        throw new BadRequestException('店铺授权已失效，请重新授权后再修复 Webhook');
+      }
+      throw new BadRequestException(
+        `修复 Shopyy Webhook 失败：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    await this.prisma.shopConnection.update({
+      where: { id: conn.id },
+      data: { webhookIds, webhookSecret, status: 'active' },
+    });
+    return this.checkConnectionHealth(accountId, connectionId);
+  }
+
+  /** Tenant-facing history of every automation message, including skipped rows. */
+  async listAutomationSends(
+    accountId: string,
+    query: ShopAutomationSendQuery,
+  ): Promise<ShopAutomationSendListResponse> {
+    const where: Prisma.ShopAutomationSendWhereInput = { accountId };
+    if (query.connectionId || query.automationType) {
+      where.automation = {
+        ...(query.connectionId ? { shopConnectionId: query.connectionId } : {}),
+        ...(query.automationType ? { type: query.automationType as ShopAutomationType } : {}),
+      };
+    }
+    if (query.status) where.status = query.status;
+    if (query.email) where.email = { contains: query.email, mode: 'insensitive' };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.shopAutomationSend.count({ where }),
+      this.prisma.shopAutomationSend.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: query.offset,
+        take: query.limit,
+        include: {
+          automation: {
+            select: {
+              id: true,
+              type: true,
+              shopConnectionId: true,
+              shopConnection: { select: { shopName: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      total,
+      offset: query.offset,
+      limit: query.limit,
+      rows: rows.map((send) => {
+        const mergeVars = send.mergeVars as Record<string, unknown> | null;
+        const orderNo = mergeVars?.order_no;
+        return {
+          id: send.id,
+          connectionId: send.automation.shopConnectionId,
+          shopName: send.automation.shopConnection.shopName,
+          automationId: send.automation.id,
+          automationType: send.automation.type as ShopAutomationTypeDto,
+          email: send.email,
+          subject: send.subject,
+          status: send.status,
+          errorMessage: send.errorMessage,
+          messageId: send.messageId,
+          orderNo: typeof orderNo === 'string' ? orderNo : null,
+          sentAt: send.sentAt?.toISOString() ?? null,
+          createdAt: send.createdAt.toISOString(),
+        };
+      }),
+    };
   }
 
   async disconnect(accountId: string, id: string): Promise<{ ok: true }> {

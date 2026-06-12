@@ -230,12 +230,8 @@ async function materialiseRecipients(
     const d = s.fromEmail.split('@')[1]?.toLowerCase();
     senderAcs.push(d ? await resolveAcsAccountIdForDomain(d) : null);
   }
-  const primaryDomain = (senders[0]?.fromEmail ?? campaign.fromEmail)
-    .split('@')[1]
-    ?.toLowerCase();
-  const primaryAcs = primaryDomain
-    ? await resolveAcsAccountIdForDomain(primaryDomain)
-    : null;
+  const primaryDomain = (senders[0]?.fromEmail ?? campaign.fromEmail).split('@')[1]?.toLowerCase();
+  const primaryAcs = primaryDomain ? await resolveAcsAccountIdForDomain(primaryDomain) : null;
 
   const listIds = campaign.lists.map((l) => l.listId);
   // No lists means this is the segment-only path; API already materialised
@@ -289,7 +285,7 @@ async function materialiseRecipients(
         const s = rotate ? senders[idx] : null;
         const member = new Set(c.memberships.map((m) => m.listId));
         const firstListId = listIds.find((id) => member.has(id));
-        const listName = firstListId ? listNameById.get(firstListId) ?? null : null;
+        const listName = firstListId ? (listNameById.get(firstListId) ?? null) : null;
         return {
           accountId,
           campaignId: campaign.id,
@@ -335,9 +331,7 @@ async function runTick(_job: Job): Promise<void> {
     where: { id: { in: tenantIds } },
     select: { id: true, sendQuotaRemaining: true },
   });
-  const tenantBudget = new Map<string, number>(
-    tenants.map((t) => [t.id, t.sendQuotaRemaining]),
-  );
+  const tenantBudget = new Map<string, number>(tenants.map((t) => [t.id, t.sendQuotaRemaining]));
 
   // 2b. Force-finalize campaigns whose tenant has zero quota. Without this
   //     the campaign would sit in `status='sending'` indefinitely (the loop
@@ -348,9 +342,7 @@ async function runTick(_job: Job): Promise<void> {
   //     (sentAt=now), so the user sees a definitive end-state instead of
   //     a stuck "发送中" indicator. The wizard's quota=0 send-button gate
   //     prevents new sends from entering this state in the first place.
-  const exhausted = campaigns.filter(
-    (c) => (tenantBudget.get(c.accountId) ?? 0) <= 0,
-  );
+  const exhausted = campaigns.filter((c) => (tenantBudget.get(c.accountId) ?? 0) <= 0);
   for (const c of exhausted) {
     try {
       await prisma.$transaction([
@@ -374,10 +366,7 @@ async function runTick(_job: Job): Promise<void> {
           `(unsent recipients flipped to failed, status=sent)`,
       );
     } catch (err) {
-      console.error(
-        `[tick] failed to finalise quota-exhausted campaign ${c.id}:`,
-        err,
-      );
+      console.error(`[tick] failed to finalise quota-exhausted campaign ${c.id}:`, err);
     }
   }
   // After finalisation those campaigns are out of the working set — only
@@ -760,9 +749,7 @@ async function runSend(job: Job<SendJobData>) {
   // recording a spurious "发送失败".
   const duplicateOperation =
     !result.ok &&
-    /operation ?id already exists/i.test(
-      `${result.errorMessage ?? ''} ${result.errorCode ?? ''}`,
-    );
+    /operation ?id already exists/i.test(`${result.errorMessage ?? ''} ${result.errorCode ?? ''}`);
   if (duplicateOperation) {
     console.log(
       `[send ${r.id}] operationId ${operationId} already exists at ACS — prior attempt already submitted; marking sent`,
@@ -991,6 +978,33 @@ async function runFlowSend(job: Job<SendJobData>) {
     headers,
   });
 
+  // Unified ACS attempt log: automation sends appear beside campaign sends in
+  // the platform-admin send log. Best-effort so observability cannot block the
+  // send state transition or BullMQ acknowledgement.
+  try {
+    await prisma.sendLog.create({
+      data: {
+        accountId: send.accountId,
+        acsAccountId: acct.id,
+        source: 'automation',
+        automationId: automation.id,
+        automationSendId: send.id,
+        fromAddress: fromEmail,
+        fromName,
+        toAddress: send.email,
+        ok: result.ok,
+        providerStatus: result.providerStatus,
+        messageId: result.messageId || operationId,
+        errorCode: result.errorCode,
+        errorMessage: result.errorMessage,
+        latencyMs: result.latencyMs,
+        responsePayload: toJsonInput(result.providerResponse),
+      },
+    });
+  } catch (logErr) {
+    console.error(`[flow send ${send.id}] failed to write send_log:`, logErr);
+  }
+
   const duplicateOperation =
     !result.ok &&
     /operation ?id already exists/i.test(`${result.errorMessage ?? ''} ${result.errorCode ?? ''}`);
@@ -1093,9 +1107,7 @@ bootstrapArchiveJob().catch((err) => {
   console.error('Failed to bootstrap recipient-archive:', err);
 });
 
-console.log(
-  `worker-sender started; concurrency=${SEND_CONCURRENCY}; tick scheduler enabled`,
-);
+console.log(`worker-sender started; concurrency=${SEND_CONCURRENCY}; tick scheduler enabled`);
 
 async function shutdown() {
   console.log('Shutting down worker-sender...');

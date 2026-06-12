@@ -13,6 +13,7 @@ import {
   Plus,
   Trash2,
   Clock,
+  ListChecks,
 } from 'lucide-react';
 import { type IEmailTemplate } from 'easy-email-editor';
 import { Button } from '@/components/ui/button';
@@ -83,11 +84,19 @@ export function AutomationsPage() {
   return (
     <div className="space-y-6">
       {!editing && (
-        <div>
-          <h1 className="text-xl font-semibold">自动化</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            为店铺事件配置自动化邮件流程：买家下单、支付、发货时自动触发，无需手动发送。
-          </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-xl font-semibold">自动化</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              为店铺事件配置自动化邮件流程：买家下单、支付、发货时自动触发，无需手动发送。
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/automations/sends">
+              <ListChecks className="mr-1 size-4" />
+              发送记录
+            </Link>
+          </Button>
         </div>
       )}
 
@@ -126,11 +135,7 @@ export function AutomationsPage() {
               />
             </div>
           )}
-          <FlowList
-            key={selected.id}
-            connectionId={selected.id}
-            onEditingChange={setEditing}
-          />
+          <FlowList key={selected.id} connectionId={selected.id} onEditingChange={setEditing} />
         </div>
       )}
     </div>
@@ -455,13 +460,7 @@ function formatDelay(m: number): string {
 }
 
 /** Days/hours/minutes editor over a single total-minutes value (capped at 7d). */
-function DelayField({
-  minutes,
-  onChange,
-}: {
-  minutes: number;
-  onChange: (m: number) => void;
-}) {
+function DelayField({ minutes, onChange }: { minutes: number; onChange: (m: number) => void }) {
   const days = Math.floor(minutes / MINUTES_PER_DAY);
   const hours = Math.floor((minutes % MINUTES_PER_DAY) / 60);
   const mins = minutes % 60;
@@ -535,7 +534,9 @@ function FlowTableRow({
   const Icon = ICONS[automation.type];
   const isAbandoned = automation.type === 'abandoned_cart';
   const configured = isAbandoned
-    ? automation.steps.length >= 1 && automation.steps.every((r) => !!r.html) && !!automation.fromEmail
+    ? automation.steps.length >= 1 &&
+      automation.steps.every((r) => !!r.html) &&
+      !!automation.fromEmail
     : !!automation.html && !!automation.fromEmail;
 
   const toggle = useMutation({
@@ -673,7 +674,9 @@ function FlowEditor({
   const delaysIncreasing = rounds.every(
     (r, i) => i === 0 || r.delayMinutes > rounds[i - 1]!.delayMinutes,
   );
-  const delaysInRange = rounds.every((r) => r.delayMinutes >= 1 && r.delayMinutes <= MAX_DELAY_MINUTES);
+  const delaysInRange = rounds.every(
+    (r) => r.delayMinutes >= 1 && r.delayMinutes <= MAX_DELAY_MINUTES,
+  );
   const roundsValid = !isAbandoned || (rounds.length >= 1 && delaysIncreasing && delaysInRange);
 
   const updateRound = (i: number, patch: Partial<Round>) =>
@@ -753,11 +756,7 @@ function FlowEditor({
 
   // Email currently open in the editor (single flow vs a specific round).
   const editingContent: EmailContent | null =
-    editing === 'single'
-      ? content
-      : typeof editing === 'number'
-        ? rounds[editing] ?? null
-        : null;
+    editing === 'single' ? content : typeof editing === 'number' ? (rounds[editing] ?? null) : null;
 
   const applyContent = (c: AutomationEmailContent) => {
     const patch = {
@@ -791,9 +790,7 @@ function FlowEditor({
           >
             <ArrowLeft className="size-5" />
           </Button>
-          <h1 className="text-xl font-semibold">
-            编辑{SHOP_AUTOMATION_LABELS[automation.type]}
-          </h1>
+          <h1 className="text-xl font-semibold">编辑{SHOP_AUTOMATION_LABELS[automation.type]}</h1>
           <div className="ml-auto flex items-center gap-2">
             <span className="text-sm text-muted-foreground">{enabled ? '已启用' : '已关闭'}</span>
             <Switch checked={enabled} onCheckedChange={setEnabled} />
@@ -802,22 +799,22 @@ function FlowEditor({
 
         <Card>
           <CardContent className="space-y-6 p-6">
-              <p className="text-sm text-muted-foreground">{TRIGGERS[automation.type]}</p>
+            <p className="text-sm text-muted-foreground">{TRIGGERS[automation.type]}</p>
 
-              {!isAbandoned && (
-                <EmailContentBlock
-                  thumbnail={content.thumbnail}
-                  html={content.html}
-                  onEdit={() => setEditing('single')}
-                  fromEmail={fromEmail}
-                  onFromEmail={setFromEmail}
-                  senderOptions={senderOptions}
-                  subject={subject}
-                  onSubject={setSubject}
-                  preheader={preheader}
-                  onPreheader={setPreheader}
-                />
-              )}
+            {!isAbandoned && (
+              <EmailContentBlock
+                thumbnail={content.thumbnail}
+                html={content.html}
+                onEdit={() => setEditing('single')}
+                fromEmail={fromEmail}
+                onFromEmail={setFromEmail}
+                senderOptions={senderOptions}
+                subject={subject}
+                onSubject={setSubject}
+                preheader={preheader}
+                onPreheader={setPreheader}
+              />
+            )}
 
             {isAbandoned && (
               <div className="space-y-3">
@@ -868,7 +865,10 @@ function FlowEditor({
                       <div className="mt-4 grid gap-4 border-t pt-4 sm:grid-cols-2">
                         <label className="block">
                           <FieldLabel>
-                            优惠券 <span className="font-normal text-muted-foreground">（选填，展示在邮件中）</span>
+                            优惠券{' '}
+                            <span className="font-normal text-muted-foreground">
+                              （选填，展示在邮件中）
+                            </span>
                           </FieldLabel>
                           <FilterSelect
                             value={r.couponCode}
@@ -906,7 +906,8 @@ function FlowEditor({
                           />
                           {coupons.isError && (
                             <span className="mt-1 block text-xs text-amber-600">
-                              无法拉取店铺优惠券：请在 Shopyy 开发者后台为应用开通「优惠券」接口权限后重试。
+                              无法拉取店铺优惠券：请在 Shopyy
+                              开发者后台为应用开通「优惠券」接口权限后重试。
                             </span>
                           )}
                         </label>
@@ -929,29 +930,29 @@ function FlowEditor({
               </div>
             )}
 
-              <div className="flex items-center justify-between border-t pt-5">
-                <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
-                  {configured && <CheckCircle2 className="size-3.5 text-emerald-600" />}
-                  {configured ? '已配置完成' : '请设置邮件内容与发件人后保存'}
-                </span>
-                <div className="flex items-center gap-2">
-                  {isAbandoned && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={rounds.length >= MAX_ABANDONED_ROUNDS}
-                      onClick={addRound}
-                    >
-                      <Plus className="mr-1 size-4" />
-                      添加一轮
-                    </Button>
-                  )}
-                  <Button onClick={() => save.mutate()} disabled={save.isPending || !roundsValid}>
-                    <Save className="mr-1 size-4" />
-                    保存流程
+            <div className="flex items-center justify-between border-t pt-5">
+              <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                {configured && <CheckCircle2 className="size-3.5 text-emerald-600" />}
+                {configured ? '已配置完成' : '请设置邮件内容与发件人后保存'}
+              </span>
+              <div className="flex items-center gap-2">
+                {isAbandoned && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={rounds.length >= MAX_ABANDONED_ROUNDS}
+                    onClick={addRound}
+                  >
+                    <Plus className="mr-1 size-4" />
+                    添加一轮
                   </Button>
-                </div>
+                )}
+                <Button onClick={() => save.mutate()} disabled={save.isPending || !roundsValid}>
+                  <Save className="mr-1 size-4" />
+                  保存流程
+                </Button>
               </div>
+            </div>
           </CardContent>
         </Card>
       </div>

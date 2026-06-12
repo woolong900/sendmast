@@ -8,6 +8,7 @@ import { z } from 'zod';
 export const SendLogQuerySchema = z.object({
   accountId: z.string().uuid().optional(),
   acsAccountId: z.string().uuid().optional(),
+  source: z.enum(['campaign', 'automation']).optional(),
   domain: z.string().min(1).max(253).optional(),
   /** 'true' / 'false' / undefined (all) — query strings are strings. */
   ok: z
@@ -26,8 +27,11 @@ export interface SendLogView {
   sentAt: string;
   account: { id: string; name: string; slug: string };
   acsAccount: { id: string; name: string } | null;
-  campaign: { id: string; name: string };
-  recipientId: string;
+  source: 'campaign' | 'automation';
+  campaign: { id: string; name: string } | null;
+  automation: { id: string; type: string; shopName: string | null } | null;
+  recipientId: string | null;
+  automationSendId: string | null;
   fromAddress: string;
   fromName: string | null;
   toAddress: string;
