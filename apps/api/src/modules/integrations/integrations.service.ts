@@ -810,12 +810,18 @@ export class IntegrationsService {
     });
     if (!conn) throw new NotFoundException('店铺连接不存在');
     await this.uninstallWebhooks(conn);
-    // Soft-revoke: keep the row (and its orders/automations) for history; the
-    // connection just stops being usable until re-authorized.
-    await this.prisma.shopConnection.update({
-      where: { id },
-      data: { status: 'revoked', webhookIds: [] },
-    });
+    // Soft-revoke: keep the row, orders, and automation configuration for
+    // history/reconnect, but disable every automation so queued jobs also stop.
+    await this.prisma.$transaction([
+      this.prisma.shopConnection.update({
+        where: { id },
+        data: { status: 'revoked', webhookIds: [] },
+      }),
+      this.prisma.shopAutomation.updateMany({
+        where: { shopConnectionId: id, enabled: true },
+        data: { enabled: false },
+      }),
+    ]);
     return { ok: true };
   }
 }
