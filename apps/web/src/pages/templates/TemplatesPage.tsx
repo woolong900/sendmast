@@ -50,6 +50,17 @@ export function TemplatesPage() {
 
       <div>
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-muted-foreground">
+          系统模板 ({systemTpls.length})
+        </h2>
+        <TemplateGrid
+          templates={systemTpls}
+          loading={isLoading}
+          empty={<EmptyState />}
+        />
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-muted-foreground">
           我的模板 ({userTpls.length})
         </h2>
         <TemplateGrid
@@ -59,17 +70,6 @@ export function TemplatesPage() {
           onDelete={(id) => deleteMut.mutate(id)}
           deleting={deleteMut.isPending}
           deletable
-        />
-      </div>
-
-      <div>
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-muted-foreground">
-          系统模板 ({systemTpls.length})
-        </h2>
-        <TemplateGrid
-          templates={systemTpls}
-          loading={isLoading}
-          empty={<EmptyState />}
         />
       </div>
     </div>
@@ -158,4 +158,3 @@ function TemplateGrid({
     </div>
   );
 }
-
