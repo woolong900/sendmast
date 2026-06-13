@@ -22,17 +22,17 @@ const SYSTEM_TEMPLATES: Array<{
   {
     name: 'Welcome',
     thumbnail: `${SYSTEM_THUMBNAIL_BASE}/welcome.webp`,
-    mjml: welcomeMjml(),
+    html: welcomeHtml(),
   },
   {
     name: 'Product Launch',
     thumbnail: `${SYSTEM_THUMBNAIL_BASE}/product-launch.webp`,
-    mjml: launchMjml(),
+    html: productLaunchHtml(),
   },
   {
     name: 'Newsletter',
     thumbnail: `${SYSTEM_THUMBNAIL_BASE}/newsletter.webp`,
-    mjml: newsletterMjml(),
+    html: newsletterHtml(),
   },
   {
     name: '弃单召回（默认）',
@@ -93,16 +93,20 @@ function deterministicId(name: string): string {
   return map[name] ?? randomUUID();
 }
 
-function welcomeMjml(): string {
-  return `<mjml><mj-body><mj-section><mj-column><mj-text font-size="20px">Welcome to {{company_name}}!</mj-text><mj-text>Thanks for subscribing. We are excited to have you on board.</mj-text></mj-column></mj-section></mj-body></mjml>`;
+function marketingShell(content: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body style="margin:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#202223;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 12px;"><table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:560px;max-width:100%;background:#ffffff;border:1px solid #e1e3e5;border-radius:8px;overflow:hidden;">${content}</table></td></tr></table></body></html>`;
 }
 
-function launchMjml(): string {
-  return `<mjml><mj-body><mj-section><mj-column><mj-text font-size="24px">Introducing our new product</mj-text><mj-button href="{{cta_url}}">Shop now</mj-button></mj-column></mj-section></mj-body></mjml>`;
+function welcomeHtml(): string {
+  return marketingShell(`<tr><td style="padding:52px 42px;background:#dce9df;"><div style="font-size:13px;color:#47705a;font-weight:700;">{{sender_domain}}</div><h1 style="font-size:34px;line-height:1.2;margin:18px 0 12px;">Welcome to our community</h1><p style="font-size:16px;line-height:1.6;color:#52605a;margin:0 0 26px;">Hi {{full_name}}, thanks for joining us. We are delighted to have you here.</p><a href="#" style="display:inline-block;background:#2f6f55;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:5px;font-weight:600;">Explore the store</a></td></tr>`);
 }
 
-function newsletterMjml(): string {
-  return `<mjml><mj-body><mj-section><mj-column><mj-text font-size="20px">Monthly Newsletter</mj-text><mj-text>Here are this month highlights.</mj-text></mj-column></mj-section></mj-body></mjml>`;
+function productLaunchHtml(): string {
+  return marketingShell(`<tr><td style="padding:54px 38px;background:#202d26;color:#ffffff;"><div style="font-size:12px;color:#b9c9c0;font-weight:700;">NEW ARRIVAL</div><h1 style="font-size:34px;line-height:1.2;margin:10px 0 0;">Made for every day</h1></td></tr><tr><td style="padding:32px 38px;"><p style="font-size:16px;line-height:1.6;color:#5f6662;margin:0 0 24px;">Meet a thoughtful new essential designed to go wherever you do.</p><a href="#" style="display:inline-block;background:#2f6f55;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:5px;font-weight:600;">Shop the collection</a></td></tr>`);
+}
+
+function newsletterHtml(): string {
+  return marketingShell(`<tr><td style="padding:38px;border-bottom:1px solid #e1e3e5;"><div style="font-size:12px;color:#47705a;font-weight:700;">THE MONTHLY EDIT</div><h1 style="font-size:32px;line-height:1.2;margin:12px 0 0;">Fresh ideas for the month</h1></td></tr><tr><td style="padding:28px 38px;"><h2 style="font-size:20px;margin:0 0 10px;">A slower, better routine</h2><p style="font-size:15px;line-height:1.6;color:#606763;margin:0 0 24px;">Stories, products, and inspiration selected for the month ahead.</p><hr style="border:0;border-top:1px solid #e1e3e5;margin:0 0 24px;"><h2 style="font-size:20px;margin:0;">What we are loving</h2></td></tr>`);
 }
 
 main()
