@@ -35,7 +35,7 @@ export const SHOP_AUTOMATION_LABELS: Record<ShopAutomationType, string> = {
  * generic fallback — per-round defaults live in `ABANDONED_CART_DEFAULT_ROUNDS`.
  */
 export const SHOP_AUTOMATION_DEFAULT_SUBJECT: Record<ShopAutomationType, string> = {
-  customer_registered: 'Welcome to {{shop_name}}',
+  customer_registered: 'Welcome to My Store',
   order_paid: 'Your order is confirmed',
   order_shipped: 'Your order has shipped',
   abandoned_cart: 'Did you forget something?',
