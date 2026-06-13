@@ -143,6 +143,13 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
       '电商自动化邮件专用：订单的收货地址，由系统渲染为多行 HTML 整段插入（仅订单/发货自动化邮件中有值）',
   },
   {
+    name: 'billing_address',
+    placeholder: '{{billing_address}}',
+    label: '账单地址',
+    description:
+      '电商自动化邮件专用：订单的账单地址，由系统渲染为多行 HTML 整段插入；订单未提供时回退为收货地址',
+  },
+  {
     name: 'order_items',
     placeholder: '{{order_items}}',
     label: '商品列表',
@@ -184,4 +191,9 @@ export const MERGE_VAR_TAG_NAMES = [
  * render as literal text in the inbox. Treated as a merge var (per-recipient,
  * blank on bulk campaigns) like MERGE_VAR_TAG_NAMES.
  */
-export const HTML_MERGE_VAR_TAG_NAMES = ['order_items', 'shipping_address', 'coupon_block'] as const;
+export const HTML_MERGE_VAR_TAG_NAMES = [
+  'order_items',
+  'shipping_address',
+  'billing_address',
+  'coupon_block',
+] as const;

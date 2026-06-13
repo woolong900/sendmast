@@ -43,6 +43,8 @@ export interface OrderContext {
   items?: LineItem[];
   /** Shipping address as plain-text lines, rendered into `{{shipping_address}}`. */
   addressLines?: string[];
+  /** Billing address as plain-text lines, rendered into `{{billing_address}}`. */
+  billingAddressLines?: string[];
 }
 
 export interface CheckoutContext {
@@ -342,6 +344,9 @@ export function renderCouponHtml(
 function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Record<string, string> {
   const itemsHtml = renderOrderItemsHtml(ctx.items ?? []);
   const addressHtml = renderShippingAddressHtml(ctx.addressLines ?? []);
+  const billingAddressHtml = renderShippingAddressHtml(
+    ctx.billingAddressLines?.length ? ctx.billingAddressLines : (ctx.addressLines ?? []),
+  );
   return {
     ...shopName,
     order_no: ctx.orderNo ?? ctx.externalOrderId,
@@ -352,6 +357,7 @@ function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Re
     ...(ctx.trackingNumber ? { tracking_number: ctx.trackingNumber } : {}),
     ...(itemsHtml ? { order_items: itemsHtml } : {}),
     ...(addressHtml ? { shipping_address: addressHtml } : {}),
+    ...(billingAddressHtml ? { billing_address: billingAddressHtml } : {}),
   };
 }
 

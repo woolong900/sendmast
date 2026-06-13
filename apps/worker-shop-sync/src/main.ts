@@ -21,6 +21,7 @@ import {
   mapCustomer,
   mapLineItems,
   mapOrder,
+  mapBillingAddressLines,
   mapShippingAddressLines,
 } from './mapper.js';
 import {
@@ -378,6 +379,7 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
     orderUrl: accountUrlFrom(order.landingPage),
     items: mapLineItems(job.payload),
     addressLines: mapShippingAddressLines(job.payload),
+    billingAddressLines: mapBillingAddressLines(job.payload),
   };
   try {
     if (shipped) await triggerOrderShipped(deps, ctx);

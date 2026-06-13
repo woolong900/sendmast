@@ -240,16 +240,7 @@ function pickRecoveryUrl(o: Json): string | undefined {
  * of the mapper; returns [] when no address object is present. The caller
  * (automations) escapes + joins these into an HTML fragment.
  */
-export function mapShippingAddressLines(payload: Json): string[] {
-  const o = unwrap(payload, ['order', 'data', 'resource']);
-  const addr =
-    asObject(o.shipping_address) ??
-    asObject(o.shippingAddress) ??
-    asObject(o.shipping) ??
-    asObject(o.address) ??
-    asObject(o.consignee) ??
-    asObject(o.receiver) ??
-    asObject(o.delivery_address);
+function mapAddressLines(addr: Json | undefined): string[] {
   if (!addr) return [];
   const name = pickStr(addr, ['name', 'full_name', 'fullName', 'consignee', 'receiver', 'contact_name', 'recipient']);
   const line1 = pickStr(addr, ['address1', 'address_1', 'address', 'addr', 'street', 'detail', 'line1', 'address_line1']);
@@ -262,6 +253,29 @@ export function mapShippingAddressLines(payload: Json): string[] {
   const cityLine = [city, province, zip].filter(Boolean).join(', ');
   return [name, line1, line2, cityLine, country, phone].filter(
     (l): l is string => !!l && l.length > 0,
+  );
+}
+
+export function mapShippingAddressLines(payload: Json): string[] {
+  const o = unwrap(payload, ['order', 'data', 'resource']);
+  return mapAddressLines(
+    asObject(o.shipping_address) ??
+      asObject(o.shippingAddress) ??
+      asObject(o.shipping) ??
+      asObject(o.address) ??
+      asObject(o.consignee) ??
+      asObject(o.receiver) ??
+      asObject(o.delivery_address),
+  );
+}
+
+/** Extract the billing address, keeping it separate from the shipping address. */
+export function mapBillingAddressLines(payload: Json): string[] {
+  const o = unwrap(payload, ['order', 'data', 'resource']);
+  return mapAddressLines(
+    asObject(o.billing_address) ??
+      asObject(o.billingAddress) ??
+      asObject(o.billing),
   );
 }
 

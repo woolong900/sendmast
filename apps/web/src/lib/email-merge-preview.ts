@@ -25,6 +25,8 @@ export const MERGE_PREVIEW_SAMPLES: Record<string, string> = {
   tracking_url: '#',
   unsubscribe_url: '#',
   order_items: SAMPLE_ORDER_ITEMS_HTML,
+  shipping_address: 'Jane Doe<br>123 Market Street<br>San Francisco, CA 94105<br>United States',
+  billing_address: 'Jane Doe<br>123 Market Street<br>San Francisco, CA 94105<br>United States',
 };
 
 const ORDER_ITEMS_TAG = '{{order_items}}';
