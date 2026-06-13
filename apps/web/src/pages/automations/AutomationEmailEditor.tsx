@@ -17,6 +17,7 @@ import { api } from '@/lib/api';
 import { easyEmailZhCN } from '@/lib/easy-email-locale';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
 import { captureAndUploadThumbnail } from '@/lib/thumbnail';
+import { applyMergePreviewSamples } from '@/lib/email-merge-preview';
 import {
   blockCategories,
   compilePreviewHtml,
@@ -223,7 +224,7 @@ export function AutomationEmailEditor({
                               ) : (
                                 <iframe
                                   title={`tpl-${t.id}`}
-                                  srcDoc={t.html}
+                                  srcDoc={applyMergePreviewSamples(t.html)}
                                   sandbox=""
                                   scrolling="no"
                                   className="pointer-events-none h-[300%] w-[300%] origin-top-left scale-[0.333] border-0 bg-white"

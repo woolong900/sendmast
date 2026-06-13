@@ -1,6 +1,6 @@
 const APP_ASSET_BASE = 'https://app.sendmast.com/assets';
 const GREEN = '#2f6f55';
-const STORE_NAME = 'My Store';
+const STORE_NAME = '{{shop_name}}';
 
 export const CUSTOMER_REGISTERED_TEMPLATE_ID = '00000000-0000-4000-8000-000000000007';
 export const ABANDONED_CART_TEMPLATE_ID = '00000000-0000-4000-8000-000000000004';

@@ -25,6 +25,7 @@ import { FilterSelect } from '@/components/ui/filter-select';
 import { useToast } from '@/components/ui/toast';
 import { cn, formatNumber } from '@/lib/utils';
 import { api, apiErrMessage } from '@/lib/api';
+import { applyMergePreviewSamples } from '@/lib/email-merge-preview';
 import {
   SHOP_AUTOMATION_LABELS,
   SHOP_AUTOMATION_DEFAULT_SUBJECT,
@@ -334,7 +335,7 @@ function EmailThumb({
       ) : html ? (
         <iframe
           title="email-thumb"
-          srcDoc={html}
+          srcDoc={applyMergePreviewSamples(html)}
           sandbox=""
           scrolling="no"
           className="pointer-events-none h-[300%] w-[300%] origin-top-left scale-[0.333] border-0 bg-white"

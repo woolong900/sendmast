@@ -17,7 +17,7 @@ export const SAMPLE_ORDER_ITEMS_HTML = `<table role="presentation" width="100%" 
 
 /** Preview values for automation merge tags (preview modal only). */
 export const MERGE_PREVIEW_SAMPLES: Record<string, string> = {
-  shop_name: 'Acme Store',
+  shop_name: 'My Store',
   full_name: 'Jane Doe',
   order_no: 'SM-10042',
   order_total: 'US$89.00',

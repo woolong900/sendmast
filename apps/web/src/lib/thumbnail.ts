@@ -1,5 +1,6 @@
 import { toPng } from 'html-to-image';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
+import { applyMergePreviewSamples } from '@/lib/email-merge-preview';
 
 /**
  * Generate + upload in one call. Returns the public URL on success, null on
@@ -7,7 +8,7 @@ import { uploadEditorImage } from '@/lib/easy-email-upload';
  * thumbnail; list page falls back to a placeholder).
  */
 export async function captureAndUploadThumbnail(html: string): Promise<string | null> {
-  const blob = await generateEmailThumbnail(html);
+  const blob = await generateEmailThumbnail(applyMergePreviewSamples(html));
   if (!blob) return null;
   try {
     const file = new File([blob], `thumbnail.png`, { type: 'image/png' });
