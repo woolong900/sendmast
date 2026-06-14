@@ -38,7 +38,7 @@ export function applyMergePreviewSamples(source: string): string {
   out = out.split(ORDER_ITEMS_TAG).join(SAMPLE_ORDER_ITEMS_HTML);
   for (const [name, sample] of Object.entries(MERGE_PREVIEW_SAMPLES)) {
     if (name === 'order_items') continue;
-    out = out.split(`{{${name}}}`).join(sample);
+    out = out.replace(new RegExp(`\\{\\{\\s*${name}\\s*\\}\\}`, 'g'), sample);
   }
   return out;
 }

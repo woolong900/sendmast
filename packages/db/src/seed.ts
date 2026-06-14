@@ -13,6 +13,7 @@ import {
 
 const prisma = new PrismaClient();
 const SYSTEM_THUMBNAIL_BASE = 'https://app.sendmast.com/assets/system-template-thumbnails';
+const AUTOMATION_THUMBNAIL_VERSION = '20260614';
 
 const SYSTEM_TEMPLATES: Array<{
   name: string;
@@ -25,22 +26,22 @@ const SYSTEM_TEMPLATES: Array<{
 }> = [
   {
     name: '弃单召回（默认）',
-    thumbnail: `${SYSTEM_THUMBNAIL_BASE}/abandoned-cart.webp`,
+    thumbnail: `${SYSTEM_THUMBNAIL_BASE}/abandoned-cart.webp?v=${AUTOMATION_THUMBNAIL_VERSION}`,
     html: abandonedCartHtml,
   },
   {
     name: '订单确认通知（默认）',
-    thumbnail: `${SYSTEM_THUMBNAIL_BASE}/order-confirmation.webp`,
+    thumbnail: `${SYSTEM_THUMBNAIL_BASE}/order-confirmation.webp?v=${AUTOMATION_THUMBNAIL_VERSION}`,
     html: orderConfirmationHtml,
   },
   {
     name: '订单发货通知（默认）',
-    thumbnail: `${SYSTEM_THUMBNAIL_BASE}/order-shipped.webp`,
+    thumbnail: `${SYSTEM_THUMBNAIL_BASE}/order-shipped.webp?v=${AUTOMATION_THUMBNAIL_VERSION}`,
     html: orderShippedHtml,
   },
   {
     name: '顾客注册欢迎（默认）',
-    thumbnail: `${SYSTEM_THUMBNAIL_BASE}/customer-registered.webp`,
+    thumbnail: `${SYSTEM_THUMBNAIL_BASE}/customer-registered.webp?v=${AUTOMATION_THUMBNAIL_VERSION}`,
     html: customerRegisteredHtml,
   },
   {
