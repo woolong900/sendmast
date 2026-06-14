@@ -314,6 +314,12 @@ export class IntegrationsService {
       });
     }
 
+    // Provision all supported flows and snapshot the latest system templates
+    // immediately. Webhooks are already live at this point, so waiting for the
+    // merchant to visit the automation page would create a window where early
+    // store events have no flow configuration to resolve.
+    await this.provisionAutomations(accountId, conn.id);
+
     // Kick off the initial full sync in the background: pull every store
     // customer into the list, and every paid order into shop_orders (used to
     // match "已下单" customers when building dynamic segments). Idempotent, so
@@ -502,6 +508,27 @@ export class IntegrationsService {
    */
   async listAutomations(accountId: string, connectionId: string): Promise<ShopAutomationView[]> {
     await this.assertConnection(accountId, connectionId);
+    const { rows, stepsByAutomation } = await this.provisionAutomations(accountId, connectionId);
+
+    return Promise.all(
+      rows.map(async (a) =>
+        toAutomationView(
+          a,
+          a.type === 'abandoned_cart' ? stepsByAutomation : [],
+          await this.automationStats(accountId, a.id),
+        ),
+      ),
+    );
+  }
+
+  /**
+   * Ensure every fixed flow exists and owns an editable snapshot of the latest
+   * system template. Called on bind and remains idempotent for page reads.
+   */
+  private async provisionAutomations(
+    accountId: string,
+    connectionId: string,
+  ): Promise<{ rows: ShopAutomation[]; stepsByAutomation: ShopAutomationStep[] }> {
     const existing = await this.prisma.shopAutomation.findMany({
       where: { shopConnectionId: connectionId },
     });
@@ -546,15 +573,7 @@ export class IntegrationsService {
     // a thumbnail + open the editor with the existing design.
     await this.materializeContent(rows, stepsByAutomation);
 
-    return Promise.all(
-      rows.map(async (a) =>
-        toAutomationView(
-          a,
-          a.type === 'abandoned_cart' ? stepsByAutomation : [],
-          await this.automationStats(accountId, a.id),
-        ),
-      ),
-    );
+    return { rows, stepsByAutomation };
   }
 
   /**

@@ -32,6 +32,8 @@ const SEND_CONCURRENCY = Number(process.env.SEND_CONCURRENCY ?? '8');
 // throughput — it only changes WHICH jobs sit in the queue, not how fast they
 // leave it.
 const MAX_INFLIGHT_PER_ACS = Number(process.env.MAX_INFLIGHT_PER_ACS ?? '2000');
+const FLOW_RECOVERY_AGE_MS = Number(process.env.FLOW_RECOVERY_AGE_MS ?? '10000');
+const FLOW_RECOVERY_BATCH = Number(process.env.FLOW_RECOVERY_BATCH ?? '100');
 
 if (!TRACKING_SECRET) {
   throw new Error('TRACKING_TOKEN_SECRET is required');
@@ -312,7 +314,58 @@ async function materialiseRecipients(
 // Tick — runs every second; fairly enqueues sends per ACS account.
 // ============================================================================
 
+/**
+ * Re-publish automation sends left pending after a transient Redis failure.
+ * The DB row is the durable outbox; deterministic BullMQ job IDs make this
+ * safe when the original enqueue actually succeeded but its acknowledgement
+ * was lost.
+ */
+async function recoverPendingFlowSends(): Promise<void> {
+  const pending = await prisma.shopAutomationSend.findMany({
+    where: {
+      status: 'pending',
+      acsAccountId: { not: null },
+      createdAt: { lt: new Date(Date.now() - FLOW_RECOVERY_AGE_MS) },
+    },
+    orderBy: { createdAt: 'asc' },
+    take: FLOW_RECOVERY_BATCH,
+    select: { id: true, acsAccountId: true },
+  });
+
+  for (const send of pending) {
+    const acsAccountId = send.acsAccountId;
+    if (!acsAccountId) continue;
+    const jobId = `f-${send.id}`;
+    try {
+      let existing = await sendEmailQueue.getJob(jobId);
+      if (existing && (await existing.getState()) === 'failed') {
+        await existing.remove();
+        existing = undefined;
+      }
+      if (!existing) {
+        await sendEmailQueue.add(
+          'send',
+          { flowSendId: send.id, acsAccountId },
+          {
+            jobId,
+            attempts: 5,
+            backoff: { type: 'exponential', delay: 5000 },
+          },
+        );
+      }
+      await prisma.shopAutomationSend.updateMany({
+        where: { id: send.id, status: 'pending' },
+        data: { status: 'queued' },
+      });
+    } catch (err) {
+      console.error(`[tick] failed to recover flow send ${send.id}:`, err);
+    }
+  }
+}
+
 async function runTick(_job: Job): Promise<void> {
+  await recoverPendingFlowSends();
+
   // 1. Find all sending campaigns. We need accountId (tenant) to enforce
   //    the per-tenant prepaid quota and fromEmail to route to ACS.
   const campaigns = await prisma.campaign.findMany({

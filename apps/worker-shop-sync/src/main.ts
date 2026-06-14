@@ -209,16 +209,12 @@ async function handleCustomerCreated(job: ShopEventJob): Promise<void> {
   const contactId = await upsertContact(job.accountId, customer.email, customer);
   await addToCustomerList(await customerListIdOf(job.connectionId), [contactId]);
   await touchSync(job.connectionId);
-  try {
-    await triggerCustomerRegistered(deps, {
-      accountId: job.accountId,
-      shopConnectionId: job.connectionId,
-      email: customer.email,
-      contactId,
-    });
-  } catch (e) {
-    console.error('[shop-sync] customer registration automation trigger failed:', e);
-  }
+  await triggerCustomerRegistered(deps, {
+    accountId: job.accountId,
+    shopConnectionId: job.connectionId,
+    email: customer.email,
+    contactId,
+  });
 }
 
 async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
@@ -381,12 +377,8 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
     addressLines: mapShippingAddressLines(job.payload),
     billingAddressLines: mapBillingAddressLines(job.payload),
   };
-  try {
-    if (shipped) await triggerOrderShipped(deps, ctx);
-    else await triggerOrderPaid(deps, ctx);
-  } catch (e) {
-    console.error('[shop-sync] automation trigger failed:', e);
-  }
+  if (shipped) await triggerOrderShipped(deps, ctx);
+  else await triggerOrderPaid(deps, ctx);
 }
 
 /**
@@ -446,21 +438,17 @@ async function handleOrderCreated(job: ShopEventJob): Promise<void> {
 
   await touchSync(job.connectionId);
 
-  try {
-    await scheduleAbandonedFromOrder(deps, {
-      accountId: job.accountId,
-      shopConnectionId: job.connectionId,
-      externalOrderId: order.externalOrderId,
-      orderNo: order.orderNo,
-      email: order.email,
-      contactId,
-      value: order.value,
-      currency: order.currency,
-      recoveryUrl: order.payUrl,
-    });
-  } catch (e) {
-    console.error('[shop-sync] abandoned-from-order schedule failed:', e);
-  }
+  await scheduleAbandonedFromOrder(deps, {
+    accountId: job.accountId,
+    shopConnectionId: job.connectionId,
+    externalOrderId: order.externalOrderId,
+    orderNo: order.orderNo,
+    email: order.email,
+    contactId,
+    value: order.value,
+    currency: order.currency,
+    recoveryUrl: order.payUrl,
+  });
 }
 
 async function handleAbandoned(job: ShopEventJob): Promise<void> {
@@ -507,20 +495,16 @@ async function handleAbandoned(job: ShopEventJob): Promise<void> {
 
   await touchSync(job.connectionId);
 
-  try {
-    await scheduleAbandonedRecovery(deps, {
-      accountId: job.accountId,
-      shopConnectionId: job.connectionId,
-      externalCheckoutId: checkout.externalCheckoutId,
-      email: checkout.email,
-      contactId,
-      value: checkout.value,
-      currency: checkout.currency,
-      recoveryUrl: checkout.recoveryUrl,
-    });
-  } catch (e) {
-    console.error('[shop-sync] abandoned schedule failed:', e);
-  }
+  await scheduleAbandonedRecovery(deps, {
+    accountId: job.accountId,
+    shopConnectionId: job.connectionId,
+    externalCheckoutId: checkout.externalCheckoutId,
+    email: checkout.email,
+    contactId,
+    value: checkout.value,
+    currency: checkout.currency,
+    recoveryUrl: checkout.recoveryUrl,
+  });
 }
 
 // ── Initial full store sync (enqueued once per successful bind) ─────────────

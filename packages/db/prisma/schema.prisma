@@ -1279,6 +1279,7 @@ model ShopAutomationSend {
 
   @@unique([automationId, dedupKey])
   @@index([accountId, createdAt])
+  @@index([status, createdAt])
   @@index([messageId])
   @@map("shop_automation_sends")
 }

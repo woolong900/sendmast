@@ -133,14 +133,27 @@ export async function enqueueTransactional(
 
   await prisma.shopAutomationSend.update({
     where: { id: sendId },
-    data: { acsAccountId, status: 'queued' },
+    data: { acsAccountId },
   });
 
   await sendQueue.add(
     'send',
     { flowSendId: sendId, acsAccountId },
-    { jobId: `f-${sendId}`, removeOnComplete: true, removeOnFail: { age: 86400 * 7 } },
+    {
+      jobId: `f-${sendId}`,
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: true,
+      removeOnFail: { age: 86400 * 7 },
+    },
   );
+
+  // Mark queued only after Redis accepted the job. updateMany's status guard
+  // avoids racing a very fast sender that may already have completed the send.
+  await prisma.shopAutomationSend.updateMany({
+    where: { id: sendId, status: 'pending' },
+    data: { status: 'queued' },
+  });
 
   return sendId;
 }
