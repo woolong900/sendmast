@@ -15,6 +15,7 @@
 # Override via env vars:
 #   BASE_URL=http://localhost:3000 ./fire.sh create
 #   KEY=... STORE_ID=... ./fire.sh
+#   DRY_RUN=1 ./fire.sh paid  # print the generated request without sending it
 #   # Attribution test: inject a real shop_automation_sends.id as sm_mid into
 #   # the order's landing_page so the paid event attributes to that flow send.
 #   SM_MID=7d328004-c3dc-4958-8be9-371305f6866d ./fire.sh paid
@@ -24,9 +25,11 @@ BASE_URL="${BASE_URL:-https://app.sendmast.com}"
 KEY="${KEY:-981863c1fdbbc0e25f7261d2517ccc6c9b47c6a15b8b76c1}"
 STORE_ID="${STORE_ID:-52051}"
 SM_MID="${SM_MID:-}"
+DRY_RUN="${DRY_RUN:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PAYLOAD_DIR="$SCRIPT_DIR/payloads"
+FIXTURE_DIR="$SCRIPT_DIR/fixtures"
 ENDPOINT="$BASE_URL/api/webhooks/shopyy"
 
 command -v jq >/dev/null   || { echo "jq is required (brew install jq)"; exit 1; }
@@ -48,7 +51,11 @@ fire() {
   local file="$PAYLOAD_DIR/$event.json"
 
   if [[ -z "$topic" ]]; then echo "unknown event: $event (use create|paid|fulfilled)"; return 1; fi
-  if [[ ! -f "$file" ]]; then echo "missing payload: $file"; return 1; fi
+  if [[ ! -f "$file" ]]; then file="$FIXTURE_DIR/$event.json"; fi
+  if [[ ! -f "$file" ]]; then
+    echo "missing payload: add $PAYLOAD_DIR/$event.json or restore $FIXTURE_DIR/$event.json"
+    return 1
+  fi
 
   # 12-digit pseudo-random order id, distinct per call
   local new_id="$(date +%s)$(printf '%02d' $((RANDOM % 100)))"
@@ -76,8 +83,14 @@ fire() {
 
   local url="$ENDPOINT?key=$KEY&topic=$topic"
   echo "==> $event  topic=$topic  store_id=$STORE_ID  id=$new_id"
+  echo "    payload=$file"
   [[ -n "$SM_MID" ]] && echo "    sm_mid=$SM_MID  landing_page=$landing"
   echo "    POST $url"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "$body" | jq .
+    echo
+    return
+  fi
   curl -sS -i -X POST "$url" \
     -H 'Content-Type: application/json' \
     --data-binary "$body"

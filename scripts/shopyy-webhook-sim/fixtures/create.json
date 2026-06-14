@@ -1,0 +1,42 @@
+{
+  "store_id": 52051,
+  "id": 100000000001,
+  "order_number": "SIM-1001",
+  "email": "webhook-sim@example.com",
+  "financial_status": 200,
+  "pay_at": 0,
+  "total_price": "89.00",
+  "currency": "USD",
+  "created_at": "2026-06-14T08:00:00Z",
+  "domain": "example-store.com",
+  "checkout_token": "simulated-checkout-token",
+  "checkout_type": "one_page",
+  "landing_page": "https://example-store.com/products/classic-tee",
+  "shipping_address": {
+    "name": "Webhook Customer",
+    "address1": "123 Market Street",
+    "city": "San Francisco",
+    "province": "CA",
+    "zip": "94105",
+    "country": "United States",
+    "phone": "+1 555 0100"
+  },
+  "billing_address": {
+    "name": "Webhook Customer",
+    "address1": "123 Market Street",
+    "city": "San Francisco",
+    "province": "CA",
+    "zip": "94105",
+    "country": "United States"
+  },
+  "products": [
+    {
+      "order_id": 100000000001,
+      "store_id": 52051,
+      "product_title": "Classic Cotton Tee",
+      "quantity": 1,
+      "sku_value": "Size M / Black",
+      "image_url": "https://placehold.co/112x112/png"
+    }
+  ]
+}
