@@ -12,7 +12,7 @@
 #   ./fire.sh create          # fire only orders/create
 #   ./fire.sh paid fulfilled  # fire a subset
 #
-# Override via env vars:
+# Store credentials in the ignored .env.local file or override via env vars:
 #   BASE_URL=http://localhost:3000 ./fire.sh create
 #   KEY=... STORE_ID=... ./fire.sh
 #   DRY_RUN=1 ./fire.sh paid  # print the generated request without sending it
@@ -21,13 +21,27 @@
 #   SM_MID=7d328004-c3dc-4958-8be9-371305f6866d ./fire.sh paid
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load local credentials without allowing them to override explicit env vars.
+if [[ -f "$SCRIPT_DIR/.env.local" ]]; then
+  while IFS='=' read -r name value; do
+    case "$name" in
+      BASE_URL) [[ -n "${BASE_URL+x}" ]] || BASE_URL="$value" ;;
+      KEY)      [[ -n "${KEY+x}" ]] || KEY="$value" ;;
+      STORE_ID) [[ -n "${STORE_ID+x}" ]] || STORE_ID="$value" ;;
+      SM_MID)   [[ -n "${SM_MID+x}" ]] || SM_MID="$value" ;;
+      DRY_RUN)  [[ -n "${DRY_RUN+x}" ]] || DRY_RUN="$value" ;;
+    esac
+  done < "$SCRIPT_DIR/.env.local"
+fi
+
 BASE_URL="${BASE_URL:-https://app.sendmast.com}"
-KEY="${KEY:-981863c1fdbbc0e25f7261d2517ccc6c9b47c6a15b8b76c1}"
-STORE_ID="${STORE_ID:-52051}"
+KEY="${KEY:-}"
+STORE_ID="${STORE_ID:-}"
 SM_MID="${SM_MID:-}"
 DRY_RUN="${DRY_RUN:-0}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PAYLOAD_DIR="$SCRIPT_DIR/payloads"
 FIXTURE_DIR="$SCRIPT_DIR/fixtures"
 ENDPOINT="$BASE_URL/api/webhooks/shopyy"
@@ -57,9 +71,19 @@ fire() {
     return 1
   fi
 
+  local store_id="${STORE_ID:-$(jq -r '.store_id // empty' "$file")}"
+  if [[ -z "$store_id" || "$store_id" == "null" ]]; then
+    echo "missing STORE_ID: set it in $SCRIPT_DIR/.env.local or the environment"
+    return 1
+  fi
+  if [[ "$DRY_RUN" != "1" && -z "$KEY" ]]; then
+    echo "missing KEY: set it in $SCRIPT_DIR/.env.local or the environment"
+    return 1
+  fi
+
   # 12-digit pseudo-random order id, distinct per call
   local new_id="$(date +%s)$(printf '%02d' $((RANDOM % 100)))"
-  local order_no="${STORE_ID}-${new_id}"
+  local order_no="${store_id}-${new_id}"
 
   # When SM_MID is set, rewrite landing_page so it carries ?sm_mid=<send id>.
   # Attribution reads exactly this param off the order's landing_page.
@@ -67,7 +91,7 @@ fire() {
 
   local body
   body="$(jq \
-    --argjson sid "$STORE_ID" \
+    --argjson sid "$store_id" \
     --arg oid "$new_id" \
     --arg ono "$order_no" \
     --arg mid "$SM_MID" \
@@ -82,10 +106,10 @@ fire() {
     ' "$file")"
 
   local url="$ENDPOINT?key=$KEY&topic=$topic"
-  echo "==> $event  topic=$topic  store_id=$STORE_ID  id=$new_id"
+  echo "==> $event  topic=$topic  store_id=$store_id  id=$new_id"
   echo "    payload=$file"
   [[ -n "$SM_MID" ]] && echo "    sm_mid=$SM_MID  landing_page=$landing"
-  echo "    POST $url"
+  echo "    POST $ENDPOINT?key=<redacted>&topic=$topic"
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "$body" | jq .
     echo
