@@ -15,6 +15,7 @@
 # Store credentials in the ignored .env.local file or override via env vars:
 #   BASE_URL=http://localhost:3000 ./fire.sh create
 #   KEY=... STORE_ID=... ./fire.sh
+#   TARGET_EMAIL=you@example.com ./fire.sh fulfilled
 #   DRY_RUN=1 ./fire.sh paid  # print the generated request without sending it
 #   # Attribution test: inject a real shop_automation_sends.id as sm_mid into
 #   # the order's landing_page so the paid event attributes to that flow send.
@@ -30,6 +31,7 @@ if [[ -f "$SCRIPT_DIR/.env.local" ]]; then
       BASE_URL) [[ -n "${BASE_URL+x}" ]] || BASE_URL="$value" ;;
       KEY)      [[ -n "${KEY+x}" ]] || KEY="$value" ;;
       STORE_ID) [[ -n "${STORE_ID+x}" ]] || STORE_ID="$value" ;;
+      TARGET_EMAIL) [[ -n "${TARGET_EMAIL+x}" ]] || TARGET_EMAIL="$value" ;;
       SM_MID)   [[ -n "${SM_MID+x}" ]] || SM_MID="$value" ;;
       DRY_RUN)  [[ -n "${DRY_RUN+x}" ]] || DRY_RUN="$value" ;;
     esac
@@ -39,6 +41,7 @@ fi
 BASE_URL="${BASE_URL:-https://app.sendmast.com}"
 KEY="${KEY:-}"
 STORE_ID="${STORE_ID:-}"
+TARGET_EMAIL="${TARGET_EMAIL:-}"
 SM_MID="${SM_MID:-}"
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -105,9 +108,21 @@ fire() {
       | (if (.fulfillment_products | type) == "array" then .fulfillment_products |= map(.order_id = ($oid | tonumber) | .store_id = $sid) else . end)
     ' "$file")"
 
+  if [[ -n "$TARGET_EMAIL" ]]; then
+    body="$(jq --arg email "$TARGET_EMAIL" '
+      walk(
+        if type == "string" and test("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
+        then $email
+        else .
+        end
+      )
+    ' <<< "$body")"
+  fi
+
   local url="$ENDPOINT?key=$KEY&topic=$topic"
   echo "==> $event  topic=$topic  store_id=$store_id  id=$new_id"
   echo "    payload=$file"
+  [[ -n "$TARGET_EMAIL" ]] && echo "    target_email=$TARGET_EMAIL"
   [[ -n "$SM_MID" ]] && echo "    sm_mid=$SM_MID  landing_page=$landing"
   echo "    POST $ENDPOINT?key=<redacted>&topic=$topic"
   if [[ "$DRY_RUN" == "1" ]]; then

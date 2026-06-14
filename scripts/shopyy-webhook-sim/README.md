@@ -9,7 +9,12 @@ Store the active webhook credentials in the ignored `.env.local` file:
 ```bash
 STORE_ID=153667
 KEY=<active store webhook secret>
+TARGET_EMAIL=you@example.com
 ```
+
+When `TARGET_EMAIL` is set, every email address in the generated payload is
+replaced before the webhook is sent. This keeps all simulator events directed
+to a controlled test inbox even when they use different payload files.
 
 ```bash
 ./fire.sh paid
