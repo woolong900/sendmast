@@ -935,7 +935,7 @@ async function runFlowSend(job: Job<SendJobData>) {
     utm: {
       source: 'sendmast',
       medium: 'email',
-      campaign: `automation_${automation.type}`,
+      campaign: automation.type,
     },
     trackClicks: true,
     // Keep flow sends attributable in the same way as campaign recipients:
