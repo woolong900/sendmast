@@ -932,6 +932,11 @@ async function runFlowSend(job: Job<SendJobData>) {
     secret: TRACKING_SECRET!,
     recipientId: send.id,
     source: 'automation',
+    utm: {
+      source: 'sendmast',
+      medium: 'email',
+      campaign: `automation_${automation.type}`,
+    },
     trackClicks: true,
     // Keep flow sends attributable in the same way as campaign recipients:
     // the store echoes sm_mid from the landing URL back in the order webhook.
