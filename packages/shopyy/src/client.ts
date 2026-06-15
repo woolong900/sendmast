@@ -31,17 +31,15 @@ export class ShopyyAuthError extends ShopyyError {
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
-/**
- * Fixed partner User-Agent shopyy requires on every OpenAPI call (alongside the
- * `Tp-Partner-Id` credential). Not a secret — it's a partner-identifying bot UA.
- */
+/** Fixed partner identity shopyy requires on every request. Neither is secret. */
+const PARTNER_ID = 'SENDMAST-FZLRWJGBHUWPUZKTHUNLEFC';
 const PARTNER_USER_AGENT = 'OEMSAAS-OPENAPIBOT-SENDMAST';
 
 /** Headers shopyy mandates on every OpenAPI request for partner identification. */
-function partnerHeaders(partnerId: string | undefined): Record<string, string> {
+function partnerHeaders(): Record<string, string> {
   return {
+    'Tp-Partner-Id': PARTNER_ID,
     'User-Agent': PARTNER_USER_AGENT,
-    ...(partnerId ? { 'Tp-Partner-Id': partnerId } : {}),
   };
 }
 
@@ -85,7 +83,7 @@ export async function exchangeAuthorizeToken(opts: {
   authorizeTokenUrl: string;
   code: string;
   secret: string;
-  /** Partner credential sent as `Tp-Partner-Id` (required by shopyy). */
+  /** @deprecated Partner identity is fixed by the SendMast integration. */
   partnerId?: string;
   /** Extra params some tenants' gateways require (e.g. app key). */
   extraParams?: Record<string, string>;
@@ -100,7 +98,7 @@ export async function exchangeAuthorizeToken(opts: {
 
   const { status, body } = await fetchJson(
     url.toString(),
-    { method: 'GET', headers: { Accept: 'application/json', ...partnerHeaders(opts.partnerId) } },
+    { method: 'GET', headers: { Accept: 'application/json', ...partnerHeaders() } },
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   );
   if (status === 401 || body.code === 401 || body.code === 'Token-Error') {
@@ -115,7 +113,7 @@ export async function exchangeAuthorizeToken(opts: {
 export interface ShopyyClientOptions {
   openapiDomain: string;
   token: string;
-  /** Partner credential sent as `Tp-Partner-Id` on every call (required by shopyy). */
+  /** @deprecated Partner identity is fixed by the SendMast integration. */
   partnerId?: string;
   timeoutMs?: number;
 }
@@ -133,13 +131,11 @@ export interface ShopyyClientOptions {
 export class ShopyyClient {
   private readonly base: string;
   private readonly token: string;
-  private readonly partnerId?: string;
   private readonly timeoutMs: number;
 
   constructor(opts: ShopyyClientOptions) {
     this.base = opts.openapiDomain.replace(/\/+$/, '');
     this.token = opts.token;
-    this.partnerId = opts.partnerId;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
@@ -162,7 +158,7 @@ export class ShopyyClient {
       Authorization: `Bearer ${this.token}`,
       Accept: 'application/json',
       // Partner identification headers shopyy mandates on every OpenAPI call.
-      ...partnerHeaders(this.partnerId),
+      ...partnerHeaders(),
     };
     let bodyStr: string | undefined;
     if (opts.body !== undefined) {
