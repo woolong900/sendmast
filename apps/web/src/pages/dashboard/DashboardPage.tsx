@@ -1,6 +1,16 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Users, Send, ShoppingCart, MailOpen, Plus, Wallet } from 'lucide-react';
+import {
+  Users,
+  Send,
+  ShoppingCart,
+  MailOpen,
+  Plus,
+  Wallet,
+  CircleDollarSign,
+  ReceiptText,
+  TrendingUp,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -147,9 +157,24 @@ export function DashboardPage() {
               </div>
             ) : data?.shopConnected ? (
               <div className="grid grid-cols-3 gap-4">
-                <SalesStat label="近 30 日营收" value={formatUsd(data.sales.revenue)} />
-                <SalesStat label="订单数" value={formatNumber(data.sales.orders)} />
-                <SalesStat label="客单价" value={formatUsd(data.sales.aov)} />
+                <SalesStat
+                  icon={<CircleDollarSign className="size-4" />}
+                  label="近 30 日营收"
+                  value={formatUsd(data.sales.revenue)}
+                  tone="emerald"
+                />
+                <SalesStat
+                  icon={<ReceiptText className="size-4" />}
+                  label="订单数"
+                  value={formatNumber(data.sales.orders)}
+                  tone="blue"
+                />
+                <SalesStat
+                  icon={<TrendingUp className="size-4" />}
+                  label="客单价"
+                  value={formatUsd(data.sales.aov)}
+                  tone="amber"
+                />
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -218,11 +243,45 @@ function formatUsd(amount: number): string {
   }
 }
 
-function SalesStat({ label, value }: { label: string; value: string }) {
+const SALES_TONE: Record<string, { box: string; icon: string; value: string }> = {
+  emerald: {
+    box: 'border-emerald-200 bg-emerald-50/70',
+    icon: 'bg-emerald-100 text-emerald-700',
+    value: 'text-emerald-700',
+  },
+  blue: {
+    box: 'border-blue-200 bg-blue-50/70',
+    icon: 'bg-blue-100 text-blue-700',
+    value: 'text-blue-700',
+  },
+  amber: {
+    box: 'border-amber-200 bg-amber-50/70',
+    icon: 'bg-amber-100 text-amber-700',
+    value: 'text-amber-700',
+  },
+};
+
+function SalesStat({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  tone: keyof typeof SALES_TONE;
+}) {
+  const colors = SALES_TONE[tone];
   return (
-    <div className="rounded-md border p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
+    <div className={`rounded-md border p-3 ${colors.box}`}>
+      <div className="flex items-center gap-2">
+        <span className={`flex size-7 items-center justify-center rounded-md ${colors.icon}`}>
+          {icon}
+        </span>
+        <div className="text-xs text-muted-foreground">{label}</div>
+      </div>
+      <div className={`mt-2 text-lg font-semibold ${colors.value}`}>{value}</div>
     </div>
   );
 }
