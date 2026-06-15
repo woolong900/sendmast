@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -39,7 +39,11 @@ import {
   type ShopCouponView,
   type SenderDomainView,
 } from '@sendmast/shared';
-import { AutomationEmailEditor, type AutomationEmailContent } from './AutomationEmailEditor';
+import type { AutomationEmailContent } from './AutomationEmailEditor';
+
+const AutomationEmailEditor = lazy(() =>
+  import('./AutomationEmailEditor').then((m) => ({ default: m.AutomationEmailEditor })),
+);
 
 interface ShopConnectionsResponse {
   configured: boolean;
@@ -770,12 +774,20 @@ function FlowEditor({
   return (
     <>
       {editing !== null && editingContent && (
-        <AutomationEmailEditor
-          initialDesignJson={editingContent.designJson}
-          initialHtml={editingContent.html}
-          onClose={() => setEditing(null)}
-          onApply={applyContent}
-        />
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-background">
+              <p className="text-sm text-muted-foreground">正在加载邮件编辑器...</p>
+            </div>
+          }
+        >
+          <AutomationEmailEditor
+            initialDesignJson={editingContent.designJson}
+            initialHtml={editingContent.html}
+            onClose={() => setEditing(null)}
+            onApply={applyContent}
+          />
+        </Suspense>
       )}
       <div className="space-y-4 pb-4">
         <div className="flex items-center gap-3">
