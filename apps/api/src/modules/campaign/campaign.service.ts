@@ -654,32 +654,70 @@ export class CampaignService {
             attributedCampaignId: campaignId,
             externalOrderId: { in: orderIds },
           },
-          select: { externalOrderId: true, orderNo: true },
+          select: {
+            externalOrderId: true,
+            orderNo: true,
+            contactId: true,
+            attributedContactId: true,
+            customerEmail: true,
+          },
         })
       : [];
-    const orderNoById = new Map(orders.map((o) => [o.externalOrderId, o.orderNo]));
+    const orderById = new Map(orders.map((o) => [o.externalOrderId, o]));
+    const contactIds = Array.from(
+      new Set(
+        orders
+          .flatMap((o) => [o.contactId, o.attributedContactId])
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const contactEmails = Array.from(
+      new Set(orders.map((o) => o.customerEmail.toLowerCase()).filter(Boolean)),
+    );
+    const contacts =
+      contactIds.length || contactEmails.length
+        ? await this.prisma.contact.findMany({
+            where: {
+              accountId,
+              OR: [
+                ...(contactIds.length ? [{ id: { in: contactIds } }] : []),
+                ...(contactEmails.length ? [{ email: { in: contactEmails } }] : []),
+              ],
+            },
+            select: { id: true, email: true, firstName: true, lastName: true },
+          })
+        : [];
+    const contactById = new Map(contacts.map((c) => [c.id, c]));
+    const contactByEmail = new Map(contacts.map((c) => [c.email.toLowerCase(), c]));
     return {
       source: 'events',
-      rows: page.map((r) => ({
-        id: r.external_order_id,
-        email: r.customer_email,
-        firstName: null,
-        lastName: null,
-        status: 'order',
-        messageId: null,
-        errorMessage: null,
-        sentAt: r.order_time,
-        createdAt: r.order_time,
-        eventTime: r.order_time,
-        userAgent: null,
-        linkUrl: null,
-        deliveredAt: null,
-        reason: `${r.currency} ${r.value}`,
-        bounceType: null,
-        orderNo: orderNoById.get(r.external_order_id) ?? r.external_order_id,
-        orderAmount: Number(r.value),
-        orderCurrency: r.currency,
-      })),
+      rows: page.map((r) => {
+        const order = orderById.get(r.external_order_id);
+        const contact =
+          (order?.contactId ? contactById.get(order.contactId) : undefined) ??
+          (order?.attributedContactId ? contactById.get(order.attributedContactId) : undefined) ??
+          contactByEmail.get((order?.customerEmail ?? r.customer_email).toLowerCase());
+        return {
+          id: r.external_order_id,
+          email: r.customer_email,
+          firstName: contact?.firstName ?? null,
+          lastName: contact?.lastName ?? null,
+          status: 'order',
+          messageId: null,
+          errorMessage: null,
+          sentAt: r.order_time,
+          createdAt: r.order_time,
+          eventTime: r.order_time,
+          userAgent: null,
+          linkUrl: null,
+          deliveredAt: null,
+          reason: `${r.currency} ${r.value}`,
+          bounceType: null,
+          orderNo: order?.orderNo ?? r.external_order_id,
+          orderAmount: Number(r.value),
+          orderCurrency: r.currency,
+        };
+      }),
       nextCursor: hasMore ? page[page.length - 1].order_time : null,
       total,
     };
