@@ -12,6 +12,8 @@ export const QUEUE_NAMES = {
   SHOP_ABANDONED: 'shop-abandoned',
   /** Daily cron — archives terminal campaigns >= 90d old to ClickHouse. */
   ARCHIVE_RECIPIENTS: 'archive-recipients',
+  /** Daily cron — refreshes cached dynamic segment counts. */
+  SEGMENT_REFRESH: 'segment-refresh',
   /** Server-side render of a campaign's HTML into a list thumbnail (WebP). */
   RENDER_THUMBNAIL: 'render-thumbnail',
 } as const;

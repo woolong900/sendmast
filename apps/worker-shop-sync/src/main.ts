@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { Worker, Queue, type Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import {
   buildClickHouseClient,
   findLastClick,
@@ -172,6 +172,61 @@ async function markContactOrdered(contactId: string, orderTime: Date): Promise<v
   });
 }
 
+type CountedOrderSnapshot = {
+  status: string;
+  contactId: string | null;
+  value: Prisma.Decimal | number | string;
+};
+
+function isCountedOrderStatus(status: string): boolean {
+  return status === 'paid' || status === 'shipped';
+}
+
+async function applyContactOrderMetricDelta(args: {
+  before: CountedOrderSnapshot | null;
+  after: CountedOrderSnapshot;
+}): Promise<void> {
+  const beforeCounted =
+    args.before && isCountedOrderStatus(args.before.status) && args.before.contactId;
+  const afterCounted = isCountedOrderStatus(args.after.status) && args.after.contactId;
+
+  if (
+    beforeCounted &&
+    args.before!.contactId === args.after.contactId &&
+    afterCounted
+  ) {
+    const amountDelta =
+      Number(args.after.value) - Number(args.before!.value);
+    if (amountDelta !== 0) {
+      await prisma.contact.update({
+        where: { id: args.after.contactId! },
+        data: { orderAmount: { increment: amountDelta } },
+      });
+    }
+    return;
+  }
+
+  if (beforeCounted) {
+    await prisma.contact.update({
+      where: { id: args.before!.contactId! },
+      data: {
+        orderCount: { decrement: 1 },
+        orderAmount: { decrement: Number(args.before!.value) },
+      },
+    });
+  }
+
+  if (afterCounted) {
+    await prisma.contact.update({
+      where: { id: args.after.contactId! },
+      data: {
+        orderCount: { increment: 1 },
+        orderAmount: { increment: Number(args.after.value) },
+      },
+    });
+  }
+}
+
 async function touchSync(connectionId: string): Promise<void> {
   await prisma.shopConnection
     .update({ where: { id: connectionId }, data: { lastSyncAt: new Date() } })
@@ -261,6 +316,16 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       ? { campaignId: lastClick.campaignId, contactId, model: 'last_click_7d' }
       : null;
 
+  const existingOrder = await prisma.shopOrder.findUnique({
+    where: {
+      shopConnectionId_externalOrderId: {
+        shopConnectionId: job.connectionId,
+        externalOrderId: order.externalOrderId,
+      },
+    },
+    select: { status: true, contactId: true, value: true },
+  });
+
   const saved = await prisma.shopOrder.upsert({
     where: {
       shopConnectionId_externalOrderId: {
@@ -326,6 +391,14 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       data: { status: newStatus },
     });
   }
+  const finalStatus =
+    existingOrder && (ORDER_STATUS_RANK[existingOrder.status] ?? 0) > ORDER_STATUS_RANK[newStatus]!
+      ? existingOrder.status
+      : newStatus;
+  await applyContactOrderMetricDelta({
+    before: existingOrder,
+    after: { status: finalStatus, contactId, value: order.value },
+  }).catch((e) => console.error('[shop-sync] update contact order metrics failed:', e));
 
   // ClickHouse analytics rows (orders is ReplacingMergeTree → safe to re-insert).
   await insertOrders(ch, [
@@ -403,6 +476,16 @@ async function handleOrderCreated(job: ShopEventJob): Promise<void> {
     console.error('[shop-sync] customer-list add failed:', e),
   );
 
+  const existingOrder = await prisma.shopOrder.findUnique({
+    where: {
+      shopConnectionId_externalOrderId: {
+        shopConnectionId: job.connectionId,
+        externalOrderId: order.externalOrderId,
+      },
+    },
+    select: { status: true, contactId: true, value: true },
+  });
+
   await prisma.shopOrder.upsert({
     where: {
       shopConnectionId_externalOrderId: {
@@ -435,6 +518,14 @@ async function handleOrderCreated(job: ShopEventJob): Promise<void> {
       raw: job.payload as object,
     },
   });
+  await applyContactOrderMetricDelta({
+    before: existingOrder,
+    after: {
+      status: existingOrder?.status ?? 'pending',
+      contactId,
+      value: order.value,
+    },
+  }).catch((e) => console.error('[shop-sync] update contact order metrics failed:', e));
 
   await touchSync(job.connectionId);
 
@@ -591,6 +682,16 @@ async function runInitialSync(job: Job<ShopSyncJob>): Promise<void> {
         await addToCustomerList(conn.customerListId, [contactId]);
         await markContactOrdered(contactId, order.orderTime);
 
+        const existingOrder = await prisma.shopOrder.findUnique({
+          where: {
+            shopConnectionId_externalOrderId: {
+              shopConnectionId: connectionId,
+              externalOrderId: order.externalOrderId,
+            },
+          },
+          select: { status: true, contactId: true, value: true },
+        });
+
         await prisma.shopOrder.upsert({
           where: {
             shopConnectionId_externalOrderId: {
@@ -631,6 +732,17 @@ async function runInitialSync(job: Job<ShopSyncJob>): Promise<void> {
           },
           data: { status: 'paid' },
         });
+        const finalStatus =
+          existingOrder &&
+          (ORDER_STATUS_RANK[existingOrder.status] ?? 0) > ORDER_STATUS_RANK.paid
+            ? existingOrder.status
+            : 'paid';
+        await applyContactOrderMetricDelta({
+          before: existingOrder,
+          after: { status: finalStatus, contactId, value: order.value },
+        }).catch((e) =>
+          console.error('[shop-sync] update contact order metrics failed:', e),
+        );
 
         chRows.push({
           account_id: accountId,

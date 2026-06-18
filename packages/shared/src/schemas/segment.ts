@@ -100,6 +100,20 @@ const OrderRule = z.object({
   lastDays: z.number().int().min(1).max(3650).optional(),
 });
 
+const OrderCountRule = z.object({
+  type: z.literal('orderMetric'),
+  metric: z.literal('count'),
+  op: z.enum(['gte', 'eq', 'lte']),
+  value: z.number().int().min(0).max(1_000_000_000),
+});
+
+const OrderAmountRule = z.object({
+  type: z.literal('orderMetric'),
+  metric: z.literal('amount'),
+  op: z.enum(['gte', 'eq', 'lte']),
+  value: z.number().min(0).max(1_000_000_000_000),
+});
+
 export const SegmentRuleSchema = z.union([
   AttributeRuleScalar,
   AttributeRuleList,
@@ -110,6 +124,8 @@ export const SegmentRuleSchema = z.union([
   CreatedAtLastDays,
   EventRule,
   OrderRule,
+  OrderCountRule,
+  OrderAmountRule,
 ]);
 export type SegmentRule = z.infer<typeof SegmentRuleSchema>;
 

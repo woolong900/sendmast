@@ -144,5 +144,16 @@ function compileRule(
       }
       return;
     }
+    case 'orderMetric': {
+      const field = rule.metric === 'count' ? 'orderCount' : 'orderAmount';
+      if (rule.op === 'gte') {
+        andClauses.push({ [field]: { gte: rule.value } });
+      } else if (rule.op === 'lte') {
+        andClauses.push({ [field]: { lte: rule.value } });
+      } else {
+        andClauses.push({ [field]: rule.value });
+      }
+      return;
+    }
   }
 }

@@ -385,6 +385,40 @@ export class SegmentService {
     return this.toView(updated);
   }
 
+  async refreshAllSegments(): Promise<{
+    total: number;
+    refreshed: number;
+    failed: number;
+  }> {
+    const segments = await this.prisma.segment.findMany({
+      select: { id: true, accountId: true, definition: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    let refreshed = 0;
+    let failed = 0;
+    for (const seg of segments) {
+      try {
+        const ids = await this.resolveContactIds(
+          seg.accountId,
+          seg.definition as unknown as SegmentDefinition,
+        );
+        await this.prisma.segment.update({
+          where: { id: seg.id },
+          data: { cachedCount: ids.size, cachedAt: new Date() },
+        });
+        refreshed += 1;
+      } catch (err) {
+        failed += 1;
+        this.logger.warn(
+          `daily segment refresh failed for ${seg.id}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    return { total: segments.length, refreshed, failed };
+  }
+
   async listContacts(
     accountId: string,
     id: string,

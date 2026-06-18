@@ -41,6 +41,7 @@ const RULE_TYPE_LABELS: Record<SegmentRule['type'], string> = {
   createdAt: '注册时间',
   event: '行为',
   order: '下单',
+  orderMetric: '订单累计',
 };
 
 const ATTRIBUTE_FIELD_LABELS: Record<string, string> = {
@@ -68,13 +69,27 @@ const SUBSCRIPTION_OPTIONS = [
 
 // `tag` is intentionally excluded from this picker until we ship a Tag
 // management UI; backend evaluator still supports it for power-user JSON.
-const ADDABLE_RULE_TYPES: Array<{ type: SegmentRule['type']; label: string }> = [
-  { type: 'attribute', label: '联系人属性' },
-  { type: 'subscription', label: '订阅状态' },
-  { type: 'list', label: '列表成员' },
-  { type: 'createdAt', label: '注册时间' },
-  { type: 'event', label: '行为(打开/点击)' },
-  { type: 'order', label: '下单(店铺订单)' },
+const ADDABLE_RULE_TYPES: Array<{
+  key: string;
+  label: string;
+  create: () => SegmentRule;
+}> = [
+  { key: 'attribute', label: '联系人属性', create: () => makeDefaultRule('attribute') },
+  { key: 'subscription', label: '订阅状态', create: () => makeDefaultRule('subscription') },
+  { key: 'list', label: '列表成员', create: () => makeDefaultRule('list') },
+  { key: 'createdAt', label: '注册时间', create: () => makeDefaultRule('createdAt') },
+  { key: 'event', label: '行为(打开/点击)', create: () => makeDefaultRule('event') },
+  { key: 'order', label: '下单(店铺订单)', create: () => makeDefaultRule('order') },
+  {
+    key: 'orderMetricCount',
+    label: '累计订单数',
+    create: () => ({ type: 'orderMetric', metric: 'count', op: 'gte', value: 1 }),
+  },
+  {
+    key: 'orderMetricAmount',
+    label: '累计订单金额',
+    create: () => ({ type: 'orderMetric', metric: 'amount', op: 'gte', value: 100 }),
+  },
 ];
 
 function makeDefaultRule(type: SegmentRule['type']): SegmentRule {
@@ -93,6 +108,8 @@ function makeDefaultRule(type: SegmentRule['type']): SegmentRule {
       return { type: 'event', event: 'open', op: 'has', lastDays: 30 };
     case 'order':
       return { type: 'order', op: 'has' };
+    case 'orderMetric':
+      return { type: 'orderMetric', metric: 'count', op: 'gte', value: 1 };
   }
 }
 
@@ -250,10 +267,10 @@ export function SegmentEditPage() {
                     <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-md border bg-popover shadow-lg">
                       {ADDABLE_RULE_TYPES.map((t) => (
                         <button
-                          key={t.type}
+                          key={t.key}
                           type="button"
                           onClick={() => {
-                            setRules((r) => [...r, makeDefaultRule(t.type)]);
+                            setRules((r) => [...r, t.create()]);
                             setShowAddMenu(false);
                           }}
                           className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
@@ -346,6 +363,9 @@ function RuleCard({
         <EventRuleEditor rule={rule} onChange={onChange} campaigns={campaigns} />
       )}
       {rule.type === 'order' && <OrderRuleEditor rule={rule} onChange={onChange} />}
+      {rule.type === 'orderMetric' && (
+        <OrderMetricRuleEditor rule={rule} onChange={onChange} />
+      )}
     </div>
   );
 }
@@ -657,6 +677,63 @@ function OrderRuleEditor({
   );
 }
 
+function OrderMetricRuleEditor({
+  rule,
+  onChange,
+}: {
+  rule: Extract<SegmentRule, { type: 'orderMetric' }>;
+  onChange: (r: SegmentRule) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <FilterSelect
+        className="w-[180px]"
+        value={rule.metric}
+        onChange={(v) =>
+          onChange({
+            type: 'orderMetric',
+            metric: v as typeof rule.metric,
+            op: rule.op,
+            value: v === 'count' ? Math.max(0, Math.floor(rule.value)) : rule.value,
+          })
+        }
+        options={[
+          { value: 'count', label: '累计订单数' },
+          { value: 'amount', label: '累计订单金额' },
+        ]}
+      />
+      <FilterSelect
+        className="w-[140px]"
+        value={rule.op}
+        onChange={(v) => onChange({ ...rule, op: v as typeof rule.op })}
+        options={[
+          { value: 'gte', label: '大于等于' },
+          { value: 'eq', label: '等于' },
+          { value: 'lte', label: '小于等于' },
+        ]}
+      />
+      <Input
+        type="number"
+        min={0}
+        step={rule.metric === 'count' ? 1 : 0.01}
+        value={rule.value}
+        onChange={(e) => {
+          const raw = Number(e.target.value);
+          const value = Number.isFinite(raw) ? raw : 0;
+          onChange({
+            ...rule,
+            value: rule.metric === 'count' ? Math.max(0, Math.floor(value)) : value,
+          });
+        }}
+        className="w-32"
+      />
+      <div className="w-full text-xs text-muted-foreground">
+        基于已绑定店铺同步的已支付/已发货订单累计计算
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Preview (debounced)
 // ---------------------------------------------------------------------------
@@ -775,5 +852,7 @@ function isRuleComplete(r: SegmentRule): boolean {
       return r.lastDays > 0;
     case 'order':
       return r.lastDays === undefined || r.lastDays > 0;
+    case 'orderMetric':
+      return Number.isFinite(r.value) && r.value >= 0;
   }
 }

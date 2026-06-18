@@ -527,6 +527,12 @@ model Contact {
   /// Latest PAID shop-order time (null = never ordered). Denormalised from
   /// shop_orders at ingest/backfill; drives the segment `order` rule.
   lastOrderedAt      DateTime?          @map("last_ordered_at")
+  /// Count of paid/shipped shop orders. Denormalised from shop_orders so
+  /// order-metric segments can be evaluated as plain Contact predicates.
+  orderCount         Int                @default(0) @map("order_count")
+  /// Sum of paid/shipped shop order values. Same currency semantics as
+  /// shop_orders.value: stores are expected to be single-currency in v1.
+  orderAmount        Decimal            @default(0) @map("order_amount") @db.Decimal(18, 2)
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
 
@@ -537,6 +543,8 @@ model Contact {
   @@unique([accountId, email])
   @@index([accountId, subscriptionStatus])
   @@index([accountId, lastOrderedAt])
+  @@index([accountId, orderCount])
+  @@index([accountId, orderAmount])
   // NOTE: no [accountId, email] non-unique index — the @@unique above already
   // produces a btree on (accountId, email) which PG will use for prefix /
   // equality lookups. Keeping a duplicate non-unique would just double write
