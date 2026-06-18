@@ -101,9 +101,9 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {
           </button>
 
           {supportOpen && (
-            <div className="fixed right-3 top-16 z-50 w-[calc(100vw-1.5rem)] max-w-[560px] overflow-hidden rounded-lg border bg-popover shadow-xl sm:right-6">
-              <div className="flex items-center justify-between border-b px-5 py-4">
-                <div className="text-base font-semibold">联系客服</div>
+            <div className="fixed right-3 top-16 z-50 w-[calc(100vw-1.5rem)] max-w-[360px] overflow-hidden rounded-lg border bg-popover shadow-xl sm:right-6">
+              <div className="flex items-center justify-between border-b px-4 py-3">
+                <div className="text-sm font-semibold">联系客服</div>
                 <button
                   type="button"
                   onClick={() => setSupportOpen(false)}
@@ -113,21 +113,21 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {
                   <X className="size-5" />
                 </button>
               </div>
-              <div className="grid gap-5 p-5 sm:grid-cols-[1fr_180px] sm:items-center">
-                <div className="space-y-4 text-sm leading-relaxed text-muted-foreground">
+              <div className="grid grid-cols-[1fr_132px] items-center gap-4 p-4">
+                <div className="space-y-3 text-sm leading-relaxed text-muted-foreground">
                   <div>
-                    <div className="mb-2 text-lg font-semibold text-foreground">微信客服</div>
-                    <p>若有疑问,请添加客服微信进行咨询。</p>
+                    <div className="mb-1 font-semibold text-foreground">微信客服</div>
+                    <p>扫码添加客服咨询。</p>
                   </div>
-                  <div className="rounded-md bg-muted/40 px-3 py-2 text-foreground">
+                  <div className="rounded-md bg-muted/40 px-2.5 py-2 text-foreground">
                     微信号: <span className="font-semibold">haoke500</span>
                   </div>
                 </div>
-                <div className="mx-auto w-[180px] rounded-md border bg-white p-2">
+                <div className="w-[132px] rounded-md border bg-white p-1.5">
                   <img
                     src="/assets/support/wechat-haoke500.png"
                     alt="客服微信二维码"
-                    className="block h-40 w-40 object-contain"
+                    className="block size-[120px] object-contain"
                   />
                 </div>
               </div>
