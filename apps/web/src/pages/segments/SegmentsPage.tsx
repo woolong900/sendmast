@@ -165,6 +165,7 @@ function UsageHint() {
         <div className="font-medium">什么是动态分群？</div>
         <ul className="list-disc space-y-0.5 pl-5 text-blue-800/90">
           <li>分群是基于规则的"动态名单",联系人变更时自动重新匹配,无需手动维护</li>
+          <li>系统每天 12:00 自动刷新一次匹配人数,也可在列表中手动点击刷新</li>
           <li>所有规则用 AND 组合;需要 OR 时请建多个分群</li>
           <li>支持按属性、列表、标签、注册时间、行为和店铺订单累计数据筛选</li>
           <li>创建活动时,目标可以同时选"列表 + 分群",最终发送对象为并集去重</li>
