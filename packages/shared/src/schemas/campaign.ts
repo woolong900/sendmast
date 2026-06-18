@@ -168,6 +168,12 @@ export interface RecipientView {
   reason: string | null;
   /** For bounce events: classification (HardBounce / SoftBounce / Suppressed / ...). */
   bounceType: string | null;
+  /** Sales tab only: merchant-facing order number, falling back to external order id. */
+  orderNo?: string | null;
+  /** Sales tab only: order amount in its native currency. */
+  orderAmount?: number | null;
+  /** Sales tab only: ISO currency code for orderAmount. */
+  orderCurrency?: string | null;
 }
 
 export interface ListRecipientsResponse {

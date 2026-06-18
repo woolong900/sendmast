@@ -39,6 +39,9 @@ interface RecipientRow {
   deliveredAt: string | null;
   reason: string | null;
   bounceType: string | null;
+  orderNo?: string | null;
+  orderAmount?: number | null;
+  orderCurrency?: string | null;
 }
 
 interface ListResp {
@@ -112,6 +115,19 @@ function parseUA(ua: string | null): { device: string; os: string } {
   }
 }
 
+function formatMoney(amount: number | null | undefined, currency: string | null | undefined) {
+  if (amount === null || amount === undefined || !Number.isFinite(amount)) return '-';
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency || 'USD',
+      currencyDisplay: 'narrowSymbol',
+    }).format(amount);
+  } catch {
+    return `${currency ?? ''} ${amount.toFixed(2)}`.trim();
+  }
+}
+
 // ----- Per-tab column configuration -----------------------------------------
 // Each entry produces one <th>/<td>. Keeping this declarative means adding a
 // column to a tab is a one-line change without touching render JSX.
@@ -181,6 +197,20 @@ const COL_REASON = (header: string): Column => ({
     </span>
   ),
 });
+const COL_ORDER_NO: Column = {
+  header: '订单号',
+  className: 'w-32 whitespace-nowrap',
+  cell: (r) => <span className="font-medium tabular-nums">{r.orderNo ?? r.id}</span>,
+};
+const COL_ORDER_AMOUNT: Column = {
+  header: '金额',
+  className: 'w-32 whitespace-nowrap',
+  cell: (r) => (
+    <span className="tabular-nums text-muted-foreground">
+      {formatMoney(r.orderAmount, r.orderCurrency)}
+    </span>
+  ),
+};
 // Distinct from COL_REASON because failed/invalid tabs come from PG
 // (campaign_recipients.error_message — written by worker-sender on send
 // failure or by tick on quota exhaustion), while bounced/unsubscribed
@@ -231,7 +261,7 @@ const COLUMNS_BY_DIM: Record<Dimension, Column[]> = {
     COL_TIME('点击时间', 'eventTime'),
     COL_URL,
   ],
-  sales: [COL_NAME, COL_EMAIL, COL_TIME('下单时间', 'eventTime')],
+  sales: [COL_NAME, COL_EMAIL, COL_ORDER_NO, COL_ORDER_AMOUNT, COL_TIME('下单时间', 'eventTime')],
   failed: [
     COL_NAME,
     COL_EMAIL,
@@ -423,7 +453,7 @@ export function CampaignRecipientsPage() {
                 {!list.isLoading && (list.data?.rows.length ?? 0) === 0 && (
                   <EmptyStateRow
                     colSpan={columns.length}
-                    title={dim === 'sales' ? '订单数据功能即将推出' : '暂无数据'}
+                    title="暂无数据"
                   />
                 )}
                 {list.data?.rows.map((r) => (

@@ -646,6 +646,18 @@ export class CampaignService {
     }
     const hasMore = rows.length > q.pageSize;
     const page = hasMore ? rows.slice(0, q.pageSize) : rows;
+    const orderIds = page.map((r) => r.external_order_id);
+    const orders = orderIds.length
+      ? await this.prisma.shopOrder.findMany({
+          where: {
+            accountId,
+            attributedCampaignId: campaignId,
+            externalOrderId: { in: orderIds },
+          },
+          select: { externalOrderId: true, orderNo: true },
+        })
+      : [];
+    const orderNoById = new Map(orders.map((o) => [o.externalOrderId, o.orderNo]));
     return {
       source: 'events',
       rows: page.map((r) => ({
@@ -664,6 +676,9 @@ export class CampaignService {
         deliveredAt: null,
         reason: `${r.currency} ${r.value}`,
         bounceType: null,
+        orderNo: orderNoById.get(r.external_order_id) ?? r.external_order_id,
+        orderAmount: Number(r.value),
+        orderCurrency: r.currency,
       })),
       nextCursor: hasMore ? page[page.length - 1].order_time : null,
       total,
