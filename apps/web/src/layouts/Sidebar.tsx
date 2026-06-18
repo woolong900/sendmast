@@ -136,10 +136,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
       </nav>
 
       <div className="border-t border-white/10 p-3">
-        <div className="mb-2 rounded-md bg-sidebar-accent/10 px-2.5 py-2 text-xs leading-relaxed text-sidebar-foreground/75">
-          <div className="font-medium text-sidebar-foreground">联系客服</div>
-          <div className="mt-0.5">微信: haoke500</div>
-        </div>
         <NavLink
           to="/settings/domains"
           onClick={onNavigate}

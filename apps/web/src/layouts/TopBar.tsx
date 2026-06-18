@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronDown, KeyRound, LogOut, Mail, Menu } from 'lucide-react';
+import { ChevronDown, Headphones, KeyRound, LogOut, Mail, Menu, X } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { api } from '@/lib/api';
 import { formatNumber, cn } from '@/lib/utils';
@@ -11,27 +11,36 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {
   const { user, refreshToken, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const supportRef = useRef<HTMLDivElement>(null);
 
   const { data: quota } = useQuota();
 
-  // Close on outside click / ESC.
+  // Close floating menus on outside click / ESC.
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen && !supportOpen) return;
     const onDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
+      if (supportRef.current && !supportRef.current.contains(e.target as Node)) {
+        setSupportOpen(false);
+      }
     };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMenuOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setMenuOpen(false);
+      setSupportOpen(false);
+    };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [menuOpen]);
+  }, [menuOpen, supportOpen]);
 
   async function handleLogout() {
     setMenuOpen(false);
@@ -65,63 +74,112 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {
           when the hamburger is hidden. md:block so it only takes space at md+. */}
       <div className="hidden md:block" />
       <div className="flex items-center gap-3">
-      <Link
-        to="/settings/quota"
-        className={cn(
-          'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors hover:opacity-80',
-          tone,
-        )}
-        title="点击查看发送额度详情"
-      >
-        <Mail className="size-3.5" />
-        <span>剩余 {formatNumber(remaining)}</span>
-      </Link>
-
-      <div ref={menuRef} className="relative">
-        <button
-          type="button"
-          onClick={() => setMenuOpen((o) => !o)}
-          className="flex items-center gap-2 rounded-md px-1.5 py-1"
+        <Link
+          to="/settings/quota"
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors hover:opacity-80',
+            tone,
+          )}
+          title="点击查看发送额度详情"
         >
-          <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-            {(user?.displayName ?? user?.email ?? '?').charAt(0).toUpperCase()}
-          </div>
-          {/* Hide name on phones — avatar + chevron are enough; full name + email
-              don't fit alongside the quota pill at <640px. */}
-          <span className="hidden text-sm font-medium sm:inline">{user?.displayName ?? user?.email}</span>
-          <ChevronDown
-            className={cn(
-              'size-3.5 text-muted-foreground transition-transform',
-              menuOpen && 'rotate-180',
-            )}
-          />
-        </button>
+          <Mail className="size-3.5" />
+          <span>剩余 {formatNumber(remaining)}</span>
+        </Link>
 
-        {menuOpen && (
-          // Right-align + min-width: on phones the trigger collapses to just
-          // avatar+chevron (~50px), and `left-0 right-0` would force the
-          // dropdown to that width, stacking Chinese characters vertically
-          // (see screenshot from 2026-05-26). Anchoring to the right edge
-          // lets the menu grow leftward into the page instead.
-          <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
-            <MenuItem
-              icon={<KeyRound className="size-4" />}
-              label="修改密码"
-              onClick={() => {
-                setMenuOpen(false);
-                setPwOpen(true);
-              }}
+        <div ref={supportRef} className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              setSupportOpen((o) => !o);
+              setMenuOpen(false);
+            }}
+            aria-expanded={supportOpen}
+            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            <Headphones className="size-4" />
+            <span className="hidden sm:inline">客服</span>
+          </button>
+
+          {supportOpen && (
+            <div className="fixed right-3 top-16 z-50 w-[calc(100vw-1.5rem)] max-w-[560px] overflow-hidden rounded-lg border bg-popover shadow-xl sm:right-6">
+              <div className="flex items-center justify-between border-b px-5 py-4">
+                <div className="text-base font-semibold">联系客服</div>
+                <button
+                  type="button"
+                  onClick={() => setSupportOpen(false)}
+                  className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label="关闭客服窗口"
+                >
+                  <X className="size-5" />
+                </button>
+              </div>
+              <div className="grid gap-5 p-5 sm:grid-cols-[1fr_180px] sm:items-center">
+                <div className="space-y-4 text-sm leading-relaxed text-muted-foreground">
+                  <div>
+                    <div className="mb-2 text-lg font-semibold text-foreground">微信客服</div>
+                    <p>若有疑问,请添加客服微信进行咨询。</p>
+                  </div>
+                  <div className="rounded-md bg-muted/40 px-3 py-2 text-foreground">
+                    微信号: <span className="font-semibold">haoke500</span>
+                  </div>
+                </div>
+                <div className="mx-auto w-[180px] rounded-md border bg-white p-2">
+                  <img
+                    src="/assets/support/wechat-haoke500.png"
+                    alt="客服微信二维码"
+                    className="block h-40 w-40 object-contain"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div ref={menuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            className="flex items-center gap-2 rounded-md px-1.5 py-1"
+          >
+            <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+              {(user?.displayName ?? user?.email ?? '?').charAt(0).toUpperCase()}
+            </div>
+            {/* Hide name on phones — avatar + chevron are enough; full name + email
+                don't fit alongside the quota pill at <640px. */}
+            <span className="hidden text-sm font-medium sm:inline">{user?.displayName ?? user?.email}</span>
+            <ChevronDown
+              className={cn(
+                'size-3.5 text-muted-foreground transition-transform',
+                menuOpen && 'rotate-180',
+              )}
             />
-            <div className="my-1 border-t" />
-            <MenuItem
-              icon={<LogOut className="size-4" />}
-              label="退出登录"
-              onClick={handleLogout}
-              danger
-            />
-          </div>
-        )}
-      </div>
+          </button>
+
+          {menuOpen && (
+            // Right-align + min-width: on phones the trigger collapses to just
+            // avatar+chevron (~50px), and `left-0 right-0` would force the
+            // dropdown to that width, stacking Chinese characters vertically
+            // (see screenshot from 2026-05-26). Anchoring to the right edge
+            // lets the menu grow leftward into the page instead.
+            <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
+              <MenuItem
+                icon={<KeyRound className="size-4" />}
+                label="修改密码"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setPwOpen(true);
+                }}
+              />
+              <div className="my-1 border-t" />
+              <MenuItem
+                icon={<LogOut className="size-4" />}
+                label="退出登录"
+                onClick={handleLogout}
+                danger
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       <ChangePasswordDialog open={pwOpen} onClose={() => setPwOpen(false)} />
