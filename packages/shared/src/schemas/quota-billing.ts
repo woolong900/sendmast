@@ -4,9 +4,8 @@ import { z } from 'zod';
 // Pricing tiers (admin manages)
 // ----------------------------------------------------------------------------
 //
-// USD only on the tier table. Checkout is charged in CNY through Airwallex,
-// so we convert USD→CNY at order creation and snapshot both `amount_cny`
-// and `fx_rate` onto the order for audit.
+// USD only on the tier table. Checkout is charged in CNY through the selected
+// payment provider, so we snapshot the converted amount and FX rate for audit.
 
 export const QuotaPricingTierInputSchema = z.object({
   emails: z.coerce.number().int().min(1),
@@ -33,22 +32,33 @@ export interface QuotaPricingTierView {
 
 export const CreateQuotaOrderSchema = z.object({
   tierId: z.string().uuid(),
+  channel: z.enum(['alipay', 'wechat']).default('alipay'),
 });
 export type CreateQuotaOrderInput = z.infer<typeof CreateQuotaOrderSchema>;
 
-export interface CreateQuotaOrderResponse {
-  /** Airwallex PaymentIntent ID; also used to poll our order status. */
+export type PaymentChannel = 'alipay' | 'wechat';
+
+interface QuotaOrderCheckoutBase {
   orderId: string;
-  /** Short-lived client credential for Airwallex Hosted Payment Page. */
+  amountCny: number;
+  amountUsd: number;
+}
+
+export interface ShouqianbaQuotaOrderResponse extends QuotaOrderCheckoutBase {
+  provider: 'shouqianba';
+  qrCode: string;
+  channel: PaymentChannel;
+}
+
+export interface AirwallexQuotaOrderResponse extends QuotaOrderCheckoutBase {
+  provider: 'airwallex';
   clientSecret: string;
   currency: 'CNY';
   environment: 'demo' | 'prod';
   successUrl: string;
-  /** CNY amount the user will pay, converted from USD at the current rate. */
-  amountCny: number;
-  /** USD price at the order's tier — useful for the modal subtitle. */
-  amountUsd: number;
 }
+
+export type CreateQuotaOrderResponse = ShouqianbaQuotaOrderResponse | AirwallexQuotaOrderResponse;
 
 export type QuotaOrderStatus = 'pending' | 'paid' | 'failed' | 'cancelled';
 

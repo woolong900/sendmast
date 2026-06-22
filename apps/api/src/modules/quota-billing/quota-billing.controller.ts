@@ -1,12 +1,4 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -37,6 +29,7 @@ export class QuotaBillingController {
       accountId: user.accountId,
       userId: user.userId,
       tierId: r.data.tierId,
+      channel: r.data.channel,
     });
   }
 
@@ -45,9 +38,7 @@ export class QuotaBillingController {
     return this.svc.listMyOrders(user.accountId);
   }
 
-  /** Single-order lookup, used by the modal to poll a pending order's
-   *  status while showing the QR code (every 2s until status flips to
-   *  `paid` via the Airwallex webhook). */
+  /** Single-order lookup used by the return page and QR payment polling. */
   @Get('quota-orders/:providerOrderId')
   getOrder(
     @Param('providerOrderId') providerOrderId: string,

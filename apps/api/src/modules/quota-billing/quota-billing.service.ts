@@ -162,11 +162,17 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
     accountId: string;
     userId: string;
     tierId: string;
+    channel: 'alipay' | 'wechat';
   }): Promise<CreateQuotaOrderResponse> {
-    if (!this.airwallex.isConfigured()) {
+    const provider =
+      this.config.get<'shouqianba' | 'airwallex'>('QUOTA_PAYMENT_PROVIDER') ?? 'shouqianba';
+    if (
+      (provider === 'shouqianba' && !this.shouqianba.isConfigured()) ||
+      (provider === 'airwallex' && !this.airwallex.isConfigured())
+    ) {
       throw new ServiceUnavailableException('支付通道未配置,请联系平台管理员完成支付接入。');
     }
-    await this.airwallex.ensurePaymentMethodAvailable();
+    if (provider === 'airwallex') await this.airwallex.ensurePaymentMethodAvailable();
     const tier = await this.prisma.quotaPricingTier.findUnique({ where: { id: args.tierId } });
     if (!tier || !tier.active) throw new BadRequestException('该档位不可用');
 
@@ -190,7 +196,7 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
         amountUsd,
         amountCny,
         fxRate: fx.rate,
-        provider: 'airwallex',
+        provider,
         // Start with our merchant reference so the row exists before the
         // provider call. It is replaced by the PaymentIntent ID immediately
         // after creation, before the browser can enter checkout.
@@ -198,6 +204,25 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
         createdBy: args.userId,
       },
     });
+
+    if (provider === 'shouqianba') {
+      const apiBase = this.config.getOrThrow<string>('API_BASE_URL');
+      const qrCode = await this.shouqianba.createQrCode({
+        outTradeNo: merchantOrderId,
+        totalAmountCny: amountCny,
+        subject: `SendMast 发送额度 +${tier.emails.toLocaleString('en-US')}`,
+        notifyUrl: `${apiBase}/api/payments/shouqianba/notify`,
+        payway: args.channel === 'wechat' ? '3' : '1',
+      });
+      return {
+        provider: 'shouqianba',
+        orderId: merchantOrderId,
+        qrCode,
+        channel: args.channel,
+        amountCny,
+        amountUsd,
+      };
+    }
 
     const webBase = this.config.getOrThrow<string>('WEB_BASE_URL');
     let intent;
@@ -225,6 +250,7 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
     }
 
     return {
+      provider: 'airwallex',
       orderId: intent.id,
       clientSecret: intent.clientSecret,
       currency: 'CNY',
@@ -425,9 +451,7 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
     if (!intent) return;
 
     if (intent.status === 'SUCCEEDED') {
-      const expectedAmount = Number(
-        (order.amountCny as { toString(): string }).toString(),
-      );
+      const expectedAmount = Number((order.amountCny as { toString(): string }).toString());
       if (intent.currency !== 'CNY' || Math.abs(intent.amount - expectedAmount) > 0.001) {
         this.logger.error(
           `Airwallex amount mismatch for ${order.providerOrderId}: ` +

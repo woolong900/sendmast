@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { init as initAirwallex } from '@airwallex/components-sdk';
-import { Loader2, X } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import { CheckCircle2, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
@@ -10,6 +11,8 @@ import { cn, formatNumber } from '@/lib/utils';
 import type {
   CreateQuotaOrderResponse,
   FxRateView,
+  PaymentChannel,
+  QuotaOrderView,
   QuotaPricingTierView,
 } from '@sendmast/shared';
 
@@ -21,14 +24,16 @@ interface Props {
 }
 
 /**
- * Self-service top-up modal. The API creates an Airwallex PaymentIntent,
- * then the browser redirects to Airwallex Hosted Payment Page. Quota is
- * credited server-side from a verified webhook; the return page polls the
- * order briefly so the user sees the result immediately.
+ * The API chooses the configured payment provider. Shouqianba orders display
+ * a QR code here; Airwallex orders redirect to its hosted checkout.
  */
 export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
   const toast = useToast();
+  const qc = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
+  const [channel, setChannel] = useState<PaymentChannel>('alipay');
+  const [order, setOrder] = useState<CreateQuotaOrderResponse | null>(null);
+  const qrOrder = order?.provider === 'shouqianba' ? order : null;
 
   const { data: tiers, isLoading } = useQuery<QuotaPricingTierView[]>({
     queryKey: ['quota-tiers'],
@@ -57,6 +62,8 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
   useEffect(() => {
     if (!open) {
       setSelected(null);
+      setChannel('alipay');
+      setOrder(null);
     }
   }, [open]);
 
@@ -70,10 +77,15 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  const orderMut = useMutation<CreateQuotaOrderResponse, unknown, { tierId: string }>({
+  const orderMut = useMutation<
+    CreateQuotaOrderResponse,
+    unknown,
+    { tierId: string; channel: PaymentChannel }
+  >({
     mutationFn: async (vars) => {
-      const order = (await api.post('/api/quota-orders', vars))
-        .data as CreateQuotaOrderResponse;
+      const order = (await api.post('/api/quota-orders', vars)).data as CreateQuotaOrderResponse;
+      if (order.provider === 'shouqianba') return order;
+
       const { payments } = await initAirwallex({
         env: order.environment,
         locale: 'zh',
@@ -97,8 +109,28 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
       if (typeof error === 'string' && error) throw new Error(error);
       return order;
     },
+    onSuccess: (created) => {
+      if (created.provider === 'shouqianba') setOrder(created);
+    },
     onError: (err) => toast(`下单失败:${apiErrMessage(err)}`, 'error'),
   });
+
+  const { data: orderStatus } = useQuery<QuotaOrderView>({
+    queryKey: ['quota-order', qrOrder?.orderId],
+    queryFn: async () => (await api.get(`/api/quota-orders/${qrOrder!.orderId}`)).data,
+    enabled: Boolean(qrOrder),
+    refetchInterval: (query) =>
+      ['paid', 'failed', 'cancelled'].includes(query.state.data?.status ?? '') ? false : 2000,
+  });
+  const paid = orderStatus?.status === 'paid';
+
+  useEffect(() => {
+    if (!paid) return;
+    void qc.invalidateQueries({ queryKey: ['me', 'quota'] });
+    void qc.invalidateQueries({ queryKey: ['quota-orders'] });
+    const timer = window.setTimeout(onClose, 1500);
+    return () => window.clearTimeout(timer);
+  }, [paid, qc, onClose]);
 
   const selectedTier = useMemo(
     () => tiers?.find((t) => t.id === selected) ?? null,
@@ -112,7 +144,10 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+      onClick={() => {
+        if (qrOrder && !paid) return;
+        onClose();
+      }}
     >
       <div
         role="dialog"
@@ -125,11 +160,15 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
       >
         <div className="flex items-start justify-between border-b px-6 py-4">
           <div>
-            <h2 className="text-lg font-semibold">
-              升级套餐
-            </h2>
+            <h2 className="text-lg font-semibold">{qrOrder ? '扫码支付' : '升级套餐'}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {currentRemaining !== undefined ? (
+              {qrOrder ? (
+                paid ? (
+                  '支付成功,额度已到账'
+                ) : (
+                  `请使用${qrOrder.channel === 'wechat' ? '微信' : '支付宝'}扫描二维码付款`
+                )
+              ) : currentRemaining !== undefined ? (
                 <>
                   您当前剩余{' '}
                   <span className="font-semibold tabular-nums text-foreground">
@@ -152,19 +191,25 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
           </button>
         </div>
 
-        <SelectStep
-          tiers={tiers}
-          isLoading={isLoading}
-          selected={selected}
-          onSelect={setSelected}
-          selectedTier={selectedTier}
-          selectedCny={selectedCny}
-          fx={fx}
-          fxFetchedDate={fxFetchedDate}
-          submitting={orderMut.isPending}
-          onSubmit={() => selected && orderMut.mutate({ tierId: selected })}
-          onCancel={onClose}
-        />
+        {qrOrder ? (
+          <QrStep order={qrOrder} paid={paid} onClose={onClose} />
+        ) : (
+          <SelectStep
+            tiers={tiers}
+            isLoading={isLoading}
+            selected={selected}
+            onSelect={setSelected}
+            channel={channel}
+            onChannelChange={setChannel}
+            selectedTier={selectedTier}
+            selectedCny={selectedCny}
+            fx={fx}
+            fxFetchedDate={fxFetchedDate}
+            submitting={orderMut.isPending}
+            onSubmit={() => selected && orderMut.mutate({ tierId: selected, channel })}
+            onCancel={onClose}
+          />
+        )}
       </div>
     </div>,
     document.body,
@@ -180,6 +225,8 @@ function SelectStep({
   isLoading,
   selected,
   onSelect,
+  channel,
+  onChannelChange,
   selectedTier,
   selectedCny,
   fx,
@@ -192,6 +239,8 @@ function SelectStep({
   isLoading: boolean;
   selected: string | null;
   onSelect: (id: string) => void;
+  channel: PaymentChannel;
+  onChannelChange: (channel: PaymentChannel) => void;
   selectedTier: QuotaPricingTierView | null;
   selectedCny: number | null;
   fx: FxRateView | undefined;
@@ -249,7 +298,7 @@ function SelectStep({
         <aside className="rounded-lg bg-muted/30 p-4">
           <div className="mb-3 text-sm font-semibold">购买说明</div>
           <ol className="list-decimal space-y-2 pl-4 text-xs leading-relaxed text-muted-foreground">
-            <li>选择档位后将跳转至空中云汇安全收银台完成付款。</li>
+            <li>选择档位和支付方式后,生成对应的付款二维码。</li>
             <li>支付成功后,所购买的发送额度将立即添加到您的账户。</li>
             <li>额度永久有效,不会过期 —— 用多少扣多少。</li>
             <li>如有支付问题或想要批量采购,请联系平台管理员。</li>
@@ -257,8 +306,23 @@ function SelectStep({
 
           <div className="mt-4 border-t pt-3">
             <div className="mb-2 text-xs font-semibold text-muted-foreground">支付方式</div>
-            <div className="text-xs leading-relaxed text-muted-foreground">
-              支持空中云汇收银台已启用的银行卡及本地支付方式。
+            <div className="inline-flex rounded-md border bg-background p-1">
+              {(['alipay', 'wechat'] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => onChannelChange(value)}
+                  className={cn(
+                    'rounded px-3 py-1.5 text-xs font-medium transition-colors',
+                    channel === value
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {value === 'alipay' ? '支付宝' : '微信'}
+                </button>
+              ))}
             </div>
           </div>
         </aside>
@@ -304,14 +368,55 @@ function SelectStep({
             {submitting ? (
               <>
                 <Loader2 className="mr-1 size-4 animate-spin" />
-                正在跳转
+                生成二维码中
               </>
             ) : (
-              '前往支付'
+              '立即支付'
             )}
           </Button>
         </div>
       </div>
     </>
+  );
+}
+
+function QrStep({
+  order,
+  paid,
+  onClose,
+}: {
+  order: Extract<CreateQuotaOrderResponse, { provider: 'shouqianba' }>;
+  paid: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-4 p-8">
+      <div className="relative rounded-lg border bg-white p-4">
+        <QRCodeSVG value={order.qrCode} size={220} level="M" />
+        {paid && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/95">
+            <CheckCircle2 className="size-20 text-emerald-500" strokeWidth={1.5} />
+          </div>
+        )}
+      </div>
+      <div className="text-center">
+        <div className="text-2xl font-semibold tabular-nums">¥{order.amountCny.toFixed(2)}</div>
+        <div className="mt-1 text-xs text-muted-foreground">≈ US${order.amountUsd.toFixed(2)}</div>
+      </div>
+      <div className="text-sm font-medium">
+        {paid ? (
+          <span className="text-emerald-600">支付成功,额度已到账</span>
+        ) : (
+          <span className="flex items-center gap-2 text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            等待扫码支付…
+          </span>
+        )}
+      </div>
+      <div className="text-xs text-muted-foreground">订单号: {order.orderId}</div>
+      <Button variant="outline" size="sm" onClick={onClose}>
+        {paid ? '关闭' : '取消'}
+      </Button>
+    </div>
   );
 }

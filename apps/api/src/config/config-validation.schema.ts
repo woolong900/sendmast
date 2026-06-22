@@ -74,6 +74,10 @@ const ConfigSchema = z
     SHOUQIANBA_TERMINAL_SN: z.string().optional(),
     SHOUQIANBA_TERMINAL_KEY: z.string().optional(),
 
+    // Switches new quota orders only. Existing pending orders continue to be
+    // reconciled with the provider recorded on each order.
+    QUOTA_PAYMENT_PROVIDER: z.enum(['shouqianba', 'airwallex']).default('shouqianba'),
+
     // Airwallex hosted checkout for new self-service quota top-ups. API
     // credentials remain server-side; only PaymentIntent client secrets are
     // returned to the browser for the provider-hosted checkout session.
