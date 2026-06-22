@@ -28,8 +28,7 @@ export class AirwallexService {
   isConfigured(): boolean {
     return Boolean(
       this.config.get<string>('AIRWALLEX_CLIENT_ID') &&
-        this.config.get<string>('AIRWALLEX_API_KEY') &&
-        this.config.get<string>('AIRWALLEX_WEBHOOK_SECRET'),
+        this.config.get<string>('AIRWALLEX_API_KEY'),
     );
   }
 
