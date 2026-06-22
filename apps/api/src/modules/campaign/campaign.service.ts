@@ -5,6 +5,8 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { Response } from 'express';
+import ExcelJS from 'exceljs';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueueService } from '../../common/queue/queue.service';
 import { ClickHouseService } from '../../common/clickhouse/clickhouse.service';
@@ -18,6 +20,7 @@ import {
   type ListCampaignsQuery,
   type ListRecipientsQuery,
   type ListRecipientsResponse,
+  type RecipientDimension,
   type RecipientView,
   type UpdateCampaignInput,
 } from '@sendmast/shared';
@@ -25,6 +28,139 @@ import {
 interface ContactNamePair {
   firstName: string | null;
   lastName: string | null;
+}
+
+type RecipientPageQuery = ListRecipientsQuery & { skipTotal?: boolean };
+
+const RECIPIENT_EXPORT_COLUMNS: Record<
+  RecipientDimension,
+  Array<{ header: string; value: (row: RecipientView) => unknown }>
+> = {
+  sent: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: '发送时间', value: (r) => dateCell(r.eventTime) },
+  ],
+  delivered: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: '送达时间', value: (r) => dateCell(r.eventTime) },
+  ],
+  pending: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: '发送时间', value: (r) => dateCell(r.eventTime) },
+  ],
+  opened: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: 'User Agent', value: (r) => r.userAgent },
+    { header: '送达时间', value: (r) => dateCell(r.deliveredAt) },
+    { header: '打开时间', value: (r) => dateCell(r.eventTime) },
+  ],
+  clicked: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: 'User Agent', value: (r) => r.userAgent },
+    { header: '发送时间', value: (r) => dateCell(r.sentAt) },
+    { header: '点击时间', value: (r) => dateCell(r.eventTime) },
+    { header: 'URL', value: (r) => r.linkUrl },
+  ],
+  sales: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: '订单号', value: (r) => r.orderNo ?? r.id },
+    { header: '金额', value: (r) => r.orderAmount },
+    { header: '币种', value: (r) => r.orderCurrency },
+    { header: '下单时间', value: (r) => dateCell(r.eventTime) },
+  ],
+  failed: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: '失败原因', value: (r) => r.errorMessage },
+    { header: '失败时间', value: (r) => dateCell(r.eventTime) },
+  ],
+  invalid: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: '原因', value: (r) => r.reason },
+    { header: '失效时间', value: (r) => dateCell(r.eventTime) },
+  ],
+  unsubscribed: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: '退订时间', value: (r) => dateCell(r.eventTime) },
+    { header: '退订原因', value: (r) => r.reason },
+  ],
+  bounced: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: '弹回类型', value: (r) => r.bounceType },
+    { header: '弹回原因', value: (r) => r.reason },
+    { header: '发送时间', value: (r) => dateCell(r.sentAt) },
+  ],
+  complained: [
+    { header: '姓名', value: recipientDisplayName },
+    { header: '邮箱', value: (r) => r.email },
+    { header: '投诉原因', value: (r) => r.reason },
+    { header: '发送时间', value: (r) => dateCell(r.sentAt) },
+  ],
+};
+
+const RECIPIENT_EXPORT_SHEETS: Array<{ dimension: RecipientDimension; name: string }> = [
+  { dimension: 'sent', name: '发送' },
+  { dimension: 'delivered', name: '送达' },
+  { dimension: 'pending', name: '投递中' },
+  { dimension: 'opened', name: '打开' },
+  { dimension: 'clicked', name: '点击' },
+  { dimension: 'sales', name: '销售额' },
+  { dimension: 'failed', name: '发送失败' },
+  { dimension: 'invalid', name: '无效邮箱' },
+  { dimension: 'unsubscribed', name: '退订' },
+  { dimension: 'bounced', name: '弹回' },
+];
+
+function recipientDisplayName(row: RecipientView): string {
+  return [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || row.email.split('@')[0];
+}
+
+function dateCell(value: string | null): Date | null {
+  return value ? new Date(value) : null;
+}
+
+function exportColumnWidth(header: string): number {
+  if (header === '邮箱' || header === 'URL' || header.includes('原因')) return 36;
+  if (header.includes('时间')) return 22;
+  if (header === 'User Agent') return 48;
+  if (header === '订单号') return 24;
+  return 16;
+}
+
+function excelColumnName(index: number): string {
+  let value = index;
+  let result = '';
+  while (value > 0) {
+    value -= 1;
+    result = String.fromCharCode(65 + (value % 26)) + result;
+    value = Math.floor(value / 26);
+  }
+  return result;
+}
+
+function encodeTimeCursor(time: string, id: string): string {
+  return Buffer.from(JSON.stringify([time, id]), 'utf8').toString('base64url');
+}
+
+function decodeTimeCursor(cursor: string): { time: string; id: string | null } {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as unknown;
+    if (Array.isArray(parsed) && typeof parsed[0] === 'string' && typeof parsed[1] === 'string') {
+      return { time: parsed[0], id: parsed[1] };
+    }
+  } catch {
+    // Older links used the timestamp itself as the cursor.
+  }
+  return { time: cursor, id: null };
 }
 
 function toRecipientView(
@@ -55,11 +191,7 @@ function toRecipientView(
     eventTime instanceof Date
       ? eventTime.toISOString()
       : (eventTime ??
-        (r.sentAt
-          ? r.sentAt.toISOString()
-          : r.updatedAt
-            ? r.updatedAt.toISOString()
-            : null));
+        (r.sentAt ? r.sentAt.toISOString() : r.updatedAt ? r.updatedAt.toISOString() : null));
   return {
     id: r.id,
     email: r.email,
@@ -111,9 +243,7 @@ function parseRawMetaReason(rawMeta: string | null): {
         ? obj.deliveryStatusDetails.statusMessage
         : null;
     const selfReason =
-      typeof obj.reason === 'string' && obj.reason.trim().length > 0
-        ? obj.reason
-        : null;
+      typeof obj.reason === 'string' && obj.reason.trim().length > 0 ? obj.reason : null;
     return { bounceType: status, reason: acsReason ?? selfReason };
   } catch {
     return { bounceType: null, reason: null };
@@ -135,9 +265,7 @@ async function fetchContactNames(
     where: { id: { in: contactIds } },
     select: { id: true, firstName: true, lastName: true },
   });
-  return new Map(
-    contacts.map((c) => [c.id, { firstName: c.firstName, lastName: c.lastName }]),
-  );
+  return new Map(contacts.map((c) => [c.id, { firstName: c.firstName, lastName: c.lastName }]));
 }
 
 /**
@@ -232,7 +360,10 @@ export class CampaignService {
       this.prisma.campaign.count({ where }),
     ]);
 
-    const stats = await this.collectListStats(accountId, rows.map((r) => r.id));
+    const stats = await this.collectListStats(
+      accountId,
+      rows.map((r) => r.id),
+    );
     const items = rows.map((r) => ({
       ...r,
       lists: r.lists.map((cl) => cl.list),
@@ -334,7 +465,7 @@ export class CampaignService {
   async listRecipients(
     accountId: string,
     campaignId: string,
-    query: ListRecipientsQuery,
+    query: RecipientPageQuery,
   ): Promise<ListRecipientsResponse> {
     // Tenant scoping: confirm the campaign belongs to this account before
     // anything else, otherwise we'd leak archived data across tenants.
@@ -362,7 +493,14 @@ export class CampaignService {
       return { source: 'events', rows: [], nextCursor: null, total: 0 };
     }
     if (softenBounce && query.dimension === 'delivered') {
-      return this.listRecipientsFromEvents(accountId, campaignId, query, 'delivered', undefined, true);
+      return this.listRecipientsFromEvents(
+        accountId,
+        campaignId,
+        query,
+        'delivered',
+        undefined,
+        true,
+      );
     }
 
     // Event-based dimensions (delivered/open/click/bounce/...) are answered
@@ -397,19 +535,93 @@ export class CampaignService {
     const excludeBounced = query.dimension === 'failed';
 
     return archived
-      ? this.listRecipientsFromArchive(
-          accountId,
-          campaignId,
-          query,
-          status,
-          excludeBounced,
-        )
+      ? this.listRecipientsFromArchive(accountId, campaignId, query, status, excludeBounced)
       : this.listRecipientsFromHot(campaignId, query, status, excludeBounced);
+  }
+
+  /** Stream one XLSX workbook containing every visible recipient-detail tab. */
+  async exportRecipientsToXlsx(
+    accountId: string,
+    campaignId: string,
+    res: Response,
+  ): Promise<void> {
+    const campaign = await this.prisma.campaign.findFirst({
+      where: { id: campaignId, accountId },
+      select: { name: true, account: { select: { isCollaborator: true } } },
+    });
+    if (!campaign) throw new NotFoundException('活动不存在');
+
+    const filename = `${campaign.name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'campaign'}-活动明细.xlsx`;
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="campaign-details.xlsx"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
+
+    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+      stream: res,
+      useStyles: true,
+      useSharedStrings: true,
+    });
+    workbook.creator = 'SendMast';
+    workbook.created = new Date();
+
+    const sheets = RECIPIENT_EXPORT_SHEETS.filter(
+      (sheet) => campaign.account.isCollaborator || sheet.dimension !== 'bounced',
+    );
+    for (const sheetConfig of sheets) {
+      const columns = RECIPIENT_EXPORT_COLUMNS[sheetConfig.dimension];
+      const sheet = workbook.addWorksheet(sheetConfig.name, {
+        views: [{ state: 'frozen', ySplit: 1 }],
+      });
+      sheet.columns = columns.map((column) => ({
+        header: column.header,
+        key: column.header,
+        width: exportColumnWidth(column.header),
+      }));
+      sheet.autoFilter = { from: 'A1', to: `${excelColumnName(columns.length)}1` };
+      const header = sheet.getRow(1);
+      header.height = 24;
+      header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+      header.alignment = { vertical: 'middle' };
+      header.commit();
+
+      let cursor: string | undefined;
+      for (;;) {
+        const page = await this.listRecipients(accountId, campaignId, {
+          dimension: sheetConfig.dimension,
+          pageSize: 200,
+          cursor,
+          skipTotal: true,
+        });
+        for (const recipient of page.rows) {
+          const row = sheet.addRow(columns.map((column) => column.value(recipient)));
+          row.eachCell((cell, columnNumber) => {
+            const title = columns[columnNumber - 1]?.header ?? '';
+            cell.alignment = {
+              vertical: 'top',
+              wrapText: title.includes('原因') || title === 'URL',
+            };
+            if (cell.value instanceof Date) cell.numFmt = 'yyyy-mm-dd hh:mm:ss';
+            if (title === '金额') cell.numFmt = '#,##0.00';
+          });
+          row.commit();
+        }
+        cursor = page.nextCursor ?? undefined;
+        if (!cursor) break;
+      }
+      sheet.commit();
+    }
+    await workbook.commit();
   }
 
   private async listRecipientsFromHot(
     campaignId: string,
-    q: ListRecipientsQuery,
+    q: RecipientPageQuery,
     status: 'sent' | 'failed' | 'pending' | 'queued' | 'skipped' | undefined,
     excludeBounced = false,
   ): Promise<ListRecipientsResponse> {
@@ -425,8 +637,8 @@ export class CampaignService {
     // We do a small COUNT here so the UI can show a total. Cheap because
     // (campaign_id, status) is well-indexed and per-campaign cardinality is
     // bounded; if you ever see this in slow logs swap it for an estimate.
-    const [total, rows] = await this.prisma.$transaction([
-      this.prisma.campaignRecipient.count({ where }),
+    const [total, rows] = await Promise.all([
+      q.skipTotal ? Promise.resolve(null) : this.prisma.campaignRecipient.count({ where }),
       this.prisma.campaignRecipient.findMany({
         where,
         orderBy: { id: 'asc' },
@@ -452,7 +664,7 @@ export class CampaignService {
   private async listRecipientsFromArchive(
     accountId: string,
     campaignId: string,
-    q: ListRecipientsQuery,
+    q: RecipientPageQuery,
     status: 'sent' | 'failed' | 'pending' | 'queued' | 'skipped' | undefined,
     excludeBounced = false,
   ): Promise<ListRecipientsResponse> {
@@ -504,12 +716,14 @@ export class CampaignService {
       ),
       // Total over the full filter (sans cursor) so the footer "共 N 条" matches
       // the hot PG path, which also returns a total.
-      this.ch.query<{ n: string }>(
-        `SELECT toString(count()) AS n
-         FROM sendmast.campaign_recipients_archive FINAL
-         WHERE ${filter}`,
-        params,
-      ),
+      q.skipTotal
+        ? Promise.resolve(null)
+        : this.ch.query<{ n: string }>(
+            `SELECT toString(count()) AS n
+             FROM sendmast.campaign_recipients_archive FINAL
+             WHERE ${filter}`,
+            params,
+          ),
     ]);
     const hasMore = rows.length > q.pageSize;
     const page = hasMore ? rows.slice(0, q.pageSize) : rows;
@@ -533,7 +747,7 @@ export class CampaignService {
         bounceType: null,
       })),
       nextCursor: hasMore ? page[page.length - 1].id : null,
-      total: Number(totalRows[0]?.n ?? 0),
+      total: totalRows ? Number(totalRows[0]?.n ?? 0) : null,
     };
   }
 
@@ -543,10 +757,8 @@ export class CampaignService {
    * the eventTime column. For each recipient we then pull email + name from
    * PG (or fall back to the archive table when the recipient row is gone).
    *
-   * Pagination uses the latest event_time as a (non-strict) cursor; this is
-   * good enough for human browsing but may double-count an edge row across
-   * pages if many events share the same millisecond. Acceptable trade-off
-   * for the UI that paginates 50–100 rows at a time.
+   * Pagination uses a stable (latest event_time, recipient_id) cursor so
+   * same-millisecond batch events are neither skipped nor duplicated.
    */
   /**
    * 投递中 list: 尚未交给 ACS 的待发送收件人 (status pending|queued)。纯 PG 查询 —
@@ -555,14 +767,14 @@ export class CampaignService {
    */
   private async listPendingRecipients(
     campaignId: string,
-    q: ListRecipientsQuery,
+    q: RecipientPageQuery,
   ): Promise<ListRecipientsResponse> {
     const where: Prisma.CampaignRecipientWhereInput = {
       campaignId,
       status: { in: ['pending', 'queued'] },
     };
-    const [total, rows] = await this.prisma.$transaction([
-      this.prisma.campaignRecipient.count({ where }),
+    const [total, rows] = await Promise.all([
+      q.skipTotal ? Promise.resolve(null) : this.prisma.campaignRecipient.count({ where }),
       this.prisma.campaignRecipient.findMany({
         where,
         orderBy: { id: 'asc' },
@@ -593,7 +805,7 @@ export class CampaignService {
   private async listSalesRecipients(
     accountId: string,
     campaignId: string,
-    q: ListRecipientsQuery,
+    q: RecipientPageQuery,
   ): Promise<ListRecipientsResponse> {
     const params: Record<string, unknown> = {
       acc: accountId,
@@ -602,8 +814,14 @@ export class CampaignService {
     };
     let cursorClause = '';
     if (q.cursor) {
-      cursorClause = 'AND order_time < parseDateTime64BestEffort({cursor:String}, 3)';
-      params.cursor = q.cursor;
+      const cursor = decodeTimeCursor(q.cursor);
+      cursorClause = cursor.id
+        ? `AND (order_time < parseDateTime64BestEffort({cursorTime:String}, 3)
+             OR (order_time = parseDateTime64BestEffort({cursorTime:String}, 3)
+                 AND external_order_id < {cursorId:String}))`
+        : 'AND order_time < parseDateTime64BestEffort({cursorTime:String}, 3)';
+      params.cursorTime = cursor.time;
+      if (cursor.id) params.cursorId = cursor.id;
     }
     let rows: Array<{
       external_order_id: string;
@@ -627,18 +845,20 @@ export class CampaignService {
            FROM sendmast.orders FINAL
            WHERE account_id = {acc:UUID} AND attributed_campaign_id = {cid:UUID}
            ${cursorClause}
-           ORDER BY order_time DESC
+           ORDER BY order_time DESC, external_order_id DESC
            LIMIT {lim:UInt32}`,
           params,
         ),
-        this.ch
-          .query<{ n: string }>(
-            `SELECT toString(count()) AS n
-             FROM sendmast.orders FINAL
-             WHERE account_id = {acc:UUID} AND attributed_campaign_id = {cid:UUID}`,
-            { acc: accountId, cid: campaignId },
-          )
-          .then((r) => Number(r[0]?.n ?? 0)),
+        q.skipTotal
+          ? Promise.resolve(null)
+          : this.ch
+              .query<{ n: string }>(
+                `SELECT toString(count()) AS n
+                 FROM sendmast.orders FINAL
+                 WHERE account_id = {acc:UUID} AND attributed_campaign_id = {cid:UUID}`,
+                { acc: accountId, cid: campaignId },
+              )
+              .then((r) => Number(r[0]?.n ?? 0)),
       ]);
     } catch (err) {
       // CH unavailable / table missing in dev → behave like an empty list.
@@ -718,7 +938,12 @@ export class CampaignService {
           orderCurrency: r.currency,
         };
       }),
-      nextCursor: hasMore ? page[page.length - 1].order_time : null,
+      nextCursor: hasMore
+        ? encodeTimeCursor(
+            page[page.length - 1].order_time,
+            page[page.length - 1].external_order_id,
+          )
+        : null,
       total,
     };
   }
@@ -726,7 +951,7 @@ export class CampaignService {
   private async listRecipientsFromEvents(
     accountId: string,
     campaignId: string,
-    q: ListRecipientsQuery,
+    q: RecipientPageQuery,
     eventType: string,
     bounceKindFilter?: 'hard' | 'soft',
     // Softened 送达 view (normal tenants): match delivered events PLUS non-hard
@@ -742,8 +967,14 @@ export class CampaignService {
     };
     let cursorClause = '';
     if (q.cursor) {
-      cursorClause = 'AND ts < parseDateTime64BestEffort({cursor:String}, 3)';
-      params.cursor = q.cursor;
+      const cursor = decodeTimeCursor(q.cursor);
+      cursorClause = cursor.id
+        ? `AND (ts < parseDateTime64BestEffort({cursorTime:String}, 3)
+             OR (ts = parseDateTime64BestEffort({cursorTime:String}, 3)
+                 AND recipient_id < {cursorId:UUID}))`
+        : 'AND ts < parseDateTime64BestEffort({cursorTime:String}, 3)';
+      params.cursorTime = cursor.time;
+      if (cursor.id) params.cursorId = cursor.id;
     }
     // The full event-match predicate, reused by both the page and the count
     // query below so they always agree.
@@ -795,21 +1026,23 @@ export class CampaignService {
              AND ${eventClause}
            GROUP BY recipient_id
            HAVING 1=1 ${cursorClause}
-           ORDER BY ts DESC
+           ORDER BY ts DESC, recipient_id DESC
            LIMIT {lim:UInt32}`,
           params,
         ),
-        this.ch.query<{ total: string }>(
-          `SELECT toString(uniqExact(recipient_id)) AS total
-           FROM sendmast.email_events
-           WHERE account_id = {acc:UUID}
-             AND campaign_id = {cid:UUID}
-             AND ${eventClause}`,
-          params,
-        ),
+        q.skipTotal
+          ? Promise.resolve(null)
+          : this.ch.query<{ total: string }>(
+              `SELECT toString(uniqExact(recipient_id)) AS total
+               FROM sendmast.email_events
+               WHERE account_id = {acc:UUID}
+                 AND campaign_id = {cid:UUID}
+                 AND ${eventClause}`,
+              params,
+            ),
       ]);
       rows = rowsRes;
-      total = Number(countRes[0]?.total ?? 0);
+      total = countRes ? Number(countRes[0]?.total ?? 0) : null;
     } catch (err) {
       // ClickHouse unreachable → degrade to empty rather than 500. The UI
       // already shows the analytics card so users know events exist.
@@ -870,9 +1103,7 @@ export class CampaignService {
       }
     }
 
-    const contactIds = [...byId.values()]
-      .map((m) => m.contactId)
-      .filter((x): x is string => !!x);
+    const contactIds = [...byId.values()].map((m) => m.contactId).filter((x): x is string => !!x);
     const names = await fetchContactNames(this.prisma, contactIds);
 
     // For the 'opened' tab the UI shows a "送达时间" column. We need to fetch
@@ -903,7 +1134,7 @@ export class CampaignService {
       const sentAtIso =
         meta?.sentAt instanceof Date
           ? meta.sentAt.toISOString()
-          : (meta?.sentAt as string | null) ?? null;
+          : ((meta?.sentAt as string | null) ?? null);
       const parsed = parseRawMetaReason(r.raw_meta);
       // Prefer the dedicated bounce_kind column when present (set by the
       // webhook layer); fall back to the raw status string for older rows
@@ -940,7 +1171,9 @@ export class CampaignService {
     return {
       source: 'events',
       rows: view,
-      nextCursor: hasMore ? page[page.length - 1].ts : null,
+      nextCursor: hasMore
+        ? encodeTimeCursor(page[page.length - 1].ts, page[page.length - 1].recipient_id)
+        : null,
       total,
     };
   }
@@ -1016,7 +1249,11 @@ export class CampaignService {
       const key = s.fromEmail.trim().toLowerCase();
       if (!key || seen.has(key)) continue;
       seen.add(key);
-      out.push({ fromEmail: s.fromEmail.trim(), fromName: s.fromName.trim(), position: out.length });
+      out.push({
+        fromEmail: s.fromEmail.trim(),
+        fromName: s.fromName.trim(),
+        position: out.length,
+      });
     }
     return out;
   }
@@ -1095,18 +1332,12 @@ export class CampaignService {
       designJson = resolved.designJson;
     }
 
-    await this.assertTargetsExist(
-      accountId,
-      input.listIds ?? [],
-      input.segmentIds ?? [],
-    );
+    await this.assertTargetsExist(accountId, input.listIds ?? [], input.segmentIds ?? []);
 
     // Recompute the sender roster only when the caller touched sender fields.
     // A metadata-only PATCH (e.g. renaming the campaign) leaves senders alone.
     const touchedSenders =
-      input.senders !== undefined ||
-      input.fromEmail !== undefined ||
-      input.fromName !== undefined;
+      input.senders !== undefined || input.fromEmail !== undefined || input.fromName !== undefined;
     const senders = touchedSenders
       ? this.senderRoster({
           fromEmail: input.fromEmail ?? c.fromEmail,
@@ -1229,9 +1460,7 @@ export class CampaignService {
       select: { sendQuotaRemaining: true },
     });
     if (!account || account.sendQuotaRemaining <= 0) {
-      throw new BadRequestException(
-        '发送额度为 0,无法发送活动。请先购买额度。',
-      );
+      throw new BadRequestException('发送额度为 0,无法发送活动。请先购买额度。');
     }
 
     // Read-only pre-flight: validates fields that don't participate in the
@@ -1497,7 +1726,7 @@ export class CampaignService {
             return {
               id: c.id,
               email: c.email,
-              listName: firstListId ? listNameById.get(firstListId) ?? null : null,
+              listName: firstListId ? (listNameById.get(firstListId) ?? null) : null,
             };
           }),
         );
@@ -1515,10 +1744,7 @@ export class CampaignService {
         select: { definition: true },
       });
       if (!seg) continue;
-      const ids = await this.segments.resolveContactIds(
-        accountId,
-        seg.definition as never,
-      );
+      const ids = await this.segments.resolveContactIds(accountId, seg.definition as never);
       if (ids.size === 0) continue;
       const arr = [...ids];
       for (let i = 0; i < arr.length; i += BATCH) {
@@ -1614,7 +1840,10 @@ export class CampaignService {
   async duplicate(accountId: string, id: string) {
     const c = await this.prisma.campaign.findFirst({
       where: { id, accountId },
-      include: { lists: { orderBy: { position: 'asc' } }, senders: { orderBy: { position: 'asc' } } },
+      include: {
+        lists: { orderBy: { position: 'asc' } },
+        senders: { orderBy: { position: 'asc' } },
+      },
     });
     if (!c) throw new NotFoundException();
     const copy = await this.prisma.campaign.create({

@@ -9,8 +9,10 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -105,5 +107,14 @@ export class CampaignController {
     const r = ListRecipientsQuerySchema.safeParse(query);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
     return this.svc.listRecipients(user.accountId, id, r.data);
+  }
+
+  @Get(':id/recipients/export')
+  async exportRecipients(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Res() res: Response,
+  ) {
+    await this.svc.exportRecipientsToXlsx(user.accountId, id, res);
   }
 }

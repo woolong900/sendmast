@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Download, Loader2 } from 'lucide-react';
 import { UAParser } from 'ua-parser-js';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { api } from '@/lib/api';
+import { api, apiErrMessage } from '@/lib/api';
+import { useToast } from '@/components/ui/toast';
 import { useAuth } from '@/store/auth';
 import { cn, formatDateTime, formatNumber } from '@/lib/utils';
 import { EmptyStateRow } from '@/components/ui/empty-state';
@@ -152,16 +153,12 @@ const COL_EMAIL: Column = {
 const COL_DEVICE: Column = {
   header: '设备',
   className: 'w-32',
-  cell: (r) => (
-    <span className="text-muted-foreground">{parseUA(r.userAgent).device}</span>
-  ),
+  cell: (r) => <span className="text-muted-foreground">{parseUA(r.userAgent).device}</span>,
 };
 const COL_OS: Column = {
   header: '操作系统',
   className: 'w-32',
-  cell: (r) => (
-    <span className="text-muted-foreground">{parseUA(r.userAgent).os}</span>
-  ),
+  cell: (r) => <span className="text-muted-foreground">{parseUA(r.userAgent).os}</span>,
 };
 const COL_URL: Column = {
   header: 'URL',
@@ -233,9 +230,7 @@ const COL_TIME = (header: string, key: 'sentAt' | 'deliveredAt' | 'eventTime'): 
   header,
   className: 'w-44',
   cell: (r) => (
-    <span className="text-right tabular-nums text-muted-foreground">
-      {formatDateTime(r[key])}
-    </span>
+    <span className="text-right tabular-nums text-muted-foreground">{formatDateTime(r[key])}</span>
   ),
 });
 
@@ -262,24 +257,9 @@ const COLUMNS_BY_DIM: Record<Dimension, Column[]> = {
     COL_URL,
   ],
   sales: [COL_NAME, COL_EMAIL, COL_ORDER_NO, COL_ORDER_AMOUNT, COL_TIME('下单时间', 'eventTime')],
-  failed: [
-    COL_NAME,
-    COL_EMAIL,
-    COL_ERROR_MESSAGE('失败原因'),
-    COL_TIME('失败时间', 'eventTime'),
-  ],
-  invalid: [
-    COL_NAME,
-    COL_EMAIL,
-    COL_REASON('原因'),
-    COL_TIME('失效时间', 'eventTime'),
-  ],
-  unsubscribed: [
-    COL_NAME,
-    COL_EMAIL,
-    COL_TIME('退订时间', 'eventTime'),
-    COL_REASON('退订原因'),
-  ],
+  failed: [COL_NAME, COL_EMAIL, COL_ERROR_MESSAGE('失败原因'), COL_TIME('失败时间', 'eventTime')],
+  invalid: [COL_NAME, COL_EMAIL, COL_REASON('原因'), COL_TIME('失效时间', 'eventTime')],
+  unsubscribed: [COL_NAME, COL_EMAIL, COL_TIME('退订时间', 'eventTime'), COL_REASON('退订原因')],
   bounced: [
     COL_NAME,
     COL_EMAIL,
@@ -287,16 +267,13 @@ const COLUMNS_BY_DIM: Record<Dimension, Column[]> = {
     COL_REASON('弹回原因'),
     COL_TIME('发送时间', 'sentAt'),
   ],
-  complained: [
-    COL_NAME,
-    COL_EMAIL,
-    COL_REASON('投诉原因'),
-    COL_TIME('发送时间', 'sentAt'),
-  ],
+  complained: [COL_NAME, COL_EMAIL, COL_REASON('投诉原因'), COL_TIME('发送时间', 'sentAt')],
 };
 
 export function CampaignRecipientsPage() {
   const { id } = useParams<{ id: string }>();
+  const toast = useToast();
+  const [exporting, setExporting] = useState(false);
   const [params, setParams] = useSearchParams();
   // Normal tenants get the softened view: soft bounces are folded into 送达, so
   // the 弹回 tab is hidden (those recipients show under 送达). Collaborators see
@@ -306,10 +283,7 @@ export function CampaignRecipientsPage() {
   // 投诉 tab is always hidden: there's no complaint/FBL data source (ACS doesn't
   // emit it), so the list is permanently empty. 弹回 stays collaborator-only.
   const tabs = useMemo(
-    () =>
-      TABS.filter(
-        (t) => t.key !== 'complained' && (showBounceTab || t.key !== 'bounced'),
-      ),
+    () => TABS.filter((t) => t.key !== 'complained' && (showBounceTab || t.key !== 'bounced')),
     [showBounceTab],
   );
   const dimRaw = params.get('tab');
@@ -337,8 +311,7 @@ export function CampaignRecipientsPage() {
     // 上/下一页 doesn't flash). On a tab switch the dimension changes, so drop
     // the placeholder and show the loading skeleton instead of the old tab's
     // rows (which would briefly look like wrong data).
-    placeholderData: (prev, prevQuery) =>
-      prevQuery?.queryKey?.[2] === dim ? prev : undefined,
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey?.[2] === dim ? prev : undefined),
   });
 
   // Cursor-based pagination is forward-only (the API returns nextCursor), so
@@ -376,6 +349,35 @@ export function CampaignRecipientsPage() {
     goToCursor(prev || null);
   };
 
+  const exportAllDetails = async () => {
+    if (!id || exporting) return;
+    setExporting(true);
+    try {
+      const response = await api.get(`/api/campaigns/${id}/recipients/export`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const filename =
+        parseFilenameFromContentDisposition(
+          response.headers['content-disposition'] as string | undefined,
+        ) ?? `${detail.data?.name ?? 'campaign'}-活动明细.xlsx`;
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast(`导出失败:${apiErrMessage(error)}`, 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -386,10 +388,22 @@ export function CampaignRecipientsPage() {
         </Button>
         <h1 className="min-w-0 truncate text-xl font-semibold">活动明细数据</h1>
         {detail.data && (
-          <span className="truncate text-sm text-muted-foreground">
-            · {detail.data.name}
-          </span>
+          <span className="truncate text-sm text-muted-foreground">· {detail.data.name}</span>
         )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto shrink-0"
+          disabled={exporting}
+          onClick={() => void exportAllDetails()}
+        >
+          {exporting ? (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          ) : (
+            <Download className="mr-2 size-4" />
+          )}
+          {exporting ? '导出中' : '导出明细'}
+        </Button>
       </div>
 
       <Card>
@@ -429,10 +443,7 @@ export function CampaignRecipientsPage() {
                   {columns.map((c) => (
                     <th
                       key={c.header}
-                      className={cn(
-                        'px-3 py-3 text-left font-medium sm:px-6',
-                        c.className,
-                      )}
+                      className={cn('px-3 py-3 text-left font-medium sm:px-6', c.className)}
                     >
                       {c.header}
                     </th>
@@ -451,10 +462,7 @@ export function CampaignRecipientsPage() {
                     </tr>
                   ))}
                 {!list.isLoading && (list.data?.rows.length ?? 0) === 0 && (
-                  <EmptyStateRow
-                    colSpan={columns.length}
-                    title="暂无数据"
-                  />
+                  <EmptyStateRow colSpan={columns.length} title="暂无数据" />
                 )}
                 {list.data?.rows.map((r) => (
                   <tr key={r.id} className="border-t hover:bg-muted/30">
@@ -470,11 +478,7 @@ export function CampaignRecipientsPage() {
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs text-muted-foreground sm:px-6">
-            <div>
-              {list.data?.total != null
-                ? `共 ${formatNumber(list.data.total)} 条`
-                : ''}
-            </div>
+            <div>{list.data?.total != null ? `共 ${formatNumber(list.data.total)} 条` : ''}</div>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -498,4 +502,18 @@ export function CampaignRecipientsPage() {
       </Card>
     </div>
   );
+}
+
+function parseFilenameFromContentDisposition(header: string | undefined): string | null {
+  if (!header) return null;
+  const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1].trim());
+    } catch {
+      // Fall through to the ASCII filename.
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);
+  return plain?.[1]?.trim() ?? null;
 }
