@@ -6,6 +6,7 @@ import { UAParser } from 'ua-parser-js';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { api, apiErrMessage } from '@/lib/api';
+import { downloadCampaignDetails } from '@/lib/campaign-export';
 import { useToast } from '@/components/ui/toast';
 import { useAuth } from '@/store/auth';
 import { cn, formatDateTime, formatNumber } from '@/lib/utils';
@@ -353,24 +354,7 @@ export function CampaignRecipientsPage() {
     if (!id || exporting) return;
     setExporting(true);
     try {
-      const response = await api.get(`/api/campaigns/${id}/recipients/export`, {
-        responseType: 'blob',
-      });
-      const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      const url = URL.createObjectURL(blob);
-      const filename =
-        parseFilenameFromContentDisposition(
-          response.headers['content-disposition'] as string | undefined,
-        ) ?? `${detail.data?.name ?? 'campaign'}-活动明细.xlsx`;
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
+      await downloadCampaignDetails(id, detail.data?.name ?? 'campaign');
     } catch (error) {
       toast(`导出失败:${apiErrMessage(error)}`, 'error');
     } finally {
@@ -502,18 +486,4 @@ export function CampaignRecipientsPage() {
       </Card>
     </div>
   );
-}
-
-function parseFilenameFromContentDisposition(header: string | undefined): string | null {
-  if (!header) return null;
-  const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header);
-  if (encoded) {
-    try {
-      return decodeURIComponent(encoded[1].trim());
-    } catch {
-      // Fall through to the ASCII filename.
-    }
-  }
-  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header);
-  return plain?.[1]?.trim() ?? null;
 }

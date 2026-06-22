@@ -1,10 +1,13 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton, PageSkeleton } from '@/components/ui/skeleton';
-import { api } from '@/lib/api';
+import { api, apiErrMessage } from '@/lib/api';
+import { downloadCampaignDetails } from '@/lib/campaign-export';
+import { useToast } from '@/components/ui/toast';
 import { formatNumber, formatPercent } from '@/lib/utils';
 import { useAuth } from '@/store/auth';
 
@@ -80,6 +83,8 @@ function formatMoney(amount: number, currency: string): string {
 
 export function CampaignAnalyticsPage() {
   const { id } = useParams<{ id: string }>();
+  const toast = useToast();
+  const [exporting, setExporting] = useState(false);
   // Normal tenants get the softened view: soft bounces are folded into 送达 by
   // the backend, so we hide 弹回邮箱率 (it'd just mirror 无效邮箱率). Collaborators
   // see the real bounce rate. 无效邮箱率 (hard bounces) is shown for everyone.
@@ -143,6 +148,18 @@ export function CampaignAnalyticsPage() {
   const conversionRate = conversionBase > 0 ? sales.orders / conversionBase : 0;
   const utmRows = collectUtm(detail.data);
 
+  const exportDetails = async () => {
+    if (!id || exporting) return;
+    setExporting(true);
+    try {
+      await downloadCampaignDetails(id, detail.data.name);
+    } catch (error) {
+      toast(`导出失败:${apiErrMessage(error)}`, 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
@@ -152,6 +169,20 @@ export function CampaignAnalyticsPage() {
           </Link>
         </Button>
         <h1 className="min-w-0 truncate text-xl font-semibold">{detail.data.name}</h1>
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto shrink-0"
+          disabled={exporting}
+          onClick={() => void exportDetails()}
+        >
+          {exporting ? (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          ) : (
+            <Download className="mr-2 size-4" />
+          )}
+          {exporting ? '导出中' : '导出明细'}
+        </Button>
       </div>
 
       {/* Single outer card hosting all summary metrics + UTM */}
@@ -187,7 +218,8 @@ export function CampaignAnalyticsPage() {
 
           {/* 送达率与投递中口径不同,不可直接相加 —— 见用户反馈"加起来110%"。 */}
           <p className="px-1 text-xs text-muted-foreground">
-            送达率 = 送达 /（送达 + 弹回 + 失败），分母不含投递中；投递中 = 投递中 / 总投放。两者分母不同，不能直接相加。
+            送达率 = 送达 /（送达 + 弹回 + 失败），分母不含投递中；投递中 = 投递中 /
+            总投放。两者分母不同，不能直接相加。
           </p>
 
           {/* Row 2 — commerce metrics. The sales cards drill into the `sales`
@@ -414,11 +446,7 @@ function FunnelCell({ step, next }: { step: FunnelStep; next?: FunnelStep }) {
           </div>
         </div>
       </div>
-      <svg
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-        className="mt-3 block h-32 w-full"
-      >
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-3 block h-32 w-full">
         <rect x="0" y={top} width="50" height={100 - top} fill="currentColor" />
         <polygon
           points={`50,${top} 100,${nextTop} 100,100 50,100`}
