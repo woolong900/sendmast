@@ -59,7 +59,7 @@ export function QuotaPage() {
         <CardContent className="space-y-2 p-6 text-sm text-muted-foreground">
           <p className="font-medium text-foreground">额度说明</p>
           <ul className="list-disc space-y-1 pl-5">
-            <li>支持自助购买:点「购买额度」选择档位,使用支付宝或微信扫码付款后额度立即到账。</li>
+            <li>支持自助购买:点「购买额度」选择档位,前往空中云汇安全收银台付款后额度立即到账。</li>
             <li>每次发送邮件(无论成功失败)都会消耗 1 个额度。</li>
             <li>额度归零时,正在发送的活动会把剩余收件人标记为失败并结束。</li>
             <li>额度永久有效,不会过期。额度数字每 30 秒自动刷新一次。</li>

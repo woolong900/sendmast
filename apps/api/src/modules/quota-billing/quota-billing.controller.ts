@@ -37,7 +37,6 @@ export class QuotaBillingController {
       accountId: user.accountId,
       userId: user.userId,
       tierId: r.data.tierId,
-      channel: r.data.channel,
     });
   }
 
@@ -48,7 +47,7 @@ export class QuotaBillingController {
 
   /** Single-order lookup, used by the modal to poll a pending order's
    *  status while showing the QR code (every 2s until status flips to
-   *  `paid` via the Shouqianba notify webhook). */
+   *  `paid` via the Airwallex webhook). */
   @Get('quota-orders/:providerOrderId')
   getOrder(
     @Param('providerOrderId') providerOrderId: string,

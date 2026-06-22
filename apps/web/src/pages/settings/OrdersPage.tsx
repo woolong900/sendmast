@@ -17,9 +17,8 @@ import type { QuotaOrderView } from '@sendmast/shared';
  * and once an order flips to paid the modal invalidates this query as
  * it closes (see UpgradeQuotaModal).
  *
- * The `?tradeNo=<id>` URL param is supported for future redirect-back
- * flows (e.g. WeChat in-browser pay). Today's QR-scan flow doesn't use
- * it — the modal handles polling there.
+ * The `?tradeNo=<id>` URL param is used when Airwallex Hosted Payment Page
+ * redirects the buyer back after checkout.
  */
 export function OrdersPage() {
   const qc = useQueryClient();

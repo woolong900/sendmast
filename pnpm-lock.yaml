@@ -204,6 +204,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@airwallex/components-sdk':
+        specifier: 1.32.0
+        version: 1.32.0
       '@arco-design/web-react':
         specifier: ^2.66.15
         version: 2.66.15(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -276,9 +279,6 @@ importers:
       mjml-browser:
         specifier: ^4.18.0
         version: 4.18.0
-      qrcode.react:
-        specifier: ^4.2.0
-        version: 4.2.0(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -614,6 +614,12 @@ importers:
         version: 5.9.3
 
 packages:
+
+  '@airwallex/airtracker@3.2.0':
+    resolution: {integrity: sha512-PKE5N38ajTVg6ph9JzLpWsICNjqLtf/wWudNVU3UPX9SVy2I5s5ITc281sMSD8+LIE6RJoGjGTO+VYP/io5kig==}
+
+  '@airwallex/components-sdk@1.32.0':
+    resolution: {integrity: sha512-IRrYOyCIWw/cQcndm/n11zx8b7hj2wYF7TD2YLmds9lXIQoir214JF99i1QJAyMsRR//nIRkNFTB2Ta2/etYGw==}
 
   '@alloc/quick-lru@5.2.0':
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
@@ -5450,11 +5456,6 @@ packages:
   pure-rand@6.1.0:
     resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
 
-  qrcode.react@4.2.0:
-    resolution: {integrity: sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA==}
-    peerDependencies:
-      react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
   qs@6.14.2:
     resolution: {integrity: sha512-V/yCWTTF7VJ9hIh18Ugr2zhJMP01MY7c5kh4J870L7imm6/DIzBsNLTXzMwUA3yZ5b/KBqLx8Kp3uRvd7xSe3Q==}
     engines: {node: '>=0.6'}
@@ -6473,6 +6474,12 @@ packages:
         optional: true
 
 snapshots:
+
+  '@airwallex/airtracker@3.2.0': {}
+
+  '@airwallex/components-sdk@1.32.0':
+    dependencies:
+      '@airwallex/airtracker': 3.2.0
 
   '@alloc/quick-lru@5.2.0': {}
 
@@ -12470,10 +12477,6 @@ snapshots:
       - utf-8-validate
 
   pure-rand@6.1.0: {}
-
-  qrcode.react@4.2.0(react@18.3.1):
-    dependencies:
-      react: 18.3.1
 
   qs@6.14.2:
     dependencies:

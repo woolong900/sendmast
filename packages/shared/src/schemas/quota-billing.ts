@@ -4,10 +4,9 @@ import { z } from 'zod';
 // Pricing tiers (admin manages)
 // ----------------------------------------------------------------------------
 //
-// USD only on the tier table. The payment gateway (Shouqianba, fronting
-// Alipay/WeChat) only settles in CNY — we convert USD→CNY ourselves at
-// order creation using the FX rate from FxService and snapshot both
-// `amount_cny` and `fx_rate` onto the order for audit.
+// USD only on the tier table. Checkout is charged in CNY through Airwallex,
+// so we convert USD→CNY at order creation and snapshot both `amount_cny`
+// and `fx_rate` onto the order for audit.
 
 export const QuotaPricingTierInputSchema = z.object({
   emails: z.coerce.number().int().min(1),
@@ -32,31 +31,20 @@ export interface QuotaPricingTierView {
 // Orders (user creates, payment provider drives status)
 // ----------------------------------------------------------------------------
 
-/** Payment channel chosen by the user before placing the order. The
- *  precreate API returns a channel-specific QR — Alipay's QR is only
- *  scannable by the Alipay app, WeChat's only by WeChat. There is no
- *  "universal" QR available in 收钱吧's C-scan-B mode, so the modal must
- *  ask up front. */
-export type PaymentChannel = 'alipay' | 'wechat';
-
 export const CreateQuotaOrderSchema = z.object({
   tierId: z.string().uuid(),
-  channel: z.enum(['alipay', 'wechat']).default('alipay'),
 });
 export type CreateQuotaOrderInput = z.infer<typeof CreateQuotaOrderSchema>;
 
 export interface CreateQuotaOrderResponse {
+  /** Airwallex PaymentIntent ID; also used to poll our order status. */
   orderId: string;
-  /** Raw `qr_code` payload from Shouqianba's `/upay/v2/precreate` response.
-   *  For `channel='alipay'` it's `https://qr.alipay.com/...` and only the
-   *  Alipay app can scan it; for `channel='wechat'` it's a wxpay URL the
-   *  WeChat app handles. The frontend renders whichever it is. */
-  qrCode: string;
-  /** Echo of the channel the order was placed on, so the QR-code step
-   *  can show the right "请使用 {Alipay|WeChat} 扫码" instruction. */
-  channel: PaymentChannel;
-  /** CNY amount the user will pay (already converted from USD at the
-   *  current FX rate). Surfaced so the modal can show ¥X.XX next to the QR. */
+  /** Short-lived client credential for Airwallex Hosted Payment Page. */
+  clientSecret: string;
+  currency: 'CNY';
+  environment: 'demo' | 'prod';
+  successUrl: string;
+  /** CNY amount the user will pay, converted from USD at the current rate. */
   amountCny: number;
   /** USD price at the order's tier — useful for the modal subtitle. */
   amountUsd: number;
@@ -68,7 +56,7 @@ export interface QuotaOrderView {
   id: string;
   emails: number;
   amountUsd: number;
-  /** CNY actually charged via Shouqianba (gateway only settles in CNY). */
+  /** CNY actually charged through the payment gateway. */
   amountCny: number;
   /** USD→CNY rate snapshotted at order creation. */
   fxRate: number;

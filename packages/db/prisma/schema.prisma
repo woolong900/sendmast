@@ -94,8 +94,7 @@ model SystemSmtpConfig {
 
 /// Self-service quota top-up: 9-tier pricing table editable in admin UI.
 /// Each row is one purchasable bundle (emails + USD price). Pricing is
-/// USD only — the gateway (currently Shouqianba, fronting Alipay/WeChat)
-/// settles in CNY, so we convert USD→CNY at order creation time using
+/// USD only — checkout charges CNY, so we convert USD→CNY at order creation using
 /// FxService and snapshot the rate onto the order. `active=false` hides
 /// a tier from buyers without breaking historical orders that reference it.
 model QuotaPricingTier {
@@ -133,12 +132,12 @@ model QuotaOrder {
   /// time so a later rate change doesn't rewrite history.
   fxRate          Decimal   @map("fx_rate") @db.Decimal(12, 6)
   status          String    @default("pending")
-  /// Which gateway placed this order — `shouqianba` for current orders,
-  /// `alipay` for legacy ones. Default reflects history; new code always
+  /// Which gateway placed this order — `airwallex` for current orders,
+  /// `shouqianba` / `alipay` for legacy ones. Default reflects history; new code always
   /// sets it explicitly.
   provider        String    @default("alipay")
-  /// Our outgoing reference (Shouqianba calls this `client_sn`, Alipay
-  /// called it `out_trade_no`). UNIQUE so retried notify callbacks land
+  /// Gateway order reference (Airwallex PaymentIntent ID for current orders).
+  /// UNIQUE so retried notify callbacks land
   /// on the same row.
   providerOrderId String    @unique @map("provider_order_id")
   /// Gateway's internal trade id, returned in the notify body once paid.
@@ -1004,7 +1003,7 @@ model ReferralChannel {
 }
 
 /// One row per paid QuotaOrder placed by a referred account. `orderId` is
-/// UNIQUE so the create runs exactly once even if the Shouqianba notify
+/// UNIQUE so the create runs exactly once even if a payment webhook
 /// is retried after we already credited the order. `ratePercent` is the
 /// snapshot of the global setting at the moment of creation — later edits
 /// to ReferralSetting.ratePercent do NOT rewrite history.

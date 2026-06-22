@@ -10,6 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { AirwallexService } from './airwallex.service';
 import { ShouqianbaService } from './shouqianba.service';
 import { FxService } from '../fx/fx.service';
 import { ReferralService } from '../referral/referral.service';
@@ -42,6 +43,7 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly airwallex: AirwallexService,
     private readonly shouqianba: ShouqianbaService,
     private readonly fx: FxService,
     private readonly config: ConfigService,
@@ -160,18 +162,15 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
     accountId: string;
     userId: string;
     tierId: string;
-    channel: 'alipay' | 'wechat';
   }): Promise<CreateQuotaOrderResponse> {
-    if (!this.shouqianba.isConfigured()) {
+    if (!this.airwallex.isConfigured()) {
       throw new ServiceUnavailableException('支付通道未配置,请联系平台管理员完成支付接入。');
     }
+    await this.airwallex.ensurePaymentMethodAvailable();
     const tier = await this.prisma.quotaPricingTier.findUnique({ where: { id: args.tierId } });
     if (!tier || !tier.active) throw new BadRequestException('该档位不可用');
 
-    // client_sn (我们的 out_trade_no) must be ≤ 32 chars and unique per app_id.
-    // UUID-no-dashes is 32 by itself — the `sm-` prefix would push us over,
-    // so use a 28-char hex slice (still 112 bits of entropy, plenty unique).
-    const outTradeNo = `sm${randomUUID().replace(/-/g, '').slice(0, 30)}`;
+    const merchantOrderId = `sm${randomUUID().replace(/-/g, '').slice(0, 30)}`;
 
     const amountUsd = Number(tier.priceUsd);
 
@@ -191,27 +190,49 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
         amountUsd,
         amountCny,
         fxRate: fx.rate,
-        provider: 'shouqianba',
-        providerOrderId: outTradeNo,
+        provider: 'airwallex',
+        // Start with our merchant reference so the row exists before the
+        // provider call. It is replaced by the PaymentIntent ID immediately
+        // after creation, before the browser can enter checkout.
+        providerOrderId: merchantOrderId,
         createdBy: args.userId,
       },
     });
 
-    const apiBase = this.config.getOrThrow<string>('API_BASE_URL');
-    const subject = `SendMast 发送额度 +${tier.emails.toLocaleString('en-US')}`;
-    // 收钱吧 payway map: 1=支付宝, 3=微信. There's no "universal" code that
-    // returns a multi-channel scannable QR — each precreate call yields a
-    // QR that only the chosen wallet can read.
-    const payway = args.channel === 'wechat' ? '3' : '1';
-    const qrCode = await this.shouqianba.createQrCode({
-      outTradeNo,
-      totalAmountCny: amountCny,
-      subject,
-      notifyUrl: `${apiBase}/api/payments/shouqianba/notify`,
-      payway,
-    });
+    const webBase = this.config.getOrThrow<string>('WEB_BASE_URL');
+    let intent;
+    try {
+      intent = await this.airwallex.createPaymentIntent({
+        requestId: randomUUID(),
+        merchantOrderId,
+        amountCny,
+        returnUrl: `${webBase}/settings/orders`,
+        description: `SendMast quota +${tier.emails}`,
+      });
+      if (!intent.clientSecret) {
+        throw new ServiceUnavailableException('支付网关未返回收银台凭证');
+      }
+      await this.prisma.quotaOrder.update({
+        where: { providerOrderId: merchantOrderId },
+        data: { providerOrderId: intent.id },
+      });
+    } catch (err) {
+      await this.prisma.quotaOrder.updateMany({
+        where: { providerOrderId: merchantOrderId, status: 'pending' },
+        data: { status: 'failed' },
+      });
+      throw err;
+    }
 
-    return { orderId: outTradeNo, qrCode, channel: args.channel, amountCny, amountUsd };
+    return {
+      orderId: intent.id,
+      clientSecret: intent.clientSecret,
+      currency: 'CNY',
+      environment: this.airwallex.checkoutEnvironment(),
+      successUrl: `${webBase}/settings/orders?tradeNo=${encodeURIComponent(intent.id)}`,
+      amountCny,
+      amountUsd,
+    };
   }
 
   // ---------- Order list (user) -----------------------------------------
@@ -231,9 +252,39 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getMyOrder(accountId: string, providerOrderId: string): Promise<QuotaOrderView> {
-    const row = await this.prisma.quotaOrder.findUnique({ where: { providerOrderId } });
+    let row = await this.prisma.quotaOrder.findUnique({ where: { providerOrderId } });
     if (!row || row.accountId !== accountId) throw new NotFoundException('订单不存在');
+    if (row.status === 'pending' && row.provider === 'airwallex') {
+      await this.reconcileAirwallexOrder(row);
+      row = await this.prisma.quotaOrder.findUnique({ where: { providerOrderId } });
+      if (!row) throw new NotFoundException('订单不存在');
+    }
     return this.toOrderView(row);
+  }
+
+  async handleAirwallexWebhook(rawBody: string): Promise<void> {
+    let event: {
+      name?: string;
+      data?: { id?: string; object?: { id?: string } };
+    };
+    try {
+      event = JSON.parse(rawBody);
+    } catch {
+      this.logger.warn('Airwallex webhook: body is not valid JSON');
+      return;
+    }
+    if (event.name !== 'payment_intent.succeeded') return;
+
+    const intentId = event.data?.object?.id ?? event.data?.id;
+    if (!intentId) {
+      this.logger.warn('Airwallex webhook: succeeded event missing PaymentIntent ID');
+      return;
+    }
+    const order = await this.prisma.quotaOrder.findUnique({
+      where: { providerOrderId: intentId },
+    });
+    if (!order || order.provider !== 'airwallex' || order.status === 'paid') return;
+    await this.reconcileAirwallexOrder(order);
   }
 
   // ---------- Notify webhook --------------------------------------------
@@ -356,6 +407,43 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  private async reconcileAirwallexOrder(order: {
+    id: string;
+    providerOrderId: string;
+    accountId: string;
+    emails: number;
+    amountCny: { toString(): string } | unknown;
+  }): Promise<void> {
+    let intent;
+    try {
+      intent = await this.airwallex.retrievePaymentIntent(order.providerOrderId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Airwallex reconcile failed for ${order.providerOrderId}: ${msg}`);
+      return;
+    }
+    if (!intent) return;
+
+    if (intent.status === 'SUCCEEDED') {
+      const expectedAmount = Number(
+        (order.amountCny as { toString(): string }).toString(),
+      );
+      if (intent.currency !== 'CNY' || Math.abs(intent.amount - expectedAmount) > 0.001) {
+        this.logger.error(
+          `Airwallex amount mismatch for ${order.providerOrderId}: ` +
+            `expected CNY ${expectedAmount}, got ${intent.currency} ${intent.amount}`,
+        );
+        return;
+      }
+      await this.creditPaidOrder(order, intent.latestPaymentAttemptId);
+      return;
+    }
+
+    if (intent.status === 'CANCELLED') {
+      await this.closeLocally(order.id);
+    }
+  }
+
   // ---------- Stale-order sweep -----------------------------------------
 
   /**
@@ -383,7 +471,9 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
     tierId?: string;
     limit?: number;
   }): Promise<{ checked: number; paid: number; cancelled: number }> {
-    if (!this.shouqianba.isConfigured()) return { checked: 0, paid: 0, cancelled: 0 };
+    if (!this.airwallex.isConfigured() && !this.shouqianba.isConfigured()) {
+      return { checked: 0, paid: 0, cancelled: 0 };
+    }
 
     const cutoff = new Date(Date.now() - (opts?.olderThanMs ?? STALE_ORDER_MS));
     const stale = await this.prisma.quotaOrder.findMany({
@@ -399,6 +489,32 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
     let paid = 0;
     let cancelled = 0;
     for (const order of stale) {
+      if (order.provider === 'airwallex') {
+        if (!this.airwallex.isConfigured()) continue;
+        await this.reconcileAirwallexOrder(order);
+        const current = await this.prisma.quotaOrder.findUnique({
+          where: { id: order.id },
+          select: { status: true },
+        });
+        if (current?.status === 'paid') {
+          paid += 1;
+          continue;
+        }
+        if (current?.status === 'cancelled') {
+          cancelled += 1;
+          continue;
+        }
+
+        // Airwallex only permits cancellation in specific pre-settlement
+        // states. If it refuses, leave the order pending and retry later;
+        // never close an asynchronously-processing payment locally.
+        if (await this.airwallex.cancelPaymentIntent(order.providerOrderId)) {
+          if (await this.closeLocally(order.id)) cancelled += 1;
+        }
+        continue;
+      }
+
+      if (!this.shouqianba.isConfigured()) continue;
       // Past this point the QR is dead; failed gateway calls must not pin the
       // order pending forever, so we close it locally instead of retrying.
       const hardExpired = order.createdAt.getTime() < Date.now() - HARD_EXPIRE_MS;

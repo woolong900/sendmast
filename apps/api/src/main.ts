@@ -36,9 +36,9 @@ async function bootstrap() {
   // referrer-policy, etc.) are useful regardless of frontend hosting.
   app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
 
-  // The `verify` hook stashes the raw bytes onto the request so payment-
-  // provider webhooks (currently Shouqianba) can MD5-verify signatures
-  // against the EXACT body the server sent. JSON.stringify(parsed) would
+  // The `verify` hook stashes the raw bytes onto the request so payment
+  // webhooks can verify signatures against the EXACT body the server sent.
+  // JSON.stringify(parsed) would
   // shuffle whitespace/key-order and break the hash. Same trick used by
   // the Stripe / Shopify SDKs.
   app.use(

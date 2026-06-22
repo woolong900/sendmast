@@ -2,22 +2,48 @@ import { Controller, Logger, Post, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
+import { AirwallexService } from './airwallex.service';
 import { QuotaBillingService } from './quota-billing.service';
 
 /**
- * Public payment-provider webhooks. NO JwtAuthGuard — Shouqianba calls
- * this server-to-server, but we don't trust the request itself: the
- * notify is treated as a "go look at this order" hint, and the billing
- * service round-trips the gateway's authoritative query API (signed
- * with our terminal_key) to decide whether to credit. See
- * QuotaBillingService.handleShouqianbaNotify for the full rationale.
+ * Public payment-provider webhooks. NO JwtAuthGuard because providers call
+ * these endpoints server-to-server. Airwallex requests are HMAC-verified;
+ * the legacy Shouqianba callback is confirmed through its order query API.
  */
 @ApiTags('payments')
 @Controller('payments')
 export class PaymentsController {
   private readonly logger = new Logger(PaymentsController.name);
 
-  constructor(private readonly svc: QuotaBillingService) {}
+  constructor(
+    private readonly svc: QuotaBillingService,
+    private readonly airwallex: AirwallexService,
+  ) {}
+
+  @Post('airwallex/webhook')
+  @Throttle({ default: { limit: 240, ttl: 60_000 } })
+  async airwallexWebhook(
+    @Req() req: Request & { rawBody?: Buffer },
+    @Res() res: Response,
+  ): Promise<void> {
+    const rawBody = req.rawBody?.toString('utf8') ?? '';
+    const timestamp = String(req.headers['x-timestamp'] ?? '');
+    const signature = String(req.headers['x-signature'] ?? '');
+    if (!rawBody || !this.airwallex.verifyWebhook(rawBody, timestamp, signature)) {
+      this.logger.warn('Airwallex webhook: invalid signature');
+      res.status(400).type('text/plain').send('invalid signature');
+      return;
+    }
+
+    try {
+      await this.svc.handleAirwallexWebhook(rawBody);
+      res.status(200).send();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Airwallex webhook processing failed: ${msg}`);
+      res.status(500).type('text/plain').send('processing failed');
+    }
+  }
 
   /**
    * Shouqianba async notify. Shouqianba retries until we literally write

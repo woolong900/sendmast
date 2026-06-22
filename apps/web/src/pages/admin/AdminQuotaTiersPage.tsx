@@ -116,7 +116,7 @@ export function AdminQuotaTiersPage() {
         <div>
           <h1 className="text-xl font-semibold">套餐档位</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            管理「购买额度」弹窗里展示的购买档位。价格 USD 标价,下单时按当前汇率换算成 CNY 喂给收钱吧(支持支付宝/微信)。停用的档位不会出现在用户端,但历史订单仍可读。
+            管理「购买额度」弹窗里展示的购买档位。价格以 USD 标价,下单时按当前汇率换算成 CNY,并通过空中云汇收银台收款。停用的档位不会出现在用户端,但历史订单仍可读。
           </p>
         </div>
         <Button

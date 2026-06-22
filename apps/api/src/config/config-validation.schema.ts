@@ -73,6 +73,14 @@ const ConfigSchema = z
      *  when keys are rotated or the device_id is unbound by support. */
     SHOUQIANBA_TERMINAL_SN: z.string().optional(),
     SHOUQIANBA_TERMINAL_KEY: z.string().optional(),
+
+    // Airwallex hosted checkout for new self-service quota top-ups. API
+    // credentials remain server-side; only PaymentIntent client secrets are
+    // returned to the browser for the provider-hosted checkout session.
+    AIRWALLEX_ENV: z.enum(['demo', 'production']).default('demo'),
+    AIRWALLEX_CLIENT_ID: z.string().optional(),
+    AIRWALLEX_API_KEY: z.string().optional(),
+    AIRWALLEX_WEBHOOK_SECRET: z.string().optional(),
   })
   .superRefine((config, ctx) => {
     if (config.NODE_ENV === 'production' && !config.EVENTGRID_WEBHOOK_KEY) {
