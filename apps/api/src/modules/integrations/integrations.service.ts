@@ -19,6 +19,7 @@ import {
   ShopyyAuthError,
   ShopyyClient,
   ShopyyError,
+  type ShopyyStoreDomain,
 } from '@sendmast/shopyy';
 import { getAutomationEngagement } from '@sendmast/clickhouse';
 import { ClickHouseService } from '../../common/clickhouse/clickhouse.service';
@@ -103,6 +104,22 @@ function parseExpiredAt(v: string | number | undefined): Date | null {
   if (!Number.isNaN(n)) return parseExpiredAt(n);
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function normaliseStoreUrl(raw: string | null | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function domainValue(row: ShopyyStoreDomain): string | null {
+  return row.domain ?? row.domain_name ?? row.host ?? row.url ?? null;
 }
 
 function toAutomationView(
@@ -244,10 +261,17 @@ export class IntegrationsService {
     }
 
     const webhookSecret = existing?.webhookSecret ?? randomBytes(24).toString('hex');
+    const detectedStoreUrl =
+      (await this.fetchStoreUrlFromDomains(
+        result.developer_app.openapi_domain,
+        result.developer_app.token,
+        externalStoreId,
+      )) ?? existing?.storeUrl ?? null;
     const data = {
       shopName: result.store.shop_name ?? null,
       shopDomain: result.store.shop_domain ?? null,
       mainDomain: result.store.main_domain ?? null,
+      storeUrl: detectedStoreUrl,
       brandId: result.store.brand_id != null ? String(result.store.brand_id) : null,
       timeZone: result.store.time_zone ?? null,
       openapiDomain: result.developer_app.openapi_domain,
@@ -355,6 +379,31 @@ export class IntegrationsService {
       this.config.get<string>('SHOPYY_WEBHOOK_BASE_URL') ??
       `${this.config.getOrThrow<string>('API_BASE_URL')}/api`;
     return `${rawBase.replace(/\/+$/, '')}/webhooks/shopyy`;
+  }
+
+  private async fetchStoreUrlFromDomains(
+    openapiDomain: string,
+    token: string,
+    externalStoreId: string,
+  ): Promise<string | null> {
+    try {
+      const domains = await this.shopyyClient(openapiDomain, token).listStoreDomains({
+        status: 1,
+        httpsStatus: 1,
+      });
+      for (const domain of domains) {
+        const storeUrl = normaliseStoreUrl(domainValue(domain));
+        if (storeUrl) return storeUrl;
+      }
+      return null;
+    } catch (err) {
+      this.logger.warn(
+        `Shopyy store domain lookup failed for store ${externalStoreId}: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+      return null;
+    }
   }
 
   private async installWebhooks(conn: {

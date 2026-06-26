@@ -254,6 +254,26 @@ export class ShopyyClient {
   }
 
   /**
+   * List the store's storefront domains (`GET /stores/domains`). After a store
+   * bind we use the first active HTTPS domain as the customer-facing shop URL.
+   */
+  async listStoreDomains(query?: {
+    status?: number;
+    httpsStatus?: number;
+  }): Promise<ShopyyStoreDomain[]> {
+    const data = await this.get<
+      ShopyyStoreDomain[] | { list?: ShopyyStoreDomain[]; domains?: ShopyyStoreDomain[] }
+    >('/stores/domains', {
+      status: query?.status,
+      https_status: query?.httpsStatus,
+    });
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.list)) return data.list;
+    if (Array.isArray(data?.domains)) return data.domains;
+    return [];
+  }
+
+  /**
    * One page of the store's customers (`GET /customers/list`, verified live).
    * Rows carry `email` / `first_name` / `last_name` etc.; field mapping lives
    * in worker-shop-sync's field-mapper, like orders/checkouts.
@@ -323,6 +343,17 @@ export interface ShopyyCoupon {
   param?: {
     discount?: { type?: number; value?: number };
   };
+}
+
+/** A storefront domain row as returned by `GET /stores/domains`. */
+export interface ShopyyStoreDomain {
+  id?: number;
+  domain?: string;
+  domain_name?: string;
+  host?: string;
+  url?: string;
+  status?: number;
+  https_status?: number;
 }
 
 /** A webhook row as returned by `GET /webhooks`. */
