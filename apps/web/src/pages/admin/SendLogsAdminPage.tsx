@@ -11,7 +11,7 @@ import { DateRangePicker, type DateRange } from '@/components/ui/date-range-pick
 import { api } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/utils';
 import type {
-  AcsAccountView,
+  EmailChannelView,
   AdminAccountView,
   SendLogListResponse,
   SendLogView,
@@ -21,7 +21,7 @@ import { TableSkeletonRows } from '@/components/ui/skeleton';
 
 interface Filters {
   accountId: string;
-  acsAccountId: string;
+  emailChannelId: string;
   source: '' | 'campaign' | 'automation';
   domain: string;
   status: '' | 'success' | 'failed';
@@ -30,7 +30,7 @@ interface Filters {
 
 const EMPTY_FILTERS: Filters = {
   accountId: '',
-  acsAccountId: '',
+  emailChannelId: '',
   source: '',
   domain: '',
   status: '',
@@ -53,9 +53,9 @@ export function SendLogsAdminPage() {
     queryKey: ['admin', 'accounts'],
     queryFn: async () => (await api.get('/api/admin/accounts')).data,
   });
-  const { data: acsAccounts } = useQuery<AcsAccountView[]>({
-    queryKey: ['admin', 'acs-accounts'],
-    queryFn: async () => (await api.get('/api/admin/acs-accounts')).data,
+  const { data: emailChannels } = useQuery<EmailChannelView[]>({
+    queryKey: ['admin', 'email-channels'],
+    queryFn: async () => (await api.get('/api/admin/email-channels')).data,
   });
 
   const queryParams = useMemo(() => {
@@ -64,7 +64,7 @@ export function SendLogsAdminPage() {
       limit: String(pageSize),
     };
     if (active.accountId) params.accountId = active.accountId;
-    if (active.acsAccountId) params.acsAccountId = active.acsAccountId;
+    if (active.emailChannelId) params.emailChannelId = active.emailChannelId;
     if (active.source) params.source = active.source;
     if (active.domain.trim()) params.domain = active.domain.trim().toLowerCase();
     if (active.status === 'success') params.ok = 'true';
@@ -97,7 +97,7 @@ export function SendLogsAdminPage() {
       <div>
         <h1 className="text-xl font-semibold">发送日志</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          每次 ACS 调用的发送记录,用于排查发送失败、监控延迟、审计租户使用情况。
+          每次邮件通道调用的发送记录,用于排查发送失败、监控延迟、审计租户使用情况。
         </p>
       </div>
 
@@ -117,14 +117,14 @@ export function SendLogsAdminPage() {
               ))}
             </select>
           </Field>
-          <Field label="ACS 账号">
+          <Field label="邮件通道">
             <select
               className={selectCls}
-              value={form.acsAccountId}
-              onChange={(e) => setForm({ ...form, acsAccountId: e.target.value })}
+              value={form.emailChannelId}
+              onChange={(e) => setForm({ ...form, emailChannelId: e.target.value })}
             >
               <option value="">全部</option>
-              {acsAccounts?.map((a) => (
+              {emailChannels?.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}
                 </option>
@@ -199,7 +199,7 @@ export function SendLogsAdminPage() {
               <tr>
                 <th className="px-4 py-3 font-medium">时间</th>
                 <th className="px-4 py-3 font-medium">租户</th>
-                <th className="px-4 py-3 font-medium">ACS</th>
+                <th className="px-4 py-3 font-medium">通道</th>
                 <th className="px-4 py-3 font-medium">来源</th>
                 <th className="px-4 py-3 font-medium">发件人</th>
                 <th className="px-4 py-3 font-medium">收件人</th>
@@ -226,7 +226,7 @@ export function SendLogsAdminPage() {
                     <div className="text-xs text-muted-foreground">{r.account.slug}</div>
                   </td>
                   <td className="px-4 py-2 text-muted-foreground">
-                    {r.acsAccount?.name ?? <span className="opacity-60">— 已删除</span>}
+                    {r.emailChannel?.name ?? <span className="opacity-60">— 已删除</span>}
                   </td>
                   <td className="px-4 py-2">
                     <Badge variant={r.source === 'automation' ? 'warning' : 'muted'}>
@@ -315,7 +315,7 @@ function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void 
         <div className="space-y-4 overflow-y-auto p-5">
           <Grid>
             <KV label="租户" value={`${row.account.name} (${row.account.slug})`} />
-            <KV label="ACS 账号" value={row.acsAccount?.name ?? '— 已删除 —'} />
+            <KV label="邮件通道" value={row.emailChannel?.name ?? '— 已删除 —'} />
             <KV
               label="来源"
               value={
@@ -355,7 +355,7 @@ function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void 
 
           <div>
             <Label className="mb-1 block text-xs text-muted-foreground">
-              ACS 响应原文 (response_payload)
+              通道响应原文 (response_payload)
             </Label>
             <pre className="max-h-[40vh] overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
               {row.responsePayload != null

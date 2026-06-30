@@ -8,7 +8,7 @@ import type {
   SenderDomainVerificationStatus,
 } from '@sendmast/shared';
 
-interface AcsAccountForArm {
+interface AzureArmChannelConfig {
   azureTenantId: string;
   azureClientId: string;
   azureClientSecret: string;
@@ -48,18 +48,18 @@ export class AzureAcsService {
   private readonly clients = new Map<string, ClientCacheEntry>();
 
   /**
-   * Provision a new CustomerManaged domain on the AcsAccount's Email
+   * Provision a new CustomerManaged domain on the ACS Email
    * Communication Service. Idempotent: re-creating an existing resource
    * just refreshes it. Returns the DNS records the customer needs to add.
    */
   async createDomain(
-    acsAccount: AcsAccountForArm,
+    emailChannel: AzureArmChannelConfig,
     domain: string,
   ): Promise<{ records: SenderDomainDnsRecord[] }> {
-    const client = this.clientFor(acsAccount);
+    const client = this.clientFor(emailChannel);
     const result = await client.domains.beginCreateOrUpdateAndWait(
-      acsAccount.azureResourceGroup,
-      acsAccount.azureEmailServiceName,
+      emailChannel.azureResourceGroup,
+      emailChannel.azureEmailServiceName,
       domain,
       {
         location: 'global',
@@ -102,15 +102,15 @@ export class AzureAcsService {
    * verification result is read back via `getStates`.
    */
   async initiateVerification(
-    acsAccount: AcsAccountForArm,
+    emailChannel: AzureArmChannelConfig,
     domain: string,
     kind: SenderDomainRecordKind,
   ): Promise<void> {
-    const client = this.clientFor(acsAccount);
+    const client = this.clientFor(emailChannel);
     try {
       await client.domains.beginInitiateVerification(
-        acsAccount.azureResourceGroup,
-        acsAccount.azureEmailServiceName,
+        emailChannel.azureResourceGroup,
+        emailChannel.azureEmailServiceName,
         domain,
         { verificationType: KIND_TO_SDK_VERIFY[kind] },
       );
@@ -123,13 +123,13 @@ export class AzureAcsService {
 
   /** Read the current verificationStates map from Azure. */
   async getStates(
-    acsAccount: AcsAccountForArm,
+    emailChannel: AzureArmChannelConfig,
     domain: string,
   ): Promise<SenderDomainVerificationStates> {
-    const client = this.clientFor(acsAccount);
+    const client = this.clientFor(emailChannel);
     const result = await client.domains.get(
-      acsAccount.azureResourceGroup,
-      acsAccount.azureEmailServiceName,
+      emailChannel.azureResourceGroup,
+      emailChannel.azureEmailServiceName,
       domain,
     );
     const vs = (result.verificationStates ?? {}) as Record<
@@ -157,22 +157,22 @@ export class AzureAcsService {
    * the domain is DNS-verified. Idempotent: re-adding an already-linked
    * domain is a no-op (we read current list first and dedupe).
    *
-   * Throws if `acsAccount.azureCommunicationServiceName` is missing — the
+   * Throws if `emailChannel.azureCommunicationServiceName` is missing — the
    * caller should validate before calling.
    */
-  async linkDomain(acsAccount: AcsAccountForArm, domain: string): Promise<void> {
-    if (!acsAccount.azureCommunicationServiceName) {
+  async linkDomain(emailChannel: AzureArmChannelConfig, domain: string): Promise<void> {
+    if (!emailChannel.azureCommunicationServiceName) {
       // Defensive: caller (sender-domain.service.ts) already gates on this
       // field, so we shouldn't ever reach here. Generic message in case it
       // does leak to the client via some future code path.
       throw new Error('发送通道配置不完整,请联系管理员。');
     }
-    const client = this.clientFor(acsAccount);
-    const domainResourceId = this.domainResourceId(acsAccount, domain);
+    const client = this.clientFor(emailChannel);
+    const domainResourceId = this.domainResourceId(emailChannel, domain);
 
     const current = await client.communicationServices.get(
-      acsAccount.azureResourceGroup,
-      acsAccount.azureCommunicationServiceName,
+      emailChannel.azureResourceGroup,
+      emailChannel.azureCommunicationServiceName,
     );
     const existing = current.linkedDomains ?? [];
     if (existing.some((id) => id.toLowerCase() === domainResourceId.toLowerCase())) {
@@ -180,8 +180,8 @@ export class AzureAcsService {
     }
     const next = [...existing, domainResourceId];
     await client.communicationServices.update(
-      acsAccount.azureResourceGroup,
-      acsAccount.azureCommunicationServiceName,
+      emailChannel.azureResourceGroup,
+      emailChannel.azureCommunicationServiceName,
       { linkedDomains: next },
     );
   }
@@ -191,22 +191,22 @@ export class AzureAcsService {
    * Best-effort: any failure is logged and swallowed so DB cleanup can
    * still proceed when deleting a domain.
    */
-  async unlinkDomain(acsAccount: AcsAccountForArm, domain: string): Promise<void> {
-    if (!acsAccount.azureCommunicationServiceName) return;
-    const client = this.clientFor(acsAccount);
-    const domainResourceId = this.domainResourceId(acsAccount, domain).toLowerCase();
+  async unlinkDomain(emailChannel: AzureArmChannelConfig, domain: string): Promise<void> {
+    if (!emailChannel.azureCommunicationServiceName) return;
+    const client = this.clientFor(emailChannel);
+    const domainResourceId = this.domainResourceId(emailChannel, domain).toLowerCase();
     try {
       const current = await client.communicationServices.get(
-        acsAccount.azureResourceGroup,
-        acsAccount.azureCommunicationServiceName,
+        emailChannel.azureResourceGroup,
+        emailChannel.azureCommunicationServiceName,
       );
       const next = (current.linkedDomains ?? []).filter(
         (id) => id.toLowerCase() !== domainResourceId,
       );
       if (next.length === (current.linkedDomains?.length ?? 0)) return;
       await client.communicationServices.update(
-        acsAccount.azureResourceGroup,
-        acsAccount.azureCommunicationServiceName,
+        emailChannel.azureResourceGroup,
+        emailChannel.azureCommunicationServiceName,
         { linkedDomains: next },
       );
     } catch (err) {
@@ -218,14 +218,14 @@ export class AzureAcsService {
 
   /** List sender usernames currently registered on a domain in Azure. */
   async listSenderUsernames(
-    acsAccount: AcsAccountForArm,
+    emailChannel: AzureArmChannelConfig,
     domain: string,
   ): Promise<AzureSenderUsername[]> {
-    const client = this.clientFor(acsAccount);
+    const client = this.clientFor(emailChannel);
     const out: AzureSenderUsername[] = [];
     for await (const r of client.senderUsernames.listByDomains(
-      acsAccount.azureResourceGroup,
-      acsAccount.azureEmailServiceName,
+      emailChannel.azureResourceGroup,
+      emailChannel.azureEmailServiceName,
       domain,
     )) {
       if (!r.username) continue;
@@ -240,15 +240,15 @@ export class AzureAcsService {
 
   /** Create or update a sender username (e.g. `donotreply`) on a domain. */
   async createSenderUsername(
-    acsAccount: AcsAccountForArm,
+    emailChannel: AzureArmChannelConfig,
     domain: string,
     username: string,
     displayName?: string,
   ): Promise<AzureSenderUsername> {
-    const client = this.clientFor(acsAccount);
+    const client = this.clientFor(emailChannel);
     const r = await client.senderUsernames.createOrUpdate(
-      acsAccount.azureResourceGroup,
-      acsAccount.azureEmailServiceName,
+      emailChannel.azureResourceGroup,
+      emailChannel.azureEmailServiceName,
       domain,
       username,
       { username, displayName },
@@ -262,15 +262,15 @@ export class AzureAcsService {
 
   /** Delete a sender username; best-effort, logs on failure. */
   async deleteSenderUsername(
-    acsAccount: AcsAccountForArm,
+    emailChannel: AzureArmChannelConfig,
     domain: string,
     username: string,
   ): Promise<void> {
-    const client = this.clientFor(acsAccount);
+    const client = this.clientFor(emailChannel);
     try {
       await client.senderUsernames.delete(
-        acsAccount.azureResourceGroup,
-        acsAccount.azureEmailServiceName,
+        emailChannel.azureResourceGroup,
+        emailChannel.azureEmailServiceName,
         domain,
         username,
       );
@@ -282,12 +282,12 @@ export class AzureAcsService {
   }
 
   /** Best-effort delete; logs and swallows so DB cleanup can proceed. */
-  async deleteDomain(acsAccount: AcsAccountForArm, domain: string): Promise<void> {
-    const client = this.clientFor(acsAccount);
+  async deleteDomain(emailChannel: AzureArmChannelConfig, domain: string): Promise<void> {
+    const client = this.clientFor(emailChannel);
     try {
       await client.domains.beginDeleteAndWait(
-        acsAccount.azureResourceGroup,
-        acsAccount.azureEmailServiceName,
+        emailChannel.azureResourceGroup,
+        emailChannel.azureEmailServiceName,
         domain,
       );
     } catch (err) {
@@ -301,16 +301,16 @@ export class AzureAcsService {
    * Full ARM resource id for an EmailService domain. Used as the value
    * we push into CommunicationService.linkedDomains.
    */
-  private domainResourceId(acsAccount: AcsAccountForArm, domain: string): string {
+  private domainResourceId(emailChannel: AzureArmChannelConfig, domain: string): string {
     return (
-      `/subscriptions/${acsAccount.azureSubscriptionId}` +
-      `/resourceGroups/${acsAccount.azureResourceGroup}` +
-      `/providers/Microsoft.Communication/emailServices/${acsAccount.azureEmailServiceName}` +
+      `/subscriptions/${emailChannel.azureSubscriptionId}` +
+      `/resourceGroups/${emailChannel.azureResourceGroup}` +
+      `/providers/Microsoft.Communication/emailServices/${emailChannel.azureEmailServiceName}` +
       `/domains/${domain}`
     );
   }
 
-  private clientFor(acct: AcsAccountForArm): CommunicationServiceManagementClient {
+  private clientFor(acct: AzureArmChannelConfig): CommunicationServiceManagementClient {
     const key = [
       acct.azureTenantId,
       acct.azureClientId,

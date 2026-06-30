@@ -17,17 +17,18 @@ export class SenderDomainAdminController {
       orderBy: { createdAt: 'desc' },
       include: {
         account: { select: { id: true, name: true, slug: true } },
-        acsAccount: { select: { id: true, name: true, status: true } },
+        emailChannel: { select: { id: true, name: true, provider: true, status: true } },
       },
     });
     return rows.map((r) => ({
       id: r.id,
       domain: r.domain,
       status: r.status,
+      provisioningError: r.provisioningError,
       verifiedAt: r.verifiedAt?.toISOString() ?? null,
       createdAt: r.createdAt.toISOString(),
       account: r.account,
-      acsAccount: r.acsAccount,
+      emailChannel: r.emailChannel,
     }));
   }
 }

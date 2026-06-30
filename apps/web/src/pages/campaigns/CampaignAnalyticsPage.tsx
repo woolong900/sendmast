@@ -281,7 +281,7 @@ export function CampaignAnalyticsPage() {
                 value={formatPercent(rates.unsubscribe)}
                 hint={`(退订数 ${formatNumber(totals.unsubscribes)})`}
               />
-              {/* 投诉率 hidden: ACS provides no complaint/FBL feed, so the value
+              {/* 投诉率 hidden: the current provider feed provides no complaint/FBL feed, so the value
                   is always 0 — surfacing it just misleads. See complaint
                   pipeline (worker-events) which stays ready for a future source. */}
             </div>

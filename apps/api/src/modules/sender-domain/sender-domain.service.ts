@@ -4,9 +4,10 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, type EmailChannel } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AzureAcsService } from './azure-acs.service';
+import { MailgunService } from './mailgun.service';
 import { ensureDmarcRecord, applyDmarcDnsVerification } from './dmarc-record';
 import type {
   SenderDomainDnsRecord,
@@ -15,7 +16,7 @@ import type {
   SenderDomainVerificationStates,
   SenderDomainView,
   SenderUsernameView,
-  TenantAcsAccountView,
+  TenantEmailChannelView,
 } from '@sendmast/shared';
 
 type SenderUsernameRow = {
@@ -32,6 +33,7 @@ export class SenderDomainService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly azure: AzureAcsService,
+    private readonly mailgun: MailgunService,
   ) {}
 
   async list(accountId: string): Promise<SenderDomainView[]> {
@@ -40,7 +42,7 @@ export class SenderDomainService {
       orderBy: { createdAt: 'desc' },
       include: {
         senderUsernames: { orderBy: { createdAt: 'asc' } },
-        acsAccount: { select: { id: true, name: true } },
+        emailChannel: { select: { id: true, name: true, provider: true } },
       },
     });
     return rows.map((r) => this.toView(r, r.senderUsernames));
@@ -51,7 +53,7 @@ export class SenderDomainService {
       where: { id, accountId },
       include: {
         senderUsernames: { orderBy: { createdAt: 'asc' } },
-        acsAccount: { select: { id: true, name: true } },
+        emailChannel: { select: { id: true, name: true, provider: true } },
       },
     });
     if (!row) throw new NotFoundException('域名不存在');
@@ -59,18 +61,19 @@ export class SenderDomainService {
   }
 
   /**
-   * ACS accounts this tenant may provision domains under. Used by the
-   * domain-add wizard to render an ACS picker when more than one is assigned.
+   * email channels this tenant may provision domains under. Used by the
+   * domain-add wizard to render a channel picker when more than one is assigned.
    */
-  async listAcsAccounts(accountId: string): Promise<TenantAcsAccountView[]> {
-    const links = await this.prisma.accountAcsAccount.findMany({
-      where: { accountId, acsAccount: { status: 'active' } },
-      include: { acsAccount: { select: { id: true, name: true } } },
+  async listEmailChannels(accountId: string): Promise<TenantEmailChannelView[]> {
+    const links = await this.prisma.accountEmailChannel.findMany({
+      where: { accountId, emailChannel: { status: 'active' } },
+      include: { emailChannel: { select: { id: true, name: true, provider: true } } },
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     });
     return links.map((l) => ({
-      id: l.acsAccount.id,
-      name: l.acsAccount.name,
+      id: l.emailChannel.id,
+      name: l.emailChannel.name,
+      provider: l.emailChannel.provider as 'acs' | 'mailgun',
       isPrimary: l.isPrimary,
     }));
   }
@@ -88,7 +91,7 @@ export class SenderDomainService {
   async create(
     accountId: string,
     domain: string,
-    acsAccountId?: string,
+    emailChannelId?: string,
   ): Promise<SenderDomainView> {
     const cleaned = domain.toLowerCase().trim();
     const exists = await this.prisma.senderDomain.findFirst({
@@ -96,45 +99,52 @@ export class SenderDomainService {
     });
     if (exists) throw new BadRequestException('该域名已添加');
 
-    // The tenant's assigned, active ACS accounts. The domain is provisioned
+    // The tenant's assigned, active email channels. The domain is provisioned
     // under exactly one of them (immutable after creation).
-    const links = await this.prisma.accountAcsAccount.findMany({
-      where: { accountId, acsAccount: { status: 'active' } },
-      include: { acsAccount: true },
+    const links = await this.prisma.accountEmailChannel.findMany({
+      where: { accountId, emailChannel: { status: 'active' } },
+      include: { emailChannel: true },
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     });
     if (links.length === 0) {
       throw new BadRequestException(
-        '当前租户尚未分配可用的 ACS 账号，请联系平台管理员。',
+        '当前租户尚未分配可用的邮件通道，请联系平台管理员。',
       );
     }
 
     let chosen;
-    if (acsAccountId) {
-      chosen = links.find((l) => l.acsAccountId === acsAccountId)?.acsAccount;
+    if (emailChannelId) {
+      chosen = links.find((l) => l.emailChannelId === emailChannelId)?.emailChannel;
       if (!chosen) {
-        throw new BadRequestException('指定的 ACS 账号未分配给当前租户或不可用');
+        throw new BadRequestException('指定的邮件通道未分配给当前租户或不可用');
       }
     } else if (links.length === 1) {
-      chosen = links[0].acsAccount;
+      chosen = links[0].emailChannel;
     } else {
-      throw new BadRequestException('当前租户分配了多个 ACS 账号，请选择要使用的 ACS 账号');
+      throw new BadRequestException('当前租户分配了多个邮件通道，请选择要使用的邮件通道');
     }
-    const acsAccount = chosen;
+    const emailChannel = chosen;
 
     const row = await this.prisma.senderDomain.create({
       data: {
         accountId,
-        acsAccountId: acsAccount.id,
+        emailChannelId: emailChannel.id,
         domain: cleaned,
         verificationRecords: [] as unknown as Prisma.InputJsonValue,
         status: 'provisioning',
       },
     });
 
-    void this.provisionInBackground(row.id, acsAccount, cleaned);
+    void this.provisionInBackground(row.id, emailChannel, cleaned);
 
-    return this.toView({ ...row, acsAccount: { id: acsAccount.id, name: acsAccount.name } });
+    return this.toView({
+      ...row,
+      emailChannel: {
+        id: emailChannel.id,
+        name: emailChannel.name,
+        provider: emailChannel.provider as 'acs' | 'mailgun',
+      },
+    });
   }
 
   /**
@@ -143,28 +153,33 @@ export class SenderDomainService {
    */
   private async provisionInBackground(
     rowId: string,
-    acsAccount: Parameters<AzureAcsService['createDomain']>[0],
+    emailChannel: EmailChannel,
     domain: string,
   ): Promise<void> {
     try {
-      const { records: azureRecords } = await this.azure.createDomain(acsAccount, domain);
-      const records = ensureDmarcRecord(azureRecords);
+      const { records: providerRecords } =
+        emailChannel.provider === 'mailgun'
+          ? await this.mailgun.createDomain(emailChannel, domain)
+          : await this.azure.createDomain(emailChannel, domain);
+      const records = ensureDmarcRecord(providerRecords);
       await this.prisma.senderDomain.update({
         where: { id: rowId },
         data: {
           verificationRecords: records as unknown as Prisma.InputJsonValue,
+          provisioningError: null,
           status: 'pending',
         },
       });
     } catch (err) {
+      const message = (err as Error).message;
       this.logger.error(
-        `Azure provisioning failed for domain ${domain} (row ${rowId}): ${(err as Error).message}`,
+        `Domain provisioning failed for ${domain} (row ${rowId}): ${message}`,
         (err as Error).stack,
       );
       await this.prisma.senderDomain
         .update({
           where: { id: rowId },
-          data: { status: 'failed' },
+          data: { status: 'failed', provisioningError: message.slice(0, 2000) },
         })
         .catch((updateErr) =>
           this.logger.error(
@@ -181,7 +196,7 @@ export class SenderDomainService {
   async verify(accountId: string, id: string): Promise<SenderDomainView> {
     const row = await this.prisma.senderDomain.findFirst({
       where: { id, accountId },
-      include: { acsAccount: true },
+      include: { emailChannel: true },
     });
     if (!row) throw new NotFoundException('域名不存在');
     if (row.status === 'provisioning') {
@@ -202,8 +217,12 @@ export class SenderDomainService {
     }
     const recordKinds: SenderDomainRecordKind[] = records.map((r) => r.kind);
 
-    // First refresh — see what's currently in flight.
-    const states = await this.azure.getStates(row.acsAccount, row.domain);
+    // First refresh — Mailgun's verify endpoint actively triggers its DNS
+    // checks, while Azure needs a separate initiateVerification step below.
+    const states =
+      row.emailChannel.provider === 'mailgun'
+        ? await this.mailgun.verifyDomain(row.emailChannel, row.domain)
+        : await this.azure.getStates(row.emailChannel, row.domain);
 
     // Kick off Azure verification for Domain/SPF/DKIM/DKIM2 only. DMARC is
     // customer-managed in public DNS — Azure's API never flips it to
@@ -213,14 +232,16 @@ export class SenderDomainService {
       const s = states[k]?.status;
       return !s || s === 'NotStarted' || s === 'Unknown' || s === 'VerificationFailed';
     });
-    await Promise.all(
-      toInitiate.map((k) => this.azure.initiateVerification(row.acsAccount, row.domain, k)),
-    );
+    if (row.emailChannel.provider !== 'mailgun') {
+      await Promise.all(
+        toInitiate.map((k) => this.azure.initiateVerification(row.emailChannel, row.domain, k)),
+      );
+    }
 
     // Re-read Azure states after kicking things off.
     let refreshed: SenderDomainVerificationStates =
-      toInitiate.length > 0
-        ? await this.azure.getStates(row.acsAccount, row.domain)
+      toInitiate.length > 0 && row.emailChannel.provider !== 'mailgun'
+        ? await this.azure.getStates(row.emailChannel, row.domain)
         : states;
 
     refreshed = await applyDmarcDnsVerification(row.domain, refreshed);
@@ -232,15 +253,20 @@ export class SenderDomainService {
       recordKinds.length > 0 && recordKinds.every((k) => refreshed[k]?.status === 'Verified');
 
     // Once a domain is fully DNS-verified we auto-link it to the
-    // AcsAccount's CommunicationService — there's no UX value in making
+    // EmailChannel's CommunicationService — there's no UX value in making
     // the user click an extra button. Best-effort: a missing
     // azureCommunicationServiceName or an Azure-side failure is logged
     // but doesn't fail the verify call (the domain is still considered
     // verified — they just won't be able to send until link succeeds).
     let linkedAt: Date | null = row.linkedAt;
-    if (allVerified && !linkedAt && row.acsAccount.azureCommunicationServiceName) {
+    if (
+      allVerified &&
+      !linkedAt &&
+      row.emailChannel.provider !== 'mailgun' &&
+      row.emailChannel.azureCommunicationServiceName
+    ) {
       try {
-        await this.azure.linkDomain(row.acsAccount, row.domain);
+        await this.azure.linkDomain(row.emailChannel, row.domain);
         linkedAt = new Date();
       } catch (err) {
         this.logger.warn(
@@ -286,7 +312,7 @@ export class SenderDomainService {
   ): Promise<SenderUsernameView> {
     const row = await this.prisma.senderDomain.findFirst({
       where: { id, accountId },
-      include: { acsAccount: true },
+      include: { emailChannel: true },
     });
     if (!row) throw new NotFoundException('域名不存在');
     if (row.status !== 'verified') {
@@ -301,12 +327,15 @@ export class SenderDomainService {
       throw new BadRequestException(`寄件人 ${cleanedUsername}@${row.domain} 已存在。`);
     }
 
-    const azureResult = await this.azure.createSenderUsername(
-      row.acsAccount,
-      row.domain,
-      cleanedUsername,
-      displayName,
-    );
+    const azureResult =
+      row.emailChannel.provider === 'mailgun'
+        ? { azureResourceId: null }
+        : await this.azure.createSenderUsername(
+            row.emailChannel,
+            row.domain,
+            cleanedUsername,
+            displayName,
+          );
 
     const created = await this.prisma.senderUsername.create({
       data: {
@@ -326,7 +355,7 @@ export class SenderDomainService {
   ): Promise<void> {
     const row = await this.prisma.senderDomain.findFirst({
       where: { id: domainId, accountId },
-      include: { acsAccount: true },
+      include: { emailChannel: true },
     });
     if (!row) throw new NotFoundException('域名不存在');
     const u = await this.prisma.senderUsername.findFirst({
@@ -334,27 +363,41 @@ export class SenderDomainService {
     });
     if (!u) return;
 
-    await this.azure.deleteSenderUsername(row.acsAccount, row.domain, u.username);
+    if (row.emailChannel.provider !== 'mailgun') {
+      await this.azure.deleteSenderUsername(row.emailChannel, row.domain, u.username);
+    }
     await this.prisma.senderUsername.deleteMany({ where: { id: u.id } });
   }
 
   async remove(accountId: string, id: string): Promise<void> {
     const row = await this.prisma.senderDomain.findFirst({
       where: { id, accountId },
-      include: { acsAccount: true },
+      include: { emailChannel: true },
     });
     if (!row) return;
 
-    // Unlink first so the domain isn't referenced by the CommunicationService
-    // when Azure runs the delete LRO. Best-effort — failures are logged and
-    // we still proceed with the domain delete.
-    await this.azure.unlinkDomain(row.acsAccount, row.domain);
+    if (row.emailChannel.provider === 'mailgun') {
+      try {
+        await this.mailgun.deleteDomain(row.emailChannel, row.domain);
+      } catch (err) {
+        const message = (err as Error).message;
+        if (!message.includes('Mailgun API 404')) throw err;
+        this.logger.warn(
+          `Mailgun domain ${row.domain} was not found upstream; deleting local row only.`,
+        );
+      }
+    } else {
+      // Unlink first so the domain isn't referenced by the CommunicationService
+      // when Azure runs the delete LRO. Best-effort — failures are logged and
+      // we still proceed with the domain delete.
+      await this.azure.unlinkDomain(row.emailChannel, row.domain);
 
-    // Azure delete is a long-running operation. If the user clicks twice (or
-    // we get racy concurrent calls) Azure rejects the second one with
-    // "Another DELETE in progress" — that's fine, the first one will finish,
-    // so we treat that case as "already deleting on Azure" and proceed.
-    await this.azure.deleteDomain(row.acsAccount, row.domain);
+      // Azure delete is a long-running operation. If the user clicks twice (or
+      // we get racy concurrent calls) Azure rejects the second one with
+      // "Another DELETE in progress" — that's fine, the first one will finish,
+      // so we treat that case as "already deleting on Azure" and proceed.
+      await this.azure.deleteDomain(row.emailChannel, row.domain);
+    }
 
     // Use deleteMany to be idempotent: if a concurrent request already
     // removed the row, this returns count=0 instead of throwing P2025.
@@ -367,14 +410,15 @@ export class SenderDomainService {
     row: {
       id: string;
       domain: string;
-      acsAccountId: string;
-      acsAccount?: { id: string; name: string } | null;
+      emailChannelId: string;
+      emailChannel?: { id: string; name: string; provider?: string } | null;
       status: SenderDomainStatus;
       verificationRecords: Prisma.JsonValue;
       verificationStates: Prisma.JsonValue | null;
       lastCheckedAt: Date | null;
       verifiedAt: Date | null;
       linkedAt: Date | null;
+      provisioningError?: string | null;
     },
     senderUsernames: SenderUsernameRow[] = [],
   ): SenderDomainView {
@@ -391,9 +435,16 @@ export class SenderDomainService {
     return {
       id: row.id,
       domain: row.domain,
-      acsAccountId: row.acsAccountId,
-      acsAccount: row.acsAccount ?? null,
+      emailChannelId: row.emailChannelId,
+      emailChannel: row.emailChannel
+        ? {
+            id: row.emailChannel.id,
+            name: row.emailChannel.name,
+            provider: row.emailChannel.provider as 'acs' | 'mailgun' | undefined,
+          }
+        : null,
       status,
+      provisioningError: row.provisioningError ?? null,
       records,
       states,
       lastCheckedAt: row.lastCheckedAt?.toISOString() ?? null,

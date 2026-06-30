@@ -1,39 +1,75 @@
 import { z } from 'zod';
 
-export const AcsAccountStatusSchema = z.enum(['active', 'suspended', 'retired']);
-export type AcsAccountStatusValue = z.infer<typeof AcsAccountStatusSchema>;
+export const EmailChannelStatusSchema = z.enum(['active', 'suspended', 'retired']);
+export type EmailChannelStatusValue = z.infer<typeof EmailChannelStatusSchema>;
+export const EmailChannelProviderSchema = z.enum(['acs', 'mailgun']);
+export type EmailChannelProviderValue = z.infer<typeof EmailChannelProviderSchema>;
 
-export const CreateAcsAccountSchema = z.object({
+const EmailChannelBaseSchema = z.object({
+  provider: EmailChannelProviderSchema.default('acs'),
   name: z.string().min(1).max(120),
   rpsLimit: z.coerce.number().int().min(1).max(100000),
   rpmLimit: z.coerce.number().int().min(1).max(10000000),
   rphLimit: z.coerce.number().int().min(1).max(100000000),
   rpdLimit: z.coerce.number().int().min(1).max(10000000000),
-  status: AcsAccountStatusSchema.optional(),
-  // Azure ARM credentials so the API can manage domains under this ACS.
-  azureTenantId: z.string().min(1).max(120),
-  azureClientId: z.string().min(1).max(120),
-  azureClientSecret: z.string().min(1).max(2000),
-  azureSubscriptionId: z.string().min(1).max(120),
-  azureResourceGroup: z.string().min(1).max(120),
-  azureEmailServiceName: z.string().min(1).max(120),
+  status: EmailChannelStatusSchema.optional(),
+  // Azure ARM credentials so the API can manage domains under this channel.
+  azureTenantId: z.string().max(120).optional().default(''),
+  azureClientId: z.string().max(120).optional().default(''),
+  azureClientSecret: z.string().max(2000).optional().default(''),
+  azureSubscriptionId: z.string().max(120).optional().default(''),
+  azureResourceGroup: z.string().max(120).optional().default(''),
+  azureEmailServiceName: z.string().max(120).optional().default(''),
   // Optional for backward-compat with accounts created before this field
   // existed; required at link-domain time, validated in the service layer.
   azureCommunicationServiceName: z.string().min(1).max(120).optional().nullable(),
+  mailgunApiKey: z.string().max(2000).optional().nullable(),
+  mailgunApiBaseUrl: z.string().url().max(200).optional().nullable(),
+  mailgunWebhookSigningKey: z.string().max(2000).optional().nullable(),
 });
-export type CreateAcsAccountInput = z.infer<typeof CreateAcsAccountSchema>;
 
-export const UpdateAcsAccountSchema = CreateAcsAccountSchema.partial();
-export type UpdateAcsAccountInput = z.infer<typeof UpdateAcsAccountSchema>;
+function validateProviderConfig(
+  v: z.infer<typeof EmailChannelBaseSchema>,
+  ctx: z.RefinementCtx,
+) {
+  if (v.provider === 'acs') {
+    for (const key of [
+      'azureTenantId',
+      'azureClientId',
+      'azureClientSecret',
+      'azureSubscriptionId',
+      'azureResourceGroup',
+      'azureEmailServiceName',
+    ] as const) {
+      if (!v[key]?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: 'Required for ACS',
+        });
+      }
+    }
+  }
+  if (v.provider === 'mailgun' && !v.mailgunApiKey?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['mailgunApiKey'], message: 'Required for Mailgun' });
+  }
+}
 
-export interface AcsAccountView {
+export const CreateEmailChannelSchema = EmailChannelBaseSchema.superRefine(validateProviderConfig);
+export type CreateEmailChannelInput = z.infer<typeof CreateEmailChannelSchema>;
+
+export const UpdateEmailChannelSchema = EmailChannelBaseSchema.partial();
+export type UpdateEmailChannelInput = z.infer<typeof UpdateEmailChannelSchema>;
+
+export interface EmailChannelView {
   id: string;
+  provider: EmailChannelProviderValue;
   name: string;
   rpsLimit: number;
   rpmLimit: number;
   rphLimit: number;
   rpdLimit: number;
-  status: AcsAccountStatusValue;
+  status: EmailChannelStatusValue;
   azureTenantId: string;
   azureClientId: string;
   /** Redacted in list, full in single-get (same convention as connectionString). */
@@ -42,6 +78,9 @@ export interface AcsAccountView {
   azureResourceGroup: string;
   azureEmailServiceName: string;
   azureCommunicationServiceName: string | null;
+  mailgunApiKey: string | null;
+  mailgunApiBaseUrl: string | null;
+  mailgunWebhookSigningKey: string | null;
   /** Whether this account is the platform-wide default for new signups. */
   isDefault: boolean;
   senderDomainCount: number;
@@ -50,29 +89,30 @@ export interface AcsAccountView {
 }
 
 /**
- * Set the full set of ACS accounts a tenant may send through, plus which one is
- * primary. An empty list clears all assignments. `primaryAcsAccountId` must be a
- * member of `acsAccountIds` (or null when the list is empty).
+ * Set the full set of email channels a tenant may send through, plus which one is
+ * primary. An empty list clears all assignments. `primaryEmailChannelId` must be a
+ * member of `emailChannelIds` (or null when the list is empty).
  */
-export const AssignAcsAccountsSchema = z
+export const AssignEmailChannelsSchema = z
   .object({
-    acsAccountIds: z.array(z.string().uuid()).max(50),
-    primaryAcsAccountId: z.string().uuid().nullable(),
+    emailChannelIds: z.array(z.string().uuid()).max(50),
+    primaryEmailChannelId: z.string().uuid().nullable(),
   })
   .refine(
     (v) =>
-      v.acsAccountIds.length === 0
-        ? v.primaryAcsAccountId === null
-        : v.primaryAcsAccountId !== null && v.acsAccountIds.includes(v.primaryAcsAccountId),
-    { message: '主 ACS 账号必须是已分配集合中的一个' },
+      v.emailChannelIds.length === 0
+        ? v.primaryEmailChannelId === null
+        : v.primaryEmailChannelId !== null && v.emailChannelIds.includes(v.primaryEmailChannelId),
+    { message: '主邮件通道必须是已分配集合中的一个' },
   );
-export type AssignAcsAccountsInput = z.infer<typeof AssignAcsAccountsSchema>;
+export type AssignEmailChannelsInput = z.infer<typeof AssignEmailChannelsSchema>;
 
-/** A single ACS assignment for a tenant, as shown in admin/tenant views. */
-export interface AssignedAcsAccountView {
+/** A single email-channel assignment for a tenant, as shown in admin/tenant views. */
+export interface AssignedEmailChannelView {
   id: string;
   name: string;
-  status: AcsAccountStatusValue;
+  provider: EmailChannelProviderValue;
+  status: EmailChannelStatusValue;
   isPrimary: boolean;
 }
 
@@ -80,8 +120,8 @@ export interface AdminAccountView {
   id: string;
   name: string;
   slug: string;
-  /** All ACS accounts assigned to this tenant; one has isPrimary=true. */
-  acsAccounts: AssignedAcsAccountView[];
+  /** All email channels assigned to this tenant; one has isPrimary=true. */
+  emailChannels: AssignedEmailChannelView[];
   senderDomainCount: number;
   sendQuotaRemaining: number;
   status: 'pending_activation' | 'active' | 'suspended';

@@ -281,7 +281,7 @@ model Account {
   /// understands why writes are blocked. Optional.
   suspendedReason     String?       @map("suspended_reason")
   /// Remaining prepaid send quota. Decremented atomically in runSend on
-  /// every ACS call attempt (success or failure). When it reaches 0, the
+  /// every provider send attempt (success or failure). When it reaches 0, the
   /// scheduler stops enqueueing for this tenant and any in-flight job
   /// fails the recipient (and same-campaign pending) with a quota error.
   /// Top-up is admin-driven via PATCH /api/admin/accounts/:id/quota.
@@ -309,7 +309,7 @@ model Account {
   segments               Segment[]
   quotaOrders            QuotaOrder[]
   commissionRecords      CommissionRecord[]
-  acsAccounts            AccountAcsAccount[]
+  emailChannels          AccountEmailChannel[]
   shopConnections        ShopConnection[]
   shopOrders             ShopOrder[]
   shopAutomations        ShopAutomation[]
@@ -321,22 +321,22 @@ model Account {
   @@map("accounts")
 }
 
-/// Join table: which ACS accounts a tenant may send through. A tenant can be
-/// assigned multiple ACS accounts; exactly one is flagged `isPrimary` (enforced
-/// by a partial unique index in migration SQL) and is used as the default when
-/// adding a sender domain and as the fallback for single-ACS tenants.
-model AccountAcsAccount {
-  accountId    String   @map("account_id") @db.Uuid
-  acsAccountId String   @map("acs_account_id") @db.Uuid
+/// Join table: which email channels a tenant may send through. A tenant can be
+/// assigned multiple channels; exactly one is flagged `isPrimary` (enforced by
+/// a partial unique index in migration SQL) and is used as the default when
+/// adding a sender domain.
+model AccountEmailChannel {
+  accountId      String   @map("account_id") @db.Uuid
+  emailChannelId String   @map("email_channel_id") @db.Uuid
   isPrimary    Boolean  @default(false) @map("is_primary")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  account    Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  acsAccount AcsAccount @relation(fields: [acsAccountId], references: [id], onDelete: Restrict)
+  account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  emailChannel EmailChannel @relation(fields: [emailChannelId], references: [id], onDelete: Restrict)
 
-  @@id([accountId, acsAccountId])
-  @@index([acsAccountId])
-  @@map("account_acs_accounts")
+  @@id([accountId, emailChannelId])
+  @@index([emailChannelId])
+  @@map("account_email_channels")
 }
 
 enum AccountStatus {
@@ -362,25 +362,27 @@ model AccountUser {
 }
 
 // ============================================================================
-// ACS Accounts (platform-level)
+// Email Channels (platform-level)
 // ============================================================================
 
-enum AcsAccountStatus {
+enum EmailChannelStatus {
   active
   suspended
   retired
 
-  @@map("acs_account_status")
+  @@map("email_channel_status")
 }
 
-model AcsAccount {
+model EmailChannel {
   id                            String           @id @default(uuid()) @db.Uuid
+  /// Sending channel provider.
+  provider                      String           @default("acs") @db.VarChar(16)
   name                          String
   rpsLimit                      Int              @map("rps_limit")
   rpmLimit                      Int              @map("rpm_limit")
   rphLimit                      Int              @map("rph_limit")
   rpdLimit                      Int              @map("rpd_limit")
-  status                        AcsAccountStatus @default(active)
+  status                        EmailChannelStatus @default(active)
   // Azure Resource Manager handles for managing domains under this account.
   // All required to drive the Azure ARM SDK; secret is stored verbatim for
   // the MVP — production should encrypt at rest.
@@ -393,12 +395,17 @@ model AcsAccount {
   // Communication Service resource that verified domains get linked to
   // (Microsoft.Communication/communicationServices). Different resource type
   // than EmailService — same RG, but separate name. Required to actually
-  // send mail through the domain. Nullable so existing ACS accounts (created
+  // send mail through the domain. Nullable so existing channels (created
   // before this column existed) keep working — they'll be rejected at the
   // link step until an admin edits and fills it in.
   azureCommunicationServiceName String?          @map("azure_communication_service_name")
+  /// Mailgun API settings. `mailgunApiBaseUrl` supports EU accounts
+  /// (https://api.eu.mailgun.net) while defaulting to the US endpoint.
+  mailgunApiKey                 String?          @map("mailgun_api_key") @db.Text
+  mailgunApiBaseUrl             String?          @map("mailgun_api_base_url")
+  mailgunWebhookSigningKey      String?          @map("mailgun_webhook_signing_key") @db.Text
   /// Platform-wide default. New tenant signups get a primary
-  /// AccountAcsAccount link to this ACS. At most one row may be true at a
+  /// AccountEmailChannel link to this channel. At most one row may be true at a
   /// time — enforced by a partial unique index defined in migration SQL
   /// (Prisma 5 doesn't support partial unique constraints declaratively).
   isDefault                     Boolean          @default(false) @map("is_default")
@@ -406,10 +413,10 @@ model AcsAccount {
   updatedAt                     DateTime         @updatedAt @map("updated_at")
 
   senderDomains SenderDomain[]
-  accountLinks  AccountAcsAccount[]
+  accountLinks  AccountEmailChannel[]
   sendLogs      SendLog[]
 
-  @@map("acs_accounts")
+  @@map("email_channels")
 }
 
 // ============================================================================
@@ -428,18 +435,19 @@ enum SenderDomainStatus {
 model SenderDomain {
   id                  String             @id @default(uuid()) @db.Uuid
   accountId           String             @map("account_id") @db.Uuid
-  acsAccountId        String             @map("acs_account_id") @db.Uuid
+  emailChannelId      String             @map("email_channel_id") @db.Uuid
   domain              String
   // The five DNS records Azure asks for (Domain, SPF, DKIM, DKIM2, DMARC).
   // Stored as JSON because the record types are mixed (TXT + CNAME) and the
   // exact selectors vary per Azure region.
   verificationRecords Json               @map("verification_records")
-  // Latest verificationStates per record from ACS, refreshed on `verify`.
+  // Latest verificationStates per record from the provider, refreshed on `verify`.
   verificationStates  Json?              @map("verification_states")
+  provisioningError   String?            @map("provisioning_error") @db.Text
   status              SenderDomainStatus @default(pending)
   lastCheckedAt       DateTime?          @map("last_checked_at")
   verifiedAt          DateTime?          @map("verified_at")
-  // Set after the domain has been added to the AcsAccount's
+  // Set after an ACS domain has been added to the Communication Service's
   // CommunicationService.linkedDomains array. Without this, sending from
   // the domain returns 401 from ACS Email even if DNS is verified.
   linkedAt            DateTime?          @map("linked_at")
@@ -447,12 +455,12 @@ model SenderDomain {
   updatedAt           DateTime           @updatedAt @map("updated_at")
 
   account         Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  acsAccount      AcsAccount       @relation(fields: [acsAccountId], references: [id], onDelete: Restrict)
+  emailChannel    EmailChannel     @relation(fields: [emailChannelId], references: [id], onDelete: Restrict)
   senderUsernames SenderUsername[]
 
   @@unique([accountId, domain])
   @@index([accountId])
-  @@index([acsAccountId])
+  @@index([emailChannelId])
   @@map("sender_domains")
 }
 
@@ -747,10 +755,10 @@ model Campaign {
 
 /// Extra "from" addresses a campaign rotates through. `Campaign.fromEmail`/
 /// `fromName` always equal the position-0 sender (kept for previews, the
-/// list view, and as the tick scheduler's ACS-routing key). When a campaign
+/// list view, and as the tick scheduler's channel-routing key). When a campaign
 /// has >1 sender, each recipient is assigned one in round-robin at
 /// materialisation time (see CampaignRecipient.fromEmail). All senders must
-/// resolve to verified domains under the SAME ACS account as the primary.
+/// resolve to verified domains under their assigned email channels.
 model CampaignSender {
   id         String @id @default(uuid()) @db.Uuid
   campaignId String @map("campaign_id") @db.Uuid
@@ -854,10 +862,10 @@ model CampaignRecipient {
   /// campaigns and all rows created before this feature).
   fromEmail    String?         @map("from_email")
   fromName     String?         @map("from_name")
-  /// ACS account this recipient's send is routed through, resolved from the
+  /// Email channel this recipient's send is routed through, resolved from the
   /// assigned sender's domain at materialisation. NULL = legacy rows; the
   /// dispatcher falls back to resolving from the from-address domain.
-  acsAccountId String?         @map("acs_account_id") @db.Uuid
+  emailChannelId String?       @map("email_channel_id") @db.Uuid
   /// Name of the campaign target list THIS contact belongs to, captured at
   /// materialisation. When the contact is in several of the campaign's target
   /// lists this is the FIRST one (lowest CampaignList.position) they belong to.
@@ -876,7 +884,7 @@ model CampaignRecipient {
   @@index([campaignId, status])
   @@index([accountId, status])
   @@index([messageId])
-  @@index([acsAccountId, status])
+  @@index([emailChannelId, status])
   @@map("campaign_recipients")
 }
 
@@ -884,13 +892,13 @@ model CampaignRecipient {
 // Send Logs
 // ============================================================================
 
-/// One row per ACS send attempt. Append-only; multiple rows per recipient
-/// allowed (future retries). Pre-flight failures (no html / suspended account
-/// / transport build failure) are NOT logged here — those never reach ACS.
+/// One row per provider send attempt. Append-only; multiple rows per recipient
+/// allowed (future retries). Pre-flight failures (no html / suspended channel
+/// / transport build failure) are NOT logged here — those never reach provider APIs.
 model SendLog {
   id               String  @id @default(uuid()) @db.Uuid
   accountId        String  @map("account_id") @db.Uuid // tenant
-  acsAccountId     String? @map("acs_account_id") @db.Uuid // SetNull on ACS account delete to retain history
+  emailChannelId   String? @map("email_channel_id") @db.Uuid // SetNull on channel delete to retain history
   /// `campaign` or `automation`; kept as text so future send sources can be
   /// added without an enum migration.
   source           String  @default("campaign")
@@ -904,21 +912,21 @@ model SendLog {
   toAddress   String  @map("to_address")
 
   ok              Boolean
-  /// ACS LRO terminal status (Succeeded / Failed / Canceled) or `Http<code>` / `Error`
+  /// Provider terminal status (Succeeded / Failed / Canceled) or `Http<code>` / `Error`
   /// when the SDK threw before reaching a terminal LRO state.
   providerStatus  String?  @map("provider_status")
   messageId       String?  @map("message_id")
   errorCode       String?  @map("error_code")
   errorMessage    String?  @map("error_message") @db.Text
   latencyMs       Int?     @map("latency_ms")
-  /// Raw ACS response body (success: minimal; failure: cherry-picked RestError).
+  /// Raw provider response body (success: minimal; failure: cherry-picked error).
   /// Request body is intentionally NOT stored — it's large and the campaign
   /// row already carries fromEmail / subject / html.
   responsePayload Json?    @map("response_payload")
   sentAt          DateTime @default(now()) @map("sent_at")
 
   account              Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  acsAccount           AcsAccount?         @relation(fields: [acsAccountId], references: [id], onDelete: SetNull)
+  emailChannel         EmailChannel?       @relation(fields: [emailChannelId], references: [id], onDelete: SetNull)
   campaign             Campaign?           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   recipient            CampaignRecipient?  @relation(fields: [recipientId], references: [id], onDelete: Cascade)
   automation           ShopAutomation?     @relation(fields: [automationId], references: [id], onDelete: Cascade)
@@ -929,7 +937,7 @@ model SendLog {
   @@index([automationId, sentAt])
   @@index([automationSendId, sentAt])
   @@index([source, sentAt])
-  @@index([acsAccountId, ok, sentAt])
+  @@index([emailChannelId, ok, sentAt])
   @@index([accountId, sentAt])
   @@map("send_logs")
 }
@@ -1068,7 +1076,7 @@ enum ShopConnectionStatus {
 
 /// One connected store per row. `devToken` is the developer-app token returned
 /// by the authorize exchange and used for every OpenAPI call; stored verbatim
-/// for the MVP (mirrors AcsAccount.azureClientSecret) — encrypt at rest later.
+/// for the MVP (mirrors EmailChannel.azureClientSecret) — encrypt at rest later.
 /// `webhookSecret` is our own per-connection secret used to HMAC-verify inbound
 /// webhooks.
 model ShopConnection {
@@ -1247,9 +1255,9 @@ model ShopAutomationStep {
 
 /// A single flow-message send — the Klaviyo-style first-class, independently
 /// tracked transactional/automation email (NOT a campaign). Replaces the old
-/// hidden-campaign-per-send borrow. Open/click/unsubscribe events and ACS
+/// hidden-campaign-per-send borrow. Open/click/unsubscribe events and provider
 /// delivery/bounce reports resolve back to this row (by `id` for the tracking
-/// pixel/links, by `messageId` for ACS reports). `@@unique([automationId,
+/// pixel/links, by `messageId` for provider reports). `@@unique([automationId,
 /// dedupKey])` makes a re-delivered webhook (same order/checkout) idempotent.
 model ShopAutomationSend {
   id           String    @id @default(uuid()) @db.Uuid
@@ -1267,10 +1275,10 @@ model ShopAutomationSend {
   preheader    String?
   /// Lifecycle: pending → queued → sent | failed | skipped.
   status       String    @default("pending")
-  /// ACS operationId, echoed back as messageId on delivery/bounce reports.
+  /// Provider operation id, echoed back as messageId on delivery/bounce reports where supported.
   messageId    String?   @map("message_id")
-  /// ACS account the send is routed through (resolved from the sender domain).
-  acsAccountId String?   @map("acs_account_id") @db.Uuid
+  /// Email channel the send is routed through (resolved from the sender domain).
+  emailChannelId String? @map("email_channel_id") @db.Uuid
   /// Sender snapshot at send time.
   fromEmail    String?   @map("from_email")
   fromName     String?   @map("from_name")

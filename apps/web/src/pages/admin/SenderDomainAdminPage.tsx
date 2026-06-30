@@ -10,10 +10,11 @@ interface AdminSenderDomain {
   id: string;
   domain: string;
   status: 'provisioning' | 'pending' | 'verified' | 'failed';
+  provisioningError: string | null;
   verifiedAt: string | null;
   createdAt: string;
   account: { id: string; name: string; slug: string };
-  acsAccount: { id: string; name: string; status: string } | null;
+  emailChannel: { id: string; name: string; provider: 'acs' | 'mailgun'; status: string } | null;
 }
 
 export function SenderDomainAdminPage() {
@@ -27,7 +28,7 @@ export function SenderDomainAdminPage() {
       <div>
         <h1 className="text-xl font-semibold">发件域名(全平台)</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          所有租户的已添加域名概览。每个域名的 ACS 账号在租户首次添加时由"租户管理"页的默认账号决定,无法在此页变更。
+          所有租户的已添加域名概览。每个域名的邮件通道在租户添加域名时决定,无法在此页变更。
         </p>
       </div>
 
@@ -39,7 +40,7 @@ export function SenderDomainAdminPage() {
                 <th className="px-4 py-3 font-medium">租户</th>
                 <th className="px-4 py-3 font-medium">域名</th>
                 <th className="px-4 py-3 font-medium">域名状态</th>
-                <th className="px-4 py-3 font-medium">绑定的 ACS 账号</th>
+                <th className="px-4 py-3 font-medium">绑定的邮件通道</th>
                 <th className="px-4 py-3 font-medium">验证时间</th>
               </tr>
             </thead>
@@ -59,13 +60,24 @@ export function SenderDomainAdminPage() {
                     ) : d.status === 'provisioning' ? (
                       <Badge variant="muted">注册中</Badge>
                     ) : d.status === 'failed' ? (
-                      <Badge variant="danger">注册失败</Badge>
+                      <Badge variant="danger" title={d.provisioningError ?? undefined}>
+                        注册失败
+                      </Badge>
                     ) : (
                       <Badge variant="warning">待验证</Badge>
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm">
-                    {d.acsAccount ? d.acsAccount.name : <span className="text-muted-foreground">—</span>}
+                    {d.emailChannel ? (
+                      <div className="flex items-center gap-2">
+                        <span>{d.emailChannel.name}</span>
+                        <Badge variant="muted">
+                          {d.emailChannel.provider === 'mailgun' ? 'Mailgun' : 'Azure'}
+                        </Badge>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {formatDateTime(d.verifiedAt)}

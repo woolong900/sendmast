@@ -1,6 +1,6 @@
 import type { Redis } from 'ioredis';
 
-export interface AcsQuota {
+export interface EmailChannelQuota {
   rpsLimit: number;
   rpmLimit: number;
   rphLimit: number;
@@ -15,7 +15,7 @@ const DAY_MS = 86_400_000;
 /**
  * Sliding-window quota.
  *
- * Each ACS account has a single Redis Sorted Set `acs:{id}:events` whose
+ * Each email channel has a single Redis Sorted Set `email-channel:{id}:events` whose
  * members are unique nonces and scores are millisecond timestamps. To check
  * how many sends are still allowed under any of the four windows we just
  * `ZCOUNT (now-windowMs) +inf`. To record a send we `ZADD` one entry.
@@ -47,9 +47,9 @@ export class QuotaManager {
    * How many sends can start right now without violating any of the four
    * sliding windows. Returns 0 when the tightest window is already at limit.
    */
-  async getAvailable(acsAccountId: string, q: AcsQuota): Promise<number> {
+  async getAvailable(emailChannelId: string, q: EmailChannelQuota): Promise<number> {
     const result = await (this.redis as RedisWithCommands).sendmastQuotaAvail(
-      this.key(acsAccountId),
+      this.key(emailChannelId),
       String(Date.now()),
       String(q.rpsLimit),
       String(q.rpmLimit),
@@ -61,22 +61,22 @@ export class QuotaManager {
 
   /**
    * Record `count` sends. We do not check limits here on purpose — runSend
-   * only calls this after ACS has accepted, and a momentary over-issuance
+   * only calls this after the provider has accepted, and a momentary over-issuance
    * (when several workers all flip to sent in the same window) is preferred
    * over rejecting a send that already left our system.
    */
-  async consume(acsAccountId: string, _q: AcsQuota, count: number): Promise<void> {
+  async consume(emailChannelId: string, _q: EmailChannelQuota, count: number): Promise<void> {
     const nonce = `${this.nonceBase}-${++this.nonceCounter}`;
     await (this.redis as RedisWithCommands).sendmastQuotaConsume(
-      this.key(acsAccountId),
+      this.key(emailChannelId),
       String(Date.now()),
       String(count),
       nonce,
     );
   }
 
-  private key(acsAccountId: string): string {
-    return `acs:${acsAccountId}:events`;
+  private key(emailChannelId: string): string {
+    return `email-channel:${emailChannelId}:events`;
   }
 }
 

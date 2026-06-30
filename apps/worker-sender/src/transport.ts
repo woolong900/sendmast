@@ -1,7 +1,7 @@
 import { ClientSecretCredential } from '@azure/identity';
 import { CommunicationServiceManagementClient } from '@azure/arm-communication';
 import { EmailClient } from '@azure/communication-email';
-import type { AcsAccount } from '@prisma/client';
+import type { EmailChannel } from '@prisma/client';
 
 export interface MailMessage {
   from: { name: string; address: string };
@@ -68,21 +68,24 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
  * an immutable Azure resource property, so we discover it once via ARM and
  * reuse it for the lifetime of the cached transport.
  */
-function cacheKey(acct: AcsAccount): string {
+function cacheKey(acct: EmailChannel): string {
   return [
     acct.id,
+    acct.provider,
     acct.azureTenantId,
     acct.azureClientId,
     acct.azureSubscriptionId,
     acct.azureResourceGroup,
     acct.azureCommunicationServiceName ?? '',
     acct.azureClientSecret.slice(0, 8),
+    acct.mailgunApiBaseUrl ?? '',
+    acct.mailgunApiKey?.slice(0, 8) ?? '',
   ].join('|');
 }
 
 const cache = new Map<string, Promise<MailTransport>>();
 
-export function getTransportForAccount(acct: AcsAccount): Promise<MailTransport> {
+export function getTransportForAccount(acct: EmailChannel): Promise<MailTransport> {
   const key = cacheKey(acct);
   let entry = cache.get(key);
   if (!entry) {
@@ -96,10 +99,15 @@ export function getTransportForAccount(acct: AcsAccount): Promise<MailTransport>
   return entry;
 }
 
-async function buildTransport(acct: AcsAccount): Promise<MailTransport> {
+async function buildTransport(acct: EmailChannel): Promise<MailTransport> {
+  if (acct.provider === 'mailgun') return buildMailgunTransport(acct);
+  return buildEmailChannelTransport(acct);
+}
+
+async function buildEmailChannelTransport(acct: EmailChannel): Promise<MailTransport> {
   if (!acct.azureCommunicationServiceName) {
     throw new Error(
-      `ACS account ${acct.name}: azureCommunicationServiceName is not configured`,
+      `Azure ACS channel ${acct.name}: azureCommunicationServiceName is not configured`,
     );
   }
 
@@ -117,7 +125,7 @@ async function buildTransport(acct: AcsAccount): Promise<MailTransport> {
   const hostName = resource.hostName;
   if (!hostName) {
     throw new Error(
-      `ACS account ${acct.name}: Communication Service ${acct.azureCommunicationServiceName} has no hostName`,
+      `Azure ACS channel ${acct.name}: Communication Service ${acct.azureCommunicationServiceName} has no hostName`,
     );
   }
 
@@ -180,6 +188,132 @@ async function buildTransport(acct: AcsAccount): Promise<MailTransport> {
       }
     },
   };
+}
+
+function buildMailgunTransport(acct: EmailChannel): MailTransport {
+  if (!acct.mailgunApiKey) {
+    throw new Error(`Mailgun channel ${acct.name}: API Key is not configured`);
+  }
+  const base = (acct.mailgunApiBaseUrl || 'https://api.mailgun.net').replace(/\/+$/, '');
+  const auth = `Basic ${Buffer.from(`api:${acct.mailgunApiKey}`).toString('base64')}`;
+
+  return {
+    async send(msg) {
+      const startedAt = Date.now();
+      const domain = msg.from.address.split('@')[1]?.toLowerCase();
+      if (!domain) {
+        return {
+          ok: false,
+          messageId: '',
+          providerStatus: 'Error',
+          latencyMs: Date.now() - startedAt,
+          errorMessage: `Invalid sender address: ${msg.from.address}`,
+        };
+      }
+
+      try {
+        const body = new URLSearchParams({
+          from: formatFrom(msg.from.name, msg.from.address),
+          to: msg.to,
+          subject: msg.subject,
+          html: msg.html,
+        });
+        for (const [key, value] of Object.entries(msg.headers ?? {})) {
+          body.set(`h:${key}`, value);
+        }
+        if (msg.operationId) body.set('h:X-SendMast-Operation-Id', msg.operationId);
+        const variables = mailgunVariables(msg.headers ?? {}, msg.operationId);
+        for (const [key, value] of Object.entries(variables)) {
+          body.set(`v:${key}`, value);
+        }
+
+        const res = await withTimeout(
+          fetch(`${base}/v3/${encodeURIComponent(domain)}/messages`, {
+            method: 'POST',
+            headers: {
+              Authorization: auth,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body,
+          }),
+          SEND_TIMEOUT_MS,
+          'Mailgun send',
+        );
+        const text = await res.text();
+        const payload = parseJson(text);
+        const latencyMs = Date.now() - startedAt;
+        if (!res.ok) {
+          return {
+            ok: false,
+            messageId: '',
+            providerStatus: `Http${res.status}`,
+            latencyMs,
+            errorMessage: providerMessage(payload, text),
+            providerResponse: payload,
+          };
+        }
+        return {
+          ok: true,
+          messageId:
+            typeof payload === 'object' && payload && 'id' in payload
+              ? String((payload as { id?: unknown }).id ?? msg.operationId ?? '')
+              : msg.operationId ?? '',
+          providerStatus: 'Accepted',
+          latencyMs,
+          providerResponse: payload,
+        };
+      } catch (err) {
+        const latencyMs = Date.now() - startedAt;
+        return {
+          ok: false,
+          messageId: '',
+          providerStatus: 'Error',
+          latencyMs,
+          errorCode: (err as { code?: string })?.code,
+          errorMessage: err instanceof Error ? err.message : String(err),
+          providerResponse: serialiseError(err),
+        };
+      }
+    },
+  };
+}
+
+function mailgunVariables(
+  headers: Record<string, string>,
+  operationId?: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (headers['X-SendMast-Recipient']) out.sendmast_recipient_id = headers['X-SendMast-Recipient'];
+  if (headers['X-SendMast-Campaign']) out.sendmast_campaign_id = headers['X-SendMast-Campaign'];
+  if (headers['X-SendMast-FlowSend']) {
+    out.sendmast_recipient_id = headers['X-SendMast-FlowSend'];
+    out.sendmast_source = 'a';
+  }
+  if (headers['X-SendMast-Automation']) out.sendmast_automation_id = headers['X-SendMast-Automation'];
+  if (operationId) out.sendmast_operation_id = operationId;
+  return out;
+}
+
+function formatFrom(name: string, address: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return address;
+  return `"${trimmed.replace(/"/g, '\\"')}" <${address}>`;
+}
+
+function parseJson(text: string): unknown {
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { body: text.slice(0, 4096) };
+  }
+}
+
+function providerMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === 'object' && 'message' in payload) {
+    return String((payload as { message?: unknown }).message ?? fallback);
+  }
+  return fallback;
 }
 
 /**

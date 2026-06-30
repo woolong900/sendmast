@@ -43,6 +43,13 @@ export class WebhookController {
     return { accepted: result.accepted };
   }
 
+  /** Mailgun webhook endpoint. Configure this URL in Mailgun as /api/webhooks/mailgun. */
+  @Post('mailgun')
+  @HttpCode(200)
+  async mailgun(@Body() body: unknown) {
+    return this.svc.handleMailgun(body);
+  }
+
   /**
    * Reject the request unless the shared key matches EVENTGRID_WEBHOOK_KEY.
    * The Authorization header is used because Caddy redacts it from access logs.

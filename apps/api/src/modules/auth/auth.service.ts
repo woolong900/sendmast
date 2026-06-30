@@ -135,10 +135,10 @@ export class AuthService {
     const referredByChannelId = await this.referral.resolveChannelIdForSignup(input.referralCode);
 
     const { user, account } = await this.prisma.$transaction(async (tx) => {
-      // Inherit the platform-wide default ACS account (if one is set and
+      // Inherit the platform-wide default email channel (if one is set and
       // active) so the new tenant can immediately add sender domains
       // without an admin having to assign one manually.
-      const platformDefault = await tx.acsAccount.findFirst({
+      const platformDefault = await tx.emailChannel.findFirst({
         where: { isDefault: true, status: 'active' },
         select: { id: true },
       });
@@ -151,9 +151,9 @@ export class AuthService {
           // create/start is gated until they redeem the activation link.
           referredByChannelId,
           referredAt: referredByChannelId ? new Date() : null,
-          // Inherit the platform default ACS as the tenant's primary assignment.
+          // Inherit the platform default email channel as the tenant's primary assignment.
           ...(platformDefault
-            ? { acsAccounts: { create: { acsAccountId: platformDefault.id, isPrimary: true } } }
+            ? { emailChannels: { create: { emailChannelId: platformDefault.id, isPrimary: true } } }
             : {}),
         },
       });

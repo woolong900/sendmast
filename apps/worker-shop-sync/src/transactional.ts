@@ -8,7 +8,7 @@ import type { Queue } from 'bullmq';
  * Each triggered email is a first-class `shop_automation_sends` row that is
  * sent and tracked independently — NOT a campaign. worker-sender's runFlowSend
  * picks it off the `send-email` queue, renders the automation's template with
- * the per-send merge vars, and applies the same quota / ACS routing / open-
+ * the per-send merge vars, and applies the same quota / channel routing / open-
  * click-bounce tracking machinery as campaigns (source='automation').
  */
 
@@ -58,10 +58,10 @@ export function formatMoney(value: number, currency: string): string {
 }
 
 /**
- * Resolve the ACS account a from-address routes through (its domain must be a
+ * Resolve the email channel a from-address routes through (its domain must be a
  * verified sender domain on this tenant). NULL = unroutable.
  */
-async function resolveAcsAccountId(
+async function resolveEmailChannelId(
   prisma: PrismaClient,
   accountId: string,
   fromEmail: string,
@@ -70,9 +70,9 @@ async function resolveAcsAccountId(
   if (!domain) return null;
   const sd = await prisma.senderDomain.findFirst({
     where: { accountId, domain },
-    select: { acsAccountId: true },
+    select: { emailChannelId: true },
   });
-  return sd?.acsAccountId ?? null;
+  return sd?.emailChannelId ?? null;
 }
 
 /**
@@ -115,12 +115,12 @@ export async function enqueueTransactional(
     throw err;
   }
 
-  const acsAccountId = await resolveAcsAccountId(
+  const emailChannelId = await resolveEmailChannelId(
     prisma,
     params.accountId,
     params.fromEmail,
   );
-  if (!acsAccountId) {
+  if (!emailChannelId) {
     await prisma.shopAutomationSend.update({
       where: { id: sendId },
       data: {
@@ -133,12 +133,12 @@ export async function enqueueTransactional(
 
   await prisma.shopAutomationSend.update({
     where: { id: sendId },
-    data: { acsAccountId },
+    data: { emailChannelId },
   });
 
   await sendQueue.add(
     'send',
-    { flowSendId: sendId, acsAccountId },
+    { flowSendId: sendId, emailChannelId },
     {
       jobId: `f-${sendId}`,
       attempts: 5,

@@ -20,12 +20,12 @@ import { PlatformAdminGuard } from '../auth/platform-admin.guard';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import {
-  AssignAcsAccountsSchema,
+  AssignEmailChannelsSchema,
   SetAccountRoleSchema,
   SetAccountStatusSchema,
   SetTenantQuotaSchema,
 } from '@sendmast/shared';
-import type { AccountRole, AdminAccountView, AssignedAcsAccountView } from '@sendmast/shared';
+import type { AccountRole, AdminAccountView, AssignedEmailChannelView } from '@sendmast/shared';
 import { firstZodError } from '../../common/zod-error';
 
 @ApiTags('admin/accounts')
@@ -43,8 +43,8 @@ export class AccountAdminController {
     const rows = await this.prisma.account.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        acsAccounts: {
-          include: { acsAccount: { select: { id: true, name: true, status: true } } },
+        emailChannels: {
+          include: { emailChannel: { select: { id: true, name: true, provider: true, status: true } } },
           orderBy: { createdAt: 'asc' },
         },
         // Owner email = first member with role=owner. There can be more in
@@ -63,11 +63,12 @@ export class AccountAdminController {
       id: r.id,
       name: r.name,
       slug: r.slug,
-      acsAccounts: r.acsAccounts.map(
-        (l): AssignedAcsAccountView => ({
-          id: l.acsAccount.id,
-          name: l.acsAccount.name,
-          status: l.acsAccount.status as 'active' | 'suspended' | 'retired',
+      emailChannels: r.emailChannels.map(
+        (l): AssignedEmailChannelView => ({
+          id: l.emailChannel.id,
+          name: l.emailChannel.name,
+          provider: l.emailChannel.provider as 'acs' | 'mailgun',
+          status: l.emailChannel.status as 'active' | 'suspended' | 'retired',
           isPrimary: l.isPrimary,
         }),
       ),
@@ -200,37 +201,38 @@ export class AccountAdminController {
     );
   }
 
-  @Get(':id/acs-accounts')
-  async listAcsAccounts(
+  @Get(':id/email-channels')
+  async listEmailChannels(
     @Param('id', new ParseUUIDPipe()) id: string,
-  ): Promise<AssignedAcsAccountView[]> {
-    const links = await this.prisma.accountAcsAccount.findMany({
+  ): Promise<AssignedEmailChannelView[]> {
+    const links = await this.prisma.accountEmailChannel.findMany({
       where: { accountId: id },
-      include: { acsAccount: { select: { id: true, name: true, status: true } } },
+      include: { emailChannel: { select: { id: true, name: true, provider: true, status: true } } },
       orderBy: { createdAt: 'asc' },
     });
     return links.map((l) => ({
-      id: l.acsAccount.id,
-      name: l.acsAccount.name,
-      status: l.acsAccount.status as 'active' | 'suspended' | 'retired',
+      id: l.emailChannel.id,
+      name: l.emailChannel.name,
+      provider: l.emailChannel.provider as 'acs' | 'mailgun',
+      status: l.emailChannel.status as 'active' | 'suspended' | 'retired',
       isPrimary: l.isPrimary,
     }));
   }
 
   /**
-   * Replace a tenant's full ACS assignment set in one shot. The set must
-   * reference existing, active ACS accounts; exactly one is primary (unless the
-   * set is empty). An ACS account cannot be removed while the tenant still has
+   * Replace a tenant's full email-channel assignment set in one shot. The set must
+   * reference existing, active email channels; exactly one is primary (unless the
+   * set is empty). An email channel cannot be removed while the tenant still has
    * sender domains bound to it (those domains' sends would break).
    */
-  @Put(':id/acs-accounts')
-  async assignAcsAccounts(
+  @Put(':id/email-channels')
+  async assignEmailChannels(
     @Param('id', new ParseUUIDPipe()) id: string,
     @Body() body: unknown,
   ) {
-    const r = AssignAcsAccountsSchema.safeParse(body);
+    const r = AssignEmailChannelsSchema.safeParse(body);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
-    const { acsAccountIds, primaryAcsAccountId } = r.data;
+    const { emailChannelIds, primaryEmailChannelId } = r.data;
 
     const account = await this.prisma.account.findUnique({
       where: { id },
@@ -238,44 +240,44 @@ export class AccountAdminController {
     });
     if (!account) throw new BadRequestException('账号不存在');
 
-    const ids = Array.from(new Set(acsAccountIds));
+    const ids = Array.from(new Set(emailChannelIds));
     if (ids.length > 0) {
-      const found = await this.prisma.acsAccount.findMany({
+      const found = await this.prisma.emailChannel.findMany({
         where: { id: { in: ids } },
         select: { id: true, status: true },
       });
       if (found.length !== ids.length) {
-        throw new BadRequestException('包含不存在的 ACS 账号');
+        throw new BadRequestException('包含不存在的邮件通道');
       }
       const inactive = found.find((a) => a.status !== 'active');
       if (inactive) {
-        throw new BadRequestException(`ACS 账号 ${inactive.id} 当前状态为 ${inactive.status}，无法分配`);
+        throw new BadRequestException(`邮件通道 ${inactive.id} 当前状态为 ${inactive.status}，无法分配`);
       }
     }
 
-    // Guard: any ACS account currently bound to this tenant's sender domains
+    // Guard: any email channel currently bound to this tenant's sender domains
     // must remain in the new set, otherwise those domains can no longer send.
     const boundDomains = await this.prisma.senderDomain.findMany({
       where: { accountId: id },
-      select: { acsAccountId: true },
-      distinct: ['acsAccountId'],
+      select: { emailChannelId: true },
+      distinct: ['emailChannelId'],
     });
-    const boundAcsIds = new Set(boundDomains.map((d) => d.acsAccountId));
-    const removed = [...boundAcsIds].filter((acsId) => !ids.includes(acsId));
+    const boundEmailChannelIds = new Set(boundDomains.map((d) => d.emailChannelId));
+    const removed = [...boundEmailChannelIds].filter((channelId) => !ids.includes(channelId));
     if (removed.length > 0) {
       throw new BadRequestException(
-        '无法移除仍有发件域名绑定的 ACS 账号，请先删除相关域名',
+        '无法移除仍有发件域名绑定的邮件通道，请先删除相关域名',
       );
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.accountAcsAccount.deleteMany({ where: { accountId: id } });
+      await tx.accountEmailChannel.deleteMany({ where: { accountId: id } });
       if (ids.length > 0) {
-        await tx.accountAcsAccount.createMany({
-          data: ids.map((acsId) => ({
+        await tx.accountEmailChannel.createMany({
+          data: ids.map((channelId) => ({
             accountId: id,
-            acsAccountId: acsId,
-            isPrimary: acsId === primaryAcsAccountId,
+            emailChannelId: channelId,
+            isPrimary: channelId === primaryEmailChannelId,
           })),
         });
       }

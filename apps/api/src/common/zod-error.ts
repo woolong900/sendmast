@@ -34,7 +34,7 @@ const FIELD_LABELS: Record<string, string> = {
   email: '邮箱',
   description: '描述',
 
-  // ACS account
+  // email channel
   rpsLimit: '每秒发送上限',
   rpmLimit: '每分发送上限',
   rphLimit: '每时发送上限',
@@ -48,7 +48,7 @@ const FIELD_LABELS: Record<string, string> = {
 
   // sender domain
   domain: '域名',
-  acsAccountId: 'ACS 账号',
+  emailChannelId: '邮件通道',
 };
 
 function labelOf(path: string): string {

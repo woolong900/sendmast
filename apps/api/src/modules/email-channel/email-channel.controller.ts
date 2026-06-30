@@ -13,19 +13,19 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlatformAdminGuard } from '../auth/platform-admin.guard';
-import { AcsAccountService } from './acs-account.service';
+import { EmailChannelService } from './email-channel.service';
 import {
-  CreateAcsAccountSchema,
-  UpdateAcsAccountSchema,
+  CreateEmailChannelSchema,
+  UpdateEmailChannelSchema,
 } from '@sendmast/shared';
 import { firstZodError } from '../../common/zod-error';
 
-@ApiTags('admin/acs-accounts')
+@ApiTags('admin/email-channels')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, PlatformAdminGuard)
-@Controller('admin/acs-accounts')
-export class AcsAccountController {
-  constructor(private readonly svc: AcsAccountService) {}
+@Controller('admin/email-channels')
+export class EmailChannelController {
+  constructor(private readonly svc: EmailChannelService) {}
 
   @Get()
   list() {
@@ -39,14 +39,14 @@ export class AcsAccountController {
 
   @Post()
   create(@Body() body: unknown) {
-    const r = CreateAcsAccountSchema.safeParse(body);
+    const r = CreateEmailChannelSchema.safeParse(body);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
     return this.svc.create(r.data);
   }
 
   @Patch(':id')
   update(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
-    const r = UpdateAcsAccountSchema.safeParse(body);
+    const r = UpdateEmailChannelSchema.safeParse(body);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
     return this.svc.update(id, r.data);
   }

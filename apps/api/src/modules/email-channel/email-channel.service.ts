@@ -2,9 +2,9 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type {
-  AcsAccountView,
-  CreateAcsAccountInput,
-  UpdateAcsAccountInput,
+  EmailChannelView,
+  CreateEmailChannelInput,
+  UpdateEmailChannelInput,
 } from '@sendmast/shared';
 
 function redact(secret: string): string {
@@ -13,8 +13,9 @@ function redact(secret: string): string {
   return secret.slice(0, 8) + '***' + secret.slice(-4);
 }
 
-interface AcsRow {
+interface EmailChannelRow {
   id: string;
+  provider: string;
   name: string;
   rpsLimit: number;
   rpmLimit: number;
@@ -28,25 +29,28 @@ interface AcsRow {
   azureResourceGroup: string;
   azureEmailServiceName: string;
   azureCommunicationServiceName: string | null;
+  mailgunApiKey: string | null;
+  mailgunApiBaseUrl: string | null;
+  mailgunWebhookSigningKey: string | null;
   isDefault: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
 @Injectable()
-export class AcsAccountService {
+export class EmailChannelService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(): Promise<AcsAccountView[]> {
-    const rows = await this.prisma.acsAccount.findMany({
+  async list(): Promise<EmailChannelView[]> {
+    const rows = await this.prisma.emailChannel.findMany({
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { senderDomains: true } } },
     });
     return rows.map((r) => this.toView(r, r._count.senderDomains, true));
   }
 
-  async get(id: string): Promise<AcsAccountView> {
-    const row = await this.prisma.acsAccount.findUnique({
+  async get(id: string): Promise<EmailChannelView> {
+    const row = await this.prisma.emailChannel.findUnique({
       where: { id },
       include: { _count: { select: { senderDomains: true } } },
     });
@@ -54,29 +58,34 @@ export class AcsAccountService {
     return this.toView(row, row._count.senderDomains, false);
   }
 
-  async create(input: CreateAcsAccountInput): Promise<AcsAccountView> {
-    const row = await this.prisma.acsAccount.create({
+  async create(input: CreateEmailChannelInput): Promise<EmailChannelView> {
+    const row = await this.prisma.emailChannel.create({
       data: {
         name: input.name,
+        provider: input.provider,
         rpsLimit: input.rpsLimit,
         rpmLimit: input.rpmLimit,
         rphLimit: input.rphLimit,
         rpdLimit: input.rpdLimit,
         status: input.status ?? 'active',
-        azureTenantId: input.azureTenantId,
-        azureClientId: input.azureClientId,
-        azureClientSecret: input.azureClientSecret,
-        azureSubscriptionId: input.azureSubscriptionId,
-        azureResourceGroup: input.azureResourceGroup,
-        azureEmailServiceName: input.azureEmailServiceName,
+        azureTenantId: input.azureTenantId ?? '',
+        azureClientId: input.azureClientId ?? '',
+        azureClientSecret: input.azureClientSecret ?? '',
+        azureSubscriptionId: input.azureSubscriptionId ?? '',
+        azureResourceGroup: input.azureResourceGroup ?? '',
+        azureEmailServiceName: input.azureEmailServiceName ?? '',
         azureCommunicationServiceName: input.azureCommunicationServiceName ?? null,
+        mailgunApiKey: input.mailgunApiKey?.trim() || null,
+        mailgunApiBaseUrl: input.mailgunApiBaseUrl?.trim() || null,
+        mailgunWebhookSigningKey: input.mailgunWebhookSigningKey?.trim() || null,
       },
     });
     return this.toView(row, 0, false);
   }
 
-  async update(id: string, input: UpdateAcsAccountInput): Promise<AcsAccountView> {
-    const data: Prisma.AcsAccountUpdateInput = {};
+  async update(id: string, input: UpdateEmailChannelInput): Promise<EmailChannelView> {
+    const data: Prisma.EmailChannelUpdateInput = {};
+    if (input.provider !== undefined) data.provider = input.provider;
     if (input.name !== undefined) data.name = input.name;
     if (input.rpsLimit !== undefined) data.rpsLimit = input.rpsLimit;
     if (input.rpmLimit !== undefined) data.rpmLimit = input.rpmLimit;
@@ -92,9 +101,15 @@ export class AcsAccountService {
       data.azureEmailServiceName = input.azureEmailServiceName;
     if (input.azureCommunicationServiceName !== undefined)
       data.azureCommunicationServiceName = input.azureCommunicationServiceName ?? null;
+    if (input.mailgunApiKey !== undefined)
+      data.mailgunApiKey = input.mailgunApiKey?.trim() || null;
+    if (input.mailgunApiBaseUrl !== undefined)
+      data.mailgunApiBaseUrl = input.mailgunApiBaseUrl?.trim() || null;
+    if (input.mailgunWebhookSigningKey !== undefined)
+      data.mailgunWebhookSigningKey = input.mailgunWebhookSigningKey?.trim() || null;
 
     try {
-      const row = await this.prisma.acsAccount.update({
+      const row = await this.prisma.emailChannel.update({
         where: { id },
         data,
         include: { _count: { select: { senderDomains: true } } },
@@ -109,7 +124,7 @@ export class AcsAccountService {
   }
 
   async remove(id: string): Promise<void> {
-    const acct = await this.prisma.acsAccount.findUnique({
+    const acct = await this.prisma.emailChannel.findUnique({
       where: { id },
       include: {
         _count: { select: { senderDomains: true, accountLinks: true } },
@@ -123,34 +138,34 @@ export class AcsAccountService {
     }
     if (acct._count.accountLinks > 0) {
       throw new ConflictException(
-        `无法删除:仍有 ${acct._count.accountLinks} 个租户分配了该 ACS 账号`,
+        `无法删除:仍有 ${acct._count.accountLinks} 个租户分配了该邮件通道`,
       );
     }
-    await this.prisma.acsAccount.delete({ where: { id } });
+    await this.prisma.emailChannel.delete({ where: { id } });
   }
 
   /**
-   * Mark a single ACS account as the platform-wide default. New tenant
-   * signups get a primary AccountAcsAccount link to it. Atomic: clear any
+   * Mark a single email channel as the platform-wide default. New tenant
+   * signups get a primary AccountEmailChannel link to it. Atomic: clear any
    * previous default first, then promote the target.
    */
-  async setDefault(id: string): Promise<AcsAccountView> {
-    const target = await this.prisma.acsAccount.findUnique({
+  async setDefault(id: string): Promise<EmailChannelView> {
+    const target = await this.prisma.emailChannel.findUnique({
       where: { id },
       include: { _count: { select: { senderDomains: true } } },
     });
     if (!target) throw new NotFoundException();
     if (target.status !== 'active') {
-      throw new ConflictException('仅 active 状态的 ACS 账号可设为默认');
+      throw new ConflictException('仅 active 状态的邮件通道可设为默认');
     }
     if (target.isDefault) return this.toView(target, target._count.senderDomains, true);
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.acsAccount.updateMany({
+      await tx.emailChannel.updateMany({
         where: { isDefault: true },
         data: { isDefault: false },
       });
-      return tx.acsAccount.update({
+      return tx.emailChannel.update({
         where: { id },
         data: { isDefault: true },
         include: { _count: { select: { senderDomains: true } } },
@@ -159,15 +174,16 @@ export class AcsAccountService {
     return this.toView(updated, updated._count.senderDomains, true);
   }
 
-  private toView(row: AcsRow, senderDomainCount: number, redactSecrets: boolean): AcsAccountView {
+  private toView(row: EmailChannelRow, senderDomainCount: number, redactSecrets: boolean): EmailChannelView {
     return {
       id: row.id,
+      provider: row.provider as EmailChannelView['provider'],
       name: row.name,
       rpsLimit: row.rpsLimit,
       rpmLimit: row.rpmLimit,
       rphLimit: row.rphLimit,
       rpdLimit: row.rpdLimit,
-      status: row.status as AcsAccountView['status'],
+      status: row.status as EmailChannelView['status'],
       azureTenantId: row.azureTenantId,
       azureClientId: row.azureClientId,
       azureClientSecret: redactSecrets ? redact(row.azureClientSecret) : row.azureClientSecret,
@@ -175,6 +191,17 @@ export class AcsAccountService {
       azureResourceGroup: row.azureResourceGroup,
       azureEmailServiceName: row.azureEmailServiceName,
       azureCommunicationServiceName: row.azureCommunicationServiceName,
+      mailgunApiKey: row.mailgunApiKey
+        ? redactSecrets
+          ? redact(row.mailgunApiKey)
+          : row.mailgunApiKey
+        : null,
+      mailgunApiBaseUrl: row.mailgunApiBaseUrl,
+      mailgunWebhookSigningKey: row.mailgunWebhookSigningKey
+        ? redactSecrets
+          ? redact(row.mailgunWebhookSigningKey)
+          : row.mailgunWebhookSigningKey
+        : null,
       isDefault: row.isDefault,
       senderDomainCount,
       createdAt: row.createdAt.toISOString(),

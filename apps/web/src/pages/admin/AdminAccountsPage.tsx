@@ -12,7 +12,7 @@ import { useAuth } from '@/store/auth';
 import {
   ACCOUNT_ROLES,
   type AccountRole,
-  type AcsAccountView,
+  type EmailChannelView,
   type AdminAccountView,
   type AuthTokens,
   type SetAccountStatusInput,
@@ -75,9 +75,9 @@ export function AdminAccountsPage() {
     queryKey: ['admin', 'accounts'],
     queryFn: async () => (await api.get('/api/admin/accounts')).data,
   });
-  const { data: acsAccounts } = useQuery<AcsAccountView[]>({
-    queryKey: ['admin', 'acs-accounts'],
-    queryFn: async () => (await api.get('/api/admin/acs-accounts')).data,
+  const { data: emailChannels } = useQuery<EmailChannelView[]>({
+    queryKey: ['admin', 'email-channels'],
+    queryFn: async () => (await api.get('/api/admin/email-channels')).data,
   });
 
   const statusMut = useMutation({
@@ -180,17 +180,17 @@ export function AdminAccountsPage() {
   }
 
   async function handleSaveEdit(
-    acsAccountIds: string[],
-    primaryAcsAccountId: string | null,
+    emailChannelIds: string[],
+    primaryEmailChannelId: string | null,
     remaining: number,
     role: AccountRole,
   ) {
     if (!editingAccount) return;
     setSavingEdit(true);
     try {
-      await api.put(`/api/admin/accounts/${editingAccount.id}/acs-accounts`, {
-        acsAccountIds,
-        primaryAcsAccountId,
+      await api.put(`/api/admin/accounts/${editingAccount.id}/email-channels`, {
+        emailChannelIds,
+        primaryEmailChannelId,
       });
       await api.patch(`/api/admin/accounts/${editingAccount.id}/quota`, { remaining });
       if (role !== editingAccount.role) {
@@ -211,7 +211,7 @@ export function AdminAccountsPage() {
       <div>
         <h1 className="text-xl font-semibold">租户管理</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          管理租户状态、分配 ACS 账号(可多选,标记一个为主)、设置剩余发送额度。封禁后该租户所有写操作会被拦截;额度 0 时活动会立即停止发送。
+          管理租户状态、分配邮件通道(可多选,标记一个为主)、设置剩余发送额度。封禁后该租户所有写操作会被拦截;额度 0 时活动会立即停止发送。
         </p>
       </div>
 
@@ -283,7 +283,7 @@ export function AdminAccountsPage() {
                         size="sm"
                         variant="outline"
                         onClick={() => setEditingAccount(a)}
-                        title="修改该租户的 ACS 账号与剩余发送额度"
+                        title="修改该租户的邮件通道与剩余发送额度"
                       >
                         修改
                       </Button>
@@ -338,7 +338,7 @@ export function AdminAccountsPage() {
       {editingAccount && (
         <AccountEditModal
           account={editingAccount}
-          acsAccounts={acsAccounts ?? []}
+          emailChannels={emailChannels ?? []}
           pending={savingEdit}
           onClose={() => setEditingAccount(null)}
           onSave={handleSaveEdit}
@@ -348,30 +348,30 @@ export function AdminAccountsPage() {
   );
 }
 
-/** ACS 账号列:只展示首个(优先主账号),绑定多个时追加省略号,悬浮显示全部。 */
+/** 邮件通道列:只展示首个(优先主账号),绑定多个时追加省略号,悬浮显示全部。 */
 function AccountEditModal({
   account,
-  acsAccounts,
+  emailChannels,
   pending,
   onClose,
   onSave,
 }: {
   account: AdminAccountView;
-  acsAccounts: AcsAccountView[];
+  emailChannels: EmailChannelView[];
   pending: boolean;
   onClose: () => void;
   onSave: (
-    acsAccountIds: string[],
-    primaryAcsAccountId: string | null,
+    emailChannelIds: string[],
+    primaryEmailChannelId: string | null,
     remaining: number,
     role: AccountRole,
   ) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(account.acsAccounts.map((a) => a.id)),
+    () => new Set(account.emailChannels.map((a) => a.id)),
   );
   const [primary, setPrimary] = useState<string | null>(
-    () => account.acsAccounts.find((a) => a.isPrimary)?.id ?? null,
+    () => account.emailChannels.find((a) => a.isPrimary)?.id ?? null,
   );
   const [quota, setQuota] = useState<string>(() => String(account.sendQuotaRemaining));
   const [role, setRole] = useState<AccountRole>(() => account.role);
@@ -391,11 +391,11 @@ function AccountEditModal({
   }
 
   const ids = [...selected];
-  const acsValid =
+  const channelValid =
     ids.length === 0 ? primary === null : primary !== null && selected.has(primary);
   const quotaNum = Number(quota);
   const quotaValid = Number.isInteger(quotaNum) && quotaNum >= 0;
-  const valid = acsValid && quotaValid;
+  const valid = channelValid && quotaValid;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -404,22 +404,22 @@ function AccountEditModal({
           <div>
             <h2 className="text-lg font-semibold">修改租户 · {account.name}</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              勾选该租户可发送的 ACS 账号(并指定一个为「主」,即添加域名时的默认 ACS),并设置剩余发送额度。
+              勾选该租户可发送的邮件通道(并指定一个为「主」,即添加域名时的默认通道),并设置剩余发送额度。
             </p>
           </div>
 
           <div>
-            <div className="mb-1.5 text-sm font-medium">ACS 账号</div>
+            <div className="mb-1.5 text-sm font-medium">邮件通道</div>
             <div className="max-h-[280px] space-y-1.5 overflow-y-auto">
-              {acsAccounts.length === 0 && (
-                <div className="text-sm text-muted-foreground">尚无 ACS 账号</div>
+              {emailChannels.length === 0 && (
+                <div className="text-sm text-muted-foreground">尚无邮件通道</div>
               )}
-              {acsAccounts.map((acs) => {
-                const checked = selected.has(acs.id);
-                const inactive = acs.status !== 'active';
+              {emailChannels.map((channel) => {
+                const checked = selected.has(channel.id);
+                const inactive = channel.status !== 'active';
                 return (
                   <div
-                    key={acs.id}
+                    key={channel.id}
                     className="flex items-center justify-between rounded-md border px-3 py-2"
                   >
                     <label className="flex items-center gap-2 text-sm">
@@ -427,20 +427,23 @@ function AccountEditModal({
                         type="checkbox"
                         checked={checked}
                         disabled={pending || (inactive && !checked)}
-                        onChange={() => toggle(acs.id)}
+                        onChange={() => toggle(channel.id)}
                       />
-                      <span>{acs.name}</span>
+                      <span>{channel.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {channel.provider === 'mailgun' ? 'Mailgun' : 'Azure'}
+                      </span>
                       {inactive && (
-                        <span className="text-xs text-muted-foreground">({acs.status})</span>
+                        <span className="text-xs text-muted-foreground">({channel.status})</span>
                       )}
                     </label>
                     <label className="flex items-center gap-1 text-xs text-muted-foreground">
                       <input
                         type="radio"
-                        name="primary-acs"
-                        checked={primary === acs.id}
+                        name="primary-channel"
+                        checked={primary === channel.id}
                         disabled={pending || !checked}
-                        onChange={() => setPrimary(acs.id)}
+                        onChange={() => setPrimary(channel.id)}
                       />
                       主
                     </label>

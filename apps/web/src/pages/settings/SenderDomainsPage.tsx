@@ -9,7 +9,7 @@ import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
-import type { SenderDomainView, TenantAcsAccountView } from '@sendmast/shared';
+import type { SenderDomainView, TenantEmailChannelView } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
 import { TableSkeletonRows } from '@/components/ui/skeleton';
 
@@ -28,14 +28,14 @@ export function SenderDomainsPage() {
     queryKey: ['sender-domains'],
     queryFn: async () => (await api.get('/api/sender-domains')).data,
   });
-  // Surface which ACS account each domain belongs to only when the tenant has
-  // more than one assigned (single-ACS tenants don't need the extra column).
-  const { data: acsAccounts } = useQuery<TenantAcsAccountView[]>({
-    queryKey: ['sender-domains', 'acs-accounts'],
-    queryFn: async () => (await api.get('/api/sender-domains/acs-accounts')).data,
+  // Surface which email channel each domain belongs to only when the tenant has
+  // more than one assigned (single-channel tenants don't need the extra column).
+  const { data: emailChannels } = useQuery<TenantEmailChannelView[]>({
+    queryKey: ['sender-domains', 'email-channels'],
+    queryFn: async () => (await api.get('/api/sender-domains/email-channels')).data,
   });
-  const multiAcs = (acsAccounts?.length ?? 0) > 1;
-  const colCount = multiAcs ? 6 : 5;
+  const multiChannel = (emailChannels?.length ?? 0) > 1;
+  const colCount = multiChannel ? 6 : 5;
 
   const verifyMut = useMutation({
     mutationFn: (id: string) => api.post(`/api/sender-domains/${id}/verify`),
@@ -79,7 +79,7 @@ export function SenderDomainsPage() {
               <tr>
                 <th className="px-4 py-3 font-medium">域名</th>
                 <th className="px-4 py-3 font-medium">状态</th>
-                {multiAcs && <th className="px-4 py-3 font-medium">所属 ACS 账号</th>}
+                {multiChannel && <th className="px-4 py-3 font-medium">所属邮件通道</th>}
                 <th className="px-4 py-3 font-medium">发件人</th>
                 <th className="px-4 py-3 font-medium">最近检测</th>
                 <th className="px-4 py-3 font-medium">操作</th>
@@ -129,7 +129,9 @@ export function SenderDomainsPage() {
                           注册中
                         </Badge>
                       ) : d.status === 'failed' ? (
-                        <Badge variant="danger">注册失败</Badge>
+                        <Badge variant="danger" title={d.provisioningError ?? undefined}>
+                          注册失败
+                        </Badge>
                       ) : (
                         <Badge variant="warning">
                           <Clock className="mr-1 size-3" />
@@ -137,9 +139,9 @@ export function SenderDomainsPage() {
                         </Badge>
                       )}
                     </td>
-                    {multiAcs && (
+                    {multiChannel && (
                       <td className="px-4 py-3 text-muted-foreground">
-                        {d.acsAccount?.name ?? '—'}
+                        {d.emailChannel?.name ?? '—'}
                       </td>
                     )}
                     <td className="px-4 py-3 text-muted-foreground">

@@ -66,7 +66,7 @@ const BASE_NAV: NavGroup[] = [
 const ADMIN_NAV: NavGroup = {
   label: '平台管理',
   items: [
-    { to: '/admin/acs-accounts', label: 'ACS 账号', icon: <ServerCog className="size-4" /> },
+    { to: '/admin/email-channels', label: '邮件通道', icon: <ServerCog className="size-4" /> },
     { to: '/admin/accounts', label: '租户管理', icon: <Building2 className="size-4" /> },
     { to: '/admin/sender-domains', label: '发件域名', icon: <Network className="size-4" /> },
     { to: '/admin/send-logs', label: '发送日志', icon: <ListChecks className="size-4" /> },

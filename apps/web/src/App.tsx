@@ -100,8 +100,8 @@ const ShopyyCallbackPage = lazy(() =>
     default: m.ShopyyCallbackPage,
   })),
 );
-const AcsAccountListPage = lazy(() =>
-  import('@/pages/admin/AcsAccountListPage').then((m) => ({ default: m.AcsAccountListPage })),
+const EmailChannelListPage = lazy(() =>
+  import('@/pages/admin/EmailChannelListPage').then((m) => ({ default: m.EmailChannelListPage })),
 );
 const SenderDomainAdminPage = lazy(() =>
   import('@/pages/admin/SenderDomainAdminPage').then((m) => ({ default: m.SenderDomainAdminPage })),
@@ -213,10 +213,10 @@ export default function App() {
               <Route path="integrations/shopyy/callback" element={<ShopyyCallbackPage />} />
 
               <Route
-                path="admin/acs-accounts"
+                path="admin/email-channels"
                 element={
                   <RequirePlatformAdmin>
-                    <AcsAccountListPage />
+                    <EmailChannelListPage />
                   </RequirePlatformAdmin>
                 }
               />

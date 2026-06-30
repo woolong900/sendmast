@@ -281,7 +281,7 @@ export function CampaignRecipientsPage() {
   // the real data with the 弹回 tab. 无效邮箱 (hard) is shown for everyone.
   const account = useAuth((s) => s.account);
   const showBounceTab = account?.isCollaborator === true;
-  // 投诉 tab is always hidden: there's no complaint/FBL data source (ACS doesn't
+  // 投诉 tab is always hidden: there's no complaint/FBL data source (current providers don't
   // emit it), so the list is permanently empty. 弹回 stays collaborator-only.
   const tabs = useMemo(
     () => TABS.filter((t) => t.key !== 'complained' && (showBounceTab || t.key !== 'bounced')),

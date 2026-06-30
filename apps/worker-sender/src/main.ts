@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { Prisma, PrismaClient, type AcsAccount } from '@prisma/client';
+import { Prisma, PrismaClient, type EmailChannel } from '@prisma/client';
 import { rewriteHtml, signTrackingToken } from '@sendmast/email-tracking';
 import { QUEUE_NAMES } from '@sendmast/shared';
 import { buildClickHouseClient } from '@sendmast/clickhouse';
@@ -22,16 +22,16 @@ const TRACKING_SECRET = process.env.TRACKING_TOKEN_SECRET;
 // future). Pool empty = send fails — see the recipient-fail path below.
 const SEND_CONCURRENCY = Number(process.env.SEND_CONCURRENCY ?? '8');
 
-// Fairness cap: max recipients kept in-flight (queued but not yet sent) per ACS
+// Fairness cap: max recipients kept in-flight (queued but not yet sent) per channel
 // account. Sends drain through ONE shared FIFO queue, so without this cap an
 // earlier/larger campaign front-loads tens of thousands of jobs and starves any
-// campaign that starts later (head-of-line blocking). Bounding per-ACS depth
+// campaign that starts later (head-of-line blocking). Bounding per-channel depth
 // keeps the shared queue shallow and interleaved, so the worker drains all
-// active ACS accounts (hence all campaigns) fairly. The 1Hz tick refills as the
+// active email channels (hence all campaigns) fairly. The 1Hz tick refills as the
 // worker drains, so a shallow buffer never starves the workers nor caps
 // throughput — it only changes WHICH jobs sit in the queue, not how fast they
 // leave it.
-const MAX_INFLIGHT_PER_ACS = Number(process.env.MAX_INFLIGHT_PER_ACS ?? '2000');
+const MAX_INFLIGHT_PER_CHANNEL = Number(process.env.MAX_INFLIGHT_PER_CHANNEL ?? '2000');
 const FLOW_RECOVERY_AGE_MS = Number(process.env.FLOW_RECOVERY_AGE_MS ?? '10000');
 const FLOW_RECOVERY_BATCH = Number(process.env.FLOW_RECOVERY_BATCH ?? '100');
 
@@ -77,52 +77,52 @@ interface SendJobData {
   recipientId?: string;
   /** Flow/automation send: a shop_automation_sends row id (Klaviyo-style). */
   flowSendId?: string;
-  acsAccountId: string;
+  emailChannelId: string;
 }
 
 /** Automation types that are transactional (no unsubscribe, sent regardless of opt-out). */
 const TRANSACTIONAL_AUTOMATIONS = new Set(['order_paid', 'order_shipped']);
 
 // ============================================================================
-// AcsAccount cache (rebuilt by tick at most every 30s)
+// EmailChannel cache (rebuilt by tick at most every 30s)
 // ============================================================================
 
-interface AcsCacheEntry {
-  account: AcsAccount;
+interface EmailChannelCacheEntry {
+  account: EmailChannel;
   loadedAt: number;
 }
 
-const acsCache = new Map<string, AcsCacheEntry>();
-const ACS_TTL_MS = 30_000;
+const emailChannelCache = new Map<string, EmailChannelCacheEntry>();
+const EMAIL_CHANNEL_TTL_MS = 30_000;
 
-async function getAcsAccount(id: string): Promise<AcsAccount | null> {
+async function getEmailChannel(id: string): Promise<EmailChannel | null> {
   const now = Date.now();
-  const cached = acsCache.get(id);
-  if (cached && cached.loadedAt + ACS_TTL_MS > now) return cached.account;
-  const fresh = await prisma.acsAccount.findUnique({ where: { id } });
-  if (fresh) acsCache.set(id, { account: fresh, loadedAt: now });
-  else acsCache.delete(id);
+  const cached = emailChannelCache.get(id);
+  if (cached && cached.loadedAt + EMAIL_CHANNEL_TTL_MS > now) return cached.account;
+  const fresh = await prisma.emailChannel.findUnique({ where: { id } });
+  if (fresh) emailChannelCache.set(id, { account: fresh, loadedAt: now });
+  else emailChannelCache.delete(id);
   return fresh;
 }
 
 // ============================================================================
-// Sender domain → ACS account lookup (cached for 30s, used by runSend)
+// Sender domain → email channel lookup (cached for 30s, used by runSend)
 // ============================================================================
 
-const routingCache = new Map<string, { acsAccountId: string | null; until: number }>();
+const routingCache = new Map<string, { emailChannelId: string | null; until: number }>();
 const ROUTING_TTL_MS = 30_000;
 
-async function resolveAcsAccountIdForDomain(domain: string): Promise<string | null> {
+async function resolveEmailChannelIdForDomain(domain: string): Promise<string | null> {
   const now = Date.now();
   const cached = routingCache.get(domain);
-  if (cached && cached.until > now) return cached.acsAccountId;
+  if (cached && cached.until > now) return cached.emailChannelId;
 
   const sd = await prisma.senderDomain.findFirst({
     where: { domain },
-    select: { acsAccountId: true },
+    select: { emailChannelId: true },
   });
-  const value = sd?.acsAccountId ?? null;
-  routingCache.set(domain, { acsAccountId: value, until: now + ROUTING_TTL_MS });
+  const value = sd?.emailChannelId ?? null;
+  routingCache.set(domain, { emailChannelId: value, until: now + ROUTING_TTL_MS });
   return value;
 }
 
@@ -225,15 +225,15 @@ async function materialiseRecipients(
   const senders = campaign.senders;
   const rotate = senders.length > 1;
 
-  // Resolve the ACS account each sender's domain routes to, so we can stamp
-  // it per recipient (cross-ACS campaigns route each recipient independently).
-  const senderAcs: (string | null)[] = [];
+  // Resolve the email channel each sender's domain routes to, so we can stamp
+  // it per recipient (cross-channel campaigns route each recipient independently).
+  const senderChannels: (string | null)[] = [];
   for (const s of senders) {
     const d = s.fromEmail.split('@')[1]?.toLowerCase();
-    senderAcs.push(d ? await resolveAcsAccountIdForDomain(d) : null);
+    senderChannels.push(d ? await resolveEmailChannelIdForDomain(d) : null);
   }
   const primaryDomain = (senders[0]?.fromEmail ?? campaign.fromEmail).split('@')[1]?.toLowerCase();
-  const primaryAcs = primaryDomain ? await resolveAcsAccountIdForDomain(primaryDomain) : null;
+  const primaryChannel = primaryDomain ? await resolveEmailChannelIdForDomain(primaryDomain) : null;
 
   const listIds = campaign.lists.map((l) => l.listId);
   // No lists means this is the segment-only path; API already materialised
@@ -297,7 +297,7 @@ async function materialiseRecipients(
           listName,
           fromEmail: s?.fromEmail ?? null,
           fromName: s?.fromName ?? null,
-          acsAccountId: rotate ? senderAcs[idx] : primaryAcs,
+          emailChannelId: rotate ? senderChannels[idx] : primaryChannel,
         };
       }),
       skipDuplicates: true,
@@ -311,7 +311,7 @@ async function materialiseRecipients(
 }
 
 // ============================================================================
-// Tick — runs every second; fairly enqueues sends per ACS account.
+// Tick — runs every second; fairly enqueues sends per email channel.
 // ============================================================================
 
 /**
@@ -324,17 +324,17 @@ async function recoverPendingFlowSends(): Promise<void> {
   const pending = await prisma.shopAutomationSend.findMany({
     where: {
       status: 'pending',
-      acsAccountId: { not: null },
+      emailChannelId: { not: null },
       createdAt: { lt: new Date(Date.now() - FLOW_RECOVERY_AGE_MS) },
     },
     orderBy: { createdAt: 'asc' },
     take: FLOW_RECOVERY_BATCH,
-    select: { id: true, acsAccountId: true },
+    select: { id: true, emailChannelId: true },
   });
 
   for (const send of pending) {
-    const acsAccountId = send.acsAccountId;
-    if (!acsAccountId) continue;
+    const emailChannelId = send.emailChannelId;
+    if (!emailChannelId) continue;
     const jobId = `f-${send.id}`;
     try {
       let existing = await sendEmailQueue.getJob(jobId);
@@ -345,7 +345,7 @@ async function recoverPendingFlowSends(): Promise<void> {
       if (!existing) {
         await sendEmailQueue.add(
           'send',
-          { flowSendId: send.id, acsAccountId },
+          { flowSendId: send.id, emailChannelId },
           {
             jobId,
             attempts: 5,
@@ -367,7 +367,7 @@ async function runTick(_job: Job): Promise<void> {
   await recoverPendingFlowSends();
 
   // 1. Find all sending campaigns. We need accountId (tenant) to enforce
-  //    the per-tenant prepaid quota and fromEmail to route to ACS.
+  //    the per-tenant prepaid quota and fromEmail to route to the email channel.
   const campaigns = await prisma.campaign.findMany({
     where: { status: 'sending' },
     select: { id: true, accountId: true, fromEmail: true },
@@ -375,7 +375,7 @@ async function runTick(_job: Job): Promise<void> {
   if (campaigns.length === 0) return;
 
   // 2. Look up per-tenant remaining quota for every involved tenant.
-  //    A live tenant->remaining map drives both an early skip (saves ACS
+  //    A live tenant->remaining map drives both an early skip (saves provider calls
   //    work) and a per-tick budget cap (prevents queuing 1000 jobs when
   //    only 10 quota are left). The map is mutated as we plan enqueues so
   //    multiple campaigns sharing a tenant share the budget within this tick.
@@ -428,8 +428,8 @@ async function runTick(_job: Job): Promise<void> {
 
   // 3. Eligible campaigns = sending campaigns whose tenant still has quota.
   //    Routing is now PER RECIPIENT: each campaign_recipients row carries the
-  //    ACS account resolved from its assigned sender's domain, so a single
-  //    campaign may fan out across multiple ACS accounts.
+  //    email channel resolved from its assigned sender's domain, so a single
+  //    campaign may fan out across multiple email channels.
   const eligibleCampaignIds: string[] = [];
   const campaignTenant = new Map<string, string>();
   for (const c of campaigns) {
@@ -439,72 +439,72 @@ async function runTick(_job: Job): Promise<void> {
   }
   if (eligibleCampaignIds.length === 0) return;
 
-  // 3b. Defensive backfill for legacy rows with no acs_account_id (new sends
+  // 3b. Defensive backfill for legacy rows with no email_channel_id (new sends
   //     are always stamped at materialisation; the migration backfilled
   //     in-flight rows, so this is usually a no-op). NULL -> campaign primary
-  //     ACS resolved from Campaign.fromEmail.
+  //     channel resolved from Campaign.fromEmail.
   const nullCount = await prisma.campaignRecipient.count({
-    where: { campaignId: { in: eligibleCampaignIds }, status: 'pending', acsAccountId: null },
+    where: { campaignId: { in: eligibleCampaignIds }, status: 'pending', emailChannelId: null },
   });
   if (nullCount > 0) {
     for (const c of campaigns) {
       if (!campaignTenant.has(c.id)) continue;
       const domain = c.fromEmail.split('@')[1]?.toLowerCase();
       if (!domain) continue;
-      const acs = await resolveAcsAccountIdForDomain(domain);
-      if (!acs) continue;
+      const channelId = await resolveEmailChannelIdForDomain(domain);
+      if (!channelId) continue;
       await prisma.campaignRecipient.updateMany({
-        where: { campaignId: c.id, status: 'pending', acsAccountId: null },
-        data: { acsAccountId: acs },
+        where: { campaignId: c.id, status: 'pending', emailChannelId: null },
+        data: { emailChannelId: channelId },
       });
     }
   }
 
-  // 4. Per ACS account: compute ACS-tier budget (min of the 4 rate tiers),
-  //    take that many pending recipients for this ACS across all eligible
+  // 4. Per email channel: compute channel-tier budget (min of the 4 rate tiers),
+  //    take that many pending recipients for this channel across all eligible
   //    campaigns, then enqueue while respecting each owning tenant's remaining
   //    prepaid quota (mutated in-tick so campaigns sharing a tenant don't
   //    double-spend).
-  const acsBuckets = await prisma.campaignRecipient.groupBy({
-    by: ['acsAccountId'],
+  const channelBuckets = await prisma.campaignRecipient.groupBy({
+    by: ['emailChannelId'],
     where: {
       campaignId: { in: eligibleCampaignIds },
       status: 'pending',
-      acsAccountId: { not: null },
+      emailChannelId: { not: null },
     },
   });
 
-  // Current in-flight (queued, not yet sent) depth per ACS. Used to bound how
-  // much we add to the shared FIFO queue this tick so no single ACS/campaign
-  // can pile a deep backlog and starve others (see MAX_INFLIGHT_PER_ACS).
+  // Current in-flight (queued, not yet sent) depth per channel. Used to bound how
+  // much we add to the shared FIFO queue this tick so no single channel/campaign
+  // can pile a deep backlog and starve others (see MAX_INFLIGHT_PER_CHANNEL).
   const queuedBuckets = await prisma.campaignRecipient.groupBy({
-    by: ['acsAccountId'],
-    where: { status: 'queued', acsAccountId: { not: null } },
+    by: ['emailChannelId'],
+    where: { status: 'queued', emailChannelId: { not: null } },
     _count: { _all: true },
   });
-  const inflightByAcs = new Map<string, number>(
+  const inflightByEmailChannel = new Map<string, number>(
     queuedBuckets
-      .filter((b): b is typeof b & { acsAccountId: string } => b.acsAccountId != null)
-      .map((b) => [b.acsAccountId, b._count._all]),
+      .filter((b): b is typeof b & { emailChannelId: string } => b.emailChannelId != null)
+      .map((b) => [b.emailChannelId, b._count._all]),
   );
 
-  for (const bucket of acsBuckets) {
-    const acsAccountId = bucket.acsAccountId;
-    if (!acsAccountId) continue;
-    const acct = await getAcsAccount(acsAccountId);
+  for (const bucket of channelBuckets) {
+    const emailChannelId = bucket.emailChannelId;
+    if (!emailChannelId) continue;
+    const acct = await getEmailChannel(emailChannelId);
     if (!acct || acct.status !== 'active') continue;
 
-    let budget = await quota.getAvailable(acsAccountId, acct);
+    let budget = await quota.getAvailable(emailChannelId, acct);
     if (budget <= 0) continue;
 
-    // Cap by remaining in-flight headroom for this ACS so the shared send queue
-    // stays shallow and fair across all active ACS accounts / campaigns.
-    const headroom = MAX_INFLIGHT_PER_ACS - (inflightByAcs.get(acsAccountId) ?? 0);
+    // Cap by remaining in-flight headroom for this channel so the shared send queue
+    // stays shallow and fair across all active email channels / campaigns.
+    const headroom = MAX_INFLIGHT_PER_CHANNEL - (inflightByEmailChannel.get(emailChannelId) ?? 0);
     if (headroom <= 0) continue;
     if (budget > headroom) budget = headroom;
 
     const candidates = await prisma.campaignRecipient.findMany({
-      where: { acsAccountId, status: 'pending', campaignId: { in: eligibleCampaignIds } },
+      where: { emailChannelId, status: 'pending', campaignId: { in: eligibleCampaignIds } },
       take: budget,
       orderBy: { id: 'asc' },
       select: { id: true, campaignId: true },
@@ -526,7 +526,7 @@ async function runTick(_job: Job): Promise<void> {
     await sendEmailQueue.addBulk(
       toQueue.map((id) => ({
         name: 'send',
-        data: { recipientId: id, acsAccountId },
+        data: { recipientId: id, emailChannelId },
         opts: { jobId: `r-${id}` },
       })),
     );
@@ -553,9 +553,9 @@ async function loadCustomTagIndex(accountId: string): Promise<Map<string, string
 
 // ============================================================================
 // Send — actual transport call. Reserves 1 unit of tenant prepaid quota
-// before calling ACS; on success also consumes 1 unit of ACS-tier sliding-
+// before calling the provider; on success also consumes 1 unit of channel-tier sliding-
 // window quota. Tenant quota is the hard cash limit (counts every attempt);
-// ACS-tier quota is the rate limit (counts only successes).
+// channel-tier quota is the rate limit (counts only successes).
 // ============================================================================
 
 async function runSend(job: Job<SendJobData>) {
@@ -597,21 +597,21 @@ async function runSend(job: Job<SendJobData>) {
     return;
   }
 
-  // Use the ACS account the tick scheduler picked for us. If it has been
+  // Use the email channel the tick scheduler picked for us. If it has been
   // retired/suspended in the meantime, fail the recipient — admin needs to
   // re-bind the sender domain.
-  const acct = await getAcsAccount(job.data.acsAccountId);
+  const acct = await getEmailChannel(job.data.emailChannelId);
   if (!acct) {
     await prisma.campaignRecipient.update({
       where: { id: r.id },
-      data: { status: 'failed', errorMessage: 'ACS 账号已不存在' },
+      data: { status: 'failed', errorMessage: '邮件通道已不存在' },
     });
     return;
   }
   if (acct.status !== 'active') {
     await prisma.campaignRecipient.update({
       where: { id: r.id },
-      data: { status: 'failed', errorMessage: `ACS 账号 ${acct.name} 当前状态为 ${acct.status}` },
+      data: { status: 'failed', errorMessage: `邮件通道 ${acct.name} 当前状态为 ${acct.status}` },
     });
     return;
   }
@@ -741,10 +741,10 @@ async function runSend(job: Job<SendJobData>) {
     return;
   }
 
-  // Pre-assign the ACS operation id and persist it BEFORE the send. ACS echoes
+  // Pre-assign the provider operation id and persist it BEFORE the send. the provider echoes
   // this id back as the `messageId` in delivery reports, so writing it first
   // guarantees worker-events can resolve even a bounce report that races back
-  // within milliseconds. Reuse the existing id on a retried send so ACS treats
+  // within milliseconds. Reuse the existing id on a retried send so the provider treats
   // it as the same operation (idempotent — no duplicate email).
   const operationId = r.messageId ?? randomUUID();
   if (!r.messageId) {
@@ -774,7 +774,7 @@ async function runSend(job: Job<SendJobData>) {
     await prisma.sendLog.create({
       data: {
         accountId: r.accountId,
-        acsAccountId: acct.id,
+        emailChannelId: acct.id,
         campaignId: c.id,
         recipientId: r.id,
         fromAddress: fromEmail,
@@ -796,7 +796,7 @@ async function runSend(job: Job<SendJobData>) {
   // ACS rejects a repeated beginSend with the same operationId
   // ("This request is invalid since the given operationId already exists.").
   // That only happens when a PRIOR attempt for this recipient already submitted
-  // the message to ACS — idempotency working as intended — but our status
+  // the message to the provider — idempotency working as intended — but our status
   // update didn't land (worker restart/stall → BullMQ retry). The email was
   // accepted, so this is a success, not a failure. Treat it as sent rather than
   // recording a spurious "发送失败".
@@ -814,13 +814,13 @@ async function runSend(job: Job<SendJobData>) {
       where: { id: r.id },
       data: { status: 'sent', messageId: operationId, sentAt: new Date() },
     });
-    // Quota is consumed only when ACS accepted the message. Failed/skipped
+    // Quota is consumed only when the provider accepted the message. Failed/skipped
     // sends do not count, which is what the user wants. Best-effort: if a
     // tier rejects (rare race when several workers all flip to sent in the
     // same window) we accept the slight over-count — the next tick simply
     // sees budget=0 and throttles.
     try {
-      await quota.consume(job.data.acsAccountId, acct, 1);
+      await quota.consume(job.data.emailChannelId, acct, 1);
     } catch {}
     await maybeFinaliseCampaign(c.id);
     return;
@@ -830,12 +830,12 @@ async function runSend(job: Job<SendJobData>) {
     where: { id: r.id },
     data: {
       status: 'failed',
-      errorMessage: result.errorMessage ?? 'ACS 发送失败',
+      errorMessage: result.errorMessage ?? '邮件通道发送失败',
     },
   });
   // Re-throw so BullMQ records this job as failed (visible in dashboard).
   // The send_logs row already carries the full provider trace.
-  throw new Error(result.errorMessage ?? `ACS send failed (${result.providerStatus})`);
+  throw new Error(result.errorMessage ?? `provider send failed (${result.providerStatus})`);
 }
 
 function toJsonInput(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
@@ -863,7 +863,7 @@ async function maybeFinaliseCampaign(campaignId: string): Promise<void> {
 // Flow send — a Klaviyo-style first-class transactional/automation email. Not
 // a campaign: it carries its own template + per-send merge vars and is tracked
 // independently (source='automation'). Reuses the same tag-substitution,
-// tracking-rewrite, transport, quota and ACS-dedup machinery as runSend, but
+// tracking-rewrite, transport, quota and provider-dedup machinery as runSend, but
 // reads/writes status on shop_automation_sends instead of campaign_recipients.
 // ============================================================================
 
@@ -924,13 +924,13 @@ async function runFlowSend(job: Job<SendJobData>) {
     return;
   }
 
-  const acct = await getAcsAccount(job.data.acsAccountId);
+  const acct = await getEmailChannel(job.data.emailChannelId);
   if (!acct) {
-    await fail('ACS 账号已不存在');
+    await fail('邮件通道已不存在');
     return;
   }
   if (acct.status !== 'active') {
-    await fail(`ACS 账号 ${acct.name} 当前状态为 ${acct.status}`);
+    await fail(`邮件通道 ${acct.name} 当前状态为 ${acct.status}`);
     return;
   }
 
@@ -1039,14 +1039,14 @@ async function runFlowSend(job: Job<SendJobData>) {
     headers,
   });
 
-  // Unified ACS attempt log: automation sends appear beside campaign sends in
+  // Unified provider attempt log: automation sends appear beside campaign sends in
   // the platform-admin send log. Best-effort so observability cannot block the
   // send state transition or BullMQ acknowledgement.
   try {
     await prisma.sendLog.create({
       data: {
         accountId: send.accountId,
-        acsAccountId: acct.id,
+        emailChannelId: acct.id,
         source: 'automation',
         automationId: automation.id,
         automationSendId: send.id,
@@ -1076,16 +1076,16 @@ async function runFlowSend(job: Job<SendJobData>) {
       data: { status: 'sent', messageId: operationId, sentAt: new Date(), errorMessage: null },
     });
     try {
-      await quota.consume(job.data.acsAccountId, acct, 1);
+      await quota.consume(job.data.emailChannelId, acct, 1);
     } catch {}
     return;
   }
 
   await prisma.shopAutomationSend.update({
     where: { id: sendId },
-    data: { status: 'failed', errorMessage: result.errorMessage ?? 'ACS 发送失败' },
+    data: { status: 'failed', errorMessage: result.errorMessage ?? '邮件通道发送失败' },
   });
-  throw new Error(result.errorMessage ?? `ACS send failed (${result.providerStatus})`);
+  throw new Error(result.errorMessage ?? `provider send failed (${result.providerStatus})`);
 }
 
 // ============================================================================

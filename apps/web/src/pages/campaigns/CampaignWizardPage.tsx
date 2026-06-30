@@ -382,14 +382,14 @@ export function CampaignWizardPage() {
   );
 
   // Flatten verified domains × their sender usernames into the actual list
-  // of from-addresses ACS will accept. A domain with no sender username
+  // of from-addresses the selected provider will accept. A domain with no sender username
   // contributes no options (the user is pointed to the domain's wizard
   // step 3 to add one).
-  // Show the ACS account label next to each sender only when the tenant spans
-  // more than one ACS account (cross-ACS sending), so single-ACS tenants stay
+  // Show the email channel label next to each sender only when the tenant spans
+  // more than one email channel (cross-channel sending), so single-channel tenants stay
   // uncluttered.
-  const multiAcs = useMemo(
-    () => new Set(verifiedDomains.map((d) => d.acsAccount?.id ?? d.acsAccountId)).size > 1,
+  const multiChannel = useMemo(
+    () => new Set(verifiedDomains.map((d) => d.emailChannel?.id ?? d.emailChannelId)).size > 1,
     [verifiedDomains],
   );
   const senderOptions = useMemo(
@@ -400,10 +400,10 @@ export function CampaignWizardPage() {
           label: u.displayName ? `${u.displayName} <${u.fullAddress}>` : u.fullAddress,
           displayName: u.displayName,
           username: u.username,
-          acsName: multiAcs ? d.acsAccount?.name ?? null : null,
+          channelName: multiChannel ? d.emailChannel?.name ?? null : null,
         })),
       ),
-    [verifiedDomains, multiAcs],
+    [verifiedDomains, multiChannel],
   );
 
   // Resolve the sender username record matching the chosen address so we can
@@ -2125,7 +2125,7 @@ function HtmlEditorStep({
 // (index 0 = primary); clicking an unchecked option appends it, clicking a
 // checked one removes it. The campaign rotates through the picked addresses
 // round-robin at send time.
-type SenderOpt = { value: string; label: string; acsName?: string | null };
+type SenderOpt = { value: string; label: string; channelName?: string | null };
 
 function SenderEmailSelect({
   values,
@@ -2143,13 +2143,13 @@ function SenderEmailSelect({
     .filter((o): o is SenderOpt => !!o);
   const allSelected = options.length > 0 && values.length >= options.length;
 
-  // Group by ACS account only when the options carry an acsName (i.e. the
-  // tenant spans multiple ACS accounts). Single-ACS tenants keep the flat list.
-  const grouped = options.some((o) => o.acsName);
+  // Group by email channel only when the options carry an channelName (i.e. the
+  // tenant spans multiple email channels). Single-channel tenants keep the flat list.
+  const grouped = options.some((o) => o.channelName);
   const groups = useMemo(() => {
     const map = new Map<string, { name: string; items: SenderOpt[] }>();
     for (const o of options) {
-      const key = o.acsName ?? '其他';
+      const key = o.channelName ?? '其他';
       const g = map.get(key) ?? { name: key, items: [] };
       g.items.push(o);
       map.set(key, g);
@@ -2207,9 +2207,9 @@ function SenderEmailSelect({
           {isSelected && <Check className="size-3" />}
         </span>
         <span className="flex-1 truncate">{o.label}</span>
-        {!grouped && o.acsName && (
+        {!grouped && o.channelName && (
           <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-            {o.acsName}
+            {o.channelName}
           </span>
         )}
       </div>

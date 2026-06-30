@@ -10,8 +10,8 @@ export interface CampaignAnalyticsView {
     delivered: number;
     failed: number;
     /**
-     * Backlog still waiting to be handed to ACS — recipients in
-     * status pending|queued. Once ACS accepts (status='sent') a recipient is
+     * Backlog still waiting to be handed to the email channel — recipients in
+     * status pending|queued. Once provider accepts (status='sent') a recipient is
      * considered delivered and drops out of this bucket, so a finished
      * campaign reads 0 here instead of getting stuck on missing delivery
      * reports.
@@ -71,7 +71,7 @@ export class AnalyticsService {
     // consistent: 送达 + 弹回 + 失败 are all subsets of it and can never exceed it.
     const sent = c.totalRecipients;
 
-    // "发送失败" counts ONLY send-time failures (quota exhausted / ACS-rejected).
+    // "发送失败" counts ONLY send-time failures (quota exhausted / provider-rejected).
     // Hard bounces were historically stored as `status='failed',
     // errorMessage='bounced'` but belong under 弹回 — exclude them here so they
     // are not double-counted against 总投放.
@@ -169,7 +169,7 @@ export class AnalyticsService {
 
     const safe = (a: number, b: number) => (b > 0 ? a / b : 0);
 
-    // 投递中 = 尚未交给 ACS 的待发送收件人 (status pending|queued)。ACS 受理
+    // 投递中 = 尚未交给邮件通道 的待发送收件人 (status pending|queued)。邮件通道受理
     // (status='sent') 后即视为已投递，不再因缺投递回执而长期停留在投递中。归档
     // 活动的热表行已被清走且都已是终态，故计 0。
     const pending = archived

@@ -11,7 +11,7 @@ export class SendLogService {
     const where: Prisma.SendLogWhereInput = {};
 
     if (query.accountId) where.accountId = query.accountId;
-    if (query.acsAccountId) where.acsAccountId = query.acsAccountId;
+    if (query.emailChannelId) where.emailChannelId = query.emailChannelId;
     if (query.source) where.source = query.source;
     if (typeof query.ok === 'boolean') where.ok = query.ok;
     if (query.domain) {
@@ -36,7 +36,7 @@ export class SendLogService {
         take: query.limit,
         include: {
           account: { select: { id: true, name: true, slug: true } },
-          acsAccount: { select: { id: true, name: true } },
+          emailChannel: { select: { id: true, name: true } },
           campaign: { select: { id: true, name: true } },
           automation: {
             select: {
@@ -75,7 +75,7 @@ function toView(r: {
   source: string;
   automationSendId: string | null;
   account: { id: string; name: string; slug: string };
-  acsAccount: { id: string; name: string } | null;
+  emailChannel: { id: string; name: string } | null;
   campaign: { id: string; name: string } | null;
   automation: { id: string; type: string; shopConnection: { shopName: string | null } } | null;
 }): SendLogView {
@@ -83,7 +83,7 @@ function toView(r: {
     id: r.id,
     sentAt: r.sentAt.toISOString(),
     account: r.account,
-    acsAccount: r.acsAccount,
+    emailChannel: r.emailChannel,
     campaign: r.campaign,
     source: r.source as SendLogView['source'],
     automation: r.automation

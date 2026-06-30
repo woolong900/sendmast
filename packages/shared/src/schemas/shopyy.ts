@@ -141,7 +141,7 @@ export interface ShopConnectionHealthView {
 
 /** Per-flow engagement rollup (Klaviyo-style flow performance). */
 export interface FlowStatsView {
-  /** Sends accepted by ACS (shop_automation_sends.status='sent'). */
+  /** Sends accepted by the provider (shop_automation_sends.status='sent'). */
   sent: number;
   /** Unique recipients with a delivered/open/click/bounce event (ClickHouse). */
   delivered: number;

@@ -43,7 +43,7 @@ export const CreateCampaignSchema = z.object({
    * position 0 must equal { fromEmail, fromName } above (the primary). When
    * omitted, the campaign has a single sender (the primary) — backwards
    * compatible with all pre-feature clients. All senders must resolve to
-   * verified domains under the same ACS account.
+   * verified domains under the same email channel.
    */
   senders: z.array(CampaignSenderSchema).min(1).max(50).optional(),
   replyTo: z.string().email().optional(),
@@ -112,7 +112,7 @@ export type RecipientStatusValue = z.infer<typeof RecipientStatusSchema>;
 export const RecipientDimensionSchema = z.enum([
   'sent',
   'delivered',
-  /** Accepted by ACS but no delivery report yet (in-transit / deferred). */
+  /** Accepted by the provider but no delivery report yet (in-transit / deferred). */
   'pending',
   'opened',
   'clicked',
@@ -193,7 +193,7 @@ export interface CampaignAnalytics {
     sent: number;
     delivered: number;
     failed: number;
-    /** Accepted by ACS but no delivery report yet (in-transit / deferred). */
+    /** Accepted by the provider but no delivery report yet (in-transit / deferred). */
     pending: number;
     uniqueOpens: number;
     uniqueClicks: number;

@@ -16,7 +16,7 @@ import type {
   SenderDomainVerificationStatus,
   SenderDomainView,
   SenderUsernameView,
-  TenantAcsAccountView,
+  TenantEmailChannelView,
 } from '@sendmast/shared';
 
 const RECORD_LABELS: Record<SenderDomainRecordKind, string> = {
@@ -36,21 +36,21 @@ export function SenderDomainAddPage() {
   const existingId = params.get('id');
   const [step, setStep] = useState(existingId ? 2 : 1);
   const [domainInput, setDomainInput] = useState('');
-  const [acsChoice, setAcsChoice] = useState('');
+  const [channelChoice, setEmailChannelChoice] = useState('');
 
-  // ACS accounts assigned to this tenant. When more than one is assigned the
-  // user must pick which ACS to provision the domain under (immutable after).
-  const acsAccounts = useQuery<TenantAcsAccountView[]>({
-    queryKey: ['sender-domains', 'acs-accounts'],
-    queryFn: async () => (await api.get('/api/sender-domains/acs-accounts')).data,
+  // Sending channels assigned to this tenant. When more than one is assigned
+  // the user must pick which channel to provision the domain under.
+  const emailChannels = useQuery<TenantEmailChannelView[]>({
+    queryKey: ['sender-domains', 'email-channels'],
+    queryFn: async () => (await api.get('/api/sender-domains/email-channels')).data,
     enabled: !existingId,
   });
-  const multiAcs = (acsAccounts.data?.length ?? 0) > 1;
+  const multiChannel = (emailChannels.data?.length ?? 0) > 1;
   useEffect(() => {
-    if (acsChoice || !acsAccounts.data?.length) return;
-    const primary = acsAccounts.data.find((a) => a.isPrimary) ?? acsAccounts.data[0];
-    setAcsChoice(primary.id);
-  }, [acsAccounts.data, acsChoice]);
+    if (channelChoice || !emailChannels.data?.length) return;
+    const primary = emailChannels.data.find((a) => a.isPrimary) ?? emailChannels.data[0];
+    setEmailChannelChoice(primary.id);
+  }, [emailChannels.data, channelChoice]);
 
   const detail = useQuery<SenderDomainView>({
     queryKey: ['sender-domains', existingId],
@@ -77,7 +77,7 @@ export function SenderDomainAddPage() {
   }, [detail.data]);
 
   const createMut = useMutation({
-    mutationFn: (input: { domain: string; acsAccountId?: string }) =>
+    mutationFn: (input: { domain: string; emailChannelId?: string }) =>
       api.post<SenderDomainView>('/api/sender-domains', input),
     onError: (err) => toast(`创建失败:${apiErrMessage(err)}`, 'error'),
     onSuccess: (r) => {
@@ -127,24 +127,26 @@ export function SenderDomainAddPage() {
                   onChange={(e) => setDomainInput(e.target.value)}
                 />
               </div>
-              {multiAcs && (
+              {multiChannel && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="acs">ACS 账号</Label>
+                  <Label htmlFor="email-channel">邮件通道</Label>
                   <select
-                    id="acs"
+                    id="email-channel"
                     className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    value={acsChoice}
-                    onChange={(e) => setAcsChoice(e.target.value)}
+                    value={channelChoice}
+                    onChange={(e) => setEmailChannelChoice(e.target.value)}
                   >
-                    {acsAccounts.data?.map((a) => (
+                    {emailChannels.data?.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name}
+                        {' · '}
+                        {a.provider === 'mailgun' ? 'Mailgun' : 'Azure'}
                         {a.isPrimary ? ' · 主' : ''}
                       </option>
                     ))}
                   </select>
                   <p className="text-xs text-muted-foreground">
-                    域名提交后无法更改所属 ACS 账号,请谨慎选择。
+                    域名提交后无法更改所属邮件通道,请谨慎选择。
                   </p>
                 </div>
               )}
@@ -157,11 +159,11 @@ export function SenderDomainAddPage() {
                 onClick={() =>
                   createMut.mutate({
                     domain: domainInput.trim(),
-                    acsAccountId: multiAcs ? acsChoice || undefined : undefined,
+                    emailChannelId: multiChannel ? channelChoice || undefined : undefined,
                   })
                 }
                 disabled={
-                  !domainInput.trim() || createMut.isPending || (multiAcs && !acsChoice)
+                  !domainInput.trim() || createMut.isPending || (multiChannel && !channelChoice)
                 }
               >
                 {createMut.isPending ? (
@@ -181,7 +183,11 @@ export function SenderDomainAddPage() {
           )}
 
           {step === 2 && view && view.status === 'failed' && (
-            <FailedCard domain={view.domain} onBack={() => navigate('/settings/domains')} />
+            <FailedCard
+              domain={view.domain}
+              error={view.provisioningError}
+              onBack={() => navigate('/settings/domains')}
+            />
           )}
 
           {step === 2 && view && view.status !== 'provisioning' && view.status !== 'failed' && (
@@ -320,19 +326,20 @@ function SenderUsernamesStepCard({
       </p>
 
       <div className="rounded-md border p-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr_auto] md:items-end">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[auto_220px_auto] md:items-end md:justify-start">
           <div>
             <Label className="mb-1.5 block">用户名</Label>
             <div className="flex items-center gap-1">
               <Input
+                className="w-[120px] flex-none"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="donotreply"
               />
-              <span className="text-sm text-muted-foreground">@{view.domain}</span>
+              <span className="shrink-0 text-sm text-muted-foreground">@{view.domain}</span>
             </div>
           </div>
-          <div>
+          <div className="min-w-0">
             <Label className="mb-1.5 block">显示名(可选)</Label>
             <Input
               value={displayName}
@@ -448,7 +455,15 @@ function ProvisioningCard({ domain }: { domain: string }) {
   );
 }
 
-function FailedCard({ domain, onBack }: { domain: string; onBack: () => void }) {
+function FailedCard({
+  domain,
+  error,
+  onBack,
+}: {
+  domain: string;
+  error?: string | null;
+  onBack: () => void;
+}) {
   return (
     <div className="mt-6 rounded-lg border border-red-300 bg-red-50/40 p-6">
       <h2 className="text-base font-semibold text-red-700">
@@ -457,6 +472,11 @@ function FailedCard({ domain, onBack }: { domain: string; onBack: () => void }) 
       <p className="mt-2 text-sm text-muted-foreground">
         系统未能完成域名注册,请删除该条记录后重试；如反复失败,请联系管理员。
       </p>
+      {error && (
+        <p className="mt-3 rounded-md bg-background/80 p-2 font-mono text-xs text-red-700">
+          {error}
+        </p>
+      )}
       <div className="mt-4">
         <Button variant="outline" size="sm" onClick={onBack}>
           返回域名列表

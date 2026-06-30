@@ -13,7 +13,7 @@ import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AccountModule } from './modules/account/account.module';
 import { SenderDomainModule } from './modules/sender-domain/sender-domain.module';
-import { AcsAccountModule } from './modules/acs-account/acs-account.module';
+import { EmailChannelModule } from './modules/email-channel/email-channel.module';
 import { ContactModule } from './modules/contact/contact.module';
 import { ImportModule } from './modules/import/import.module';
 import { UploadModule } from './modules/upload/upload.module';
@@ -52,7 +52,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
     AuthModule,
     AccountModule,
     SenderDomainModule,
-    AcsAccountModule,
+    EmailChannelModule,
     ContactModule,
     ImportModule,
     UploadModule,
