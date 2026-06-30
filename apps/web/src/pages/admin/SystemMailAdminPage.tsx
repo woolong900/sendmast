@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton, TableSkeletonRows } from '@/components/ui/skeleton';
+import { FilterSelect } from '@/components/ui/filter-select';
 import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
@@ -18,6 +19,11 @@ import type {
 type ConfigResp =
   | (SystemSmtpConfigView & { configured: true })
   | { configured: false };
+
+const SECURE_OPTIONS = [
+  { value: '1', label: 'SSL/TLS（推荐 465 端口）' },
+  { value: '0', label: 'STARTTLS / 不加密（587 / 25）' },
+];
 
 export function SystemMailAdminPage() {
   return (
@@ -165,14 +171,11 @@ function SmtpConfigCard() {
                 />
               </Field>
               <Field label="加密方式">
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                <FilterSelect
                   value={form.secure ? '1' : '0'}
-                  onChange={(e) => update('secure', e.target.value === '1')}
-                >
-                  <option value="1">SSL/TLS（推荐 465 端口）</option>
-                  <option value="0">STARTTLS / 不加密（587 / 25）</option>
-                </select>
+                  onChange={(value) => update('secure', value === '1')}
+                  options={SECURE_OPTIONS}
+                />
               </Field>
               <Field label="用户名" required>
                 <Input

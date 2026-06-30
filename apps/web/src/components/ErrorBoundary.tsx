@@ -38,7 +38,6 @@ export class ErrorBoundary extends Component<Props, State> {
       }
       return;
     }
-    // eslint-disable-next-line no-console
     console.error('[ErrorBoundary]', error, info.componentStack);
   }
 

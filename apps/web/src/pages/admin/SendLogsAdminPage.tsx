@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Pagination } from '@/components/ui/pagination';
 import { DateRangePicker, type DateRange } from '@/components/ui/date-range-picker';
+import { FilterSelect } from '@/components/ui/filter-select';
 import { api } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/utils';
 import type {
@@ -38,6 +39,16 @@ const EMPTY_FILTERS: Filters = {
 };
 
 const PAGE_SIZE_DEFAULT = 50;
+const SOURCE_OPTIONS: Array<{ value: Filters['source']; label: string }> = [
+  { value: '', label: '全部' },
+  { value: 'campaign', label: '营销活动' },
+  { value: 'automation', label: '自动化' },
+];
+const STATUS_OPTIONS: Array<{ value: Filters['status']; label: string }> = [
+  { value: '', label: '全部' },
+  { value: 'success', label: '成功' },
+  { value: 'failed', label: '失败' },
+];
 
 export function SendLogsAdminPage() {
   // Two layers of state: the form (mutable as user types) and the active
@@ -104,43 +115,31 @@ export function SendLogsAdminPage() {
       <Card>
         <CardContent className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3 lg:grid-cols-7">
           <Field label="租户">
-            <select
-              className={selectCls}
+            <FilterSelect
               value={form.accountId}
-              onChange={(e) => setForm({ ...form, accountId: e.target.value })}
-            >
-              <option value="">全部</option>
-              {accounts?.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+              onChange={(accountId) => setForm({ ...form, accountId })}
+              options={[
+                { value: '', label: '全部' },
+                ...(accounts?.map((a) => ({ value: a.id, label: a.name })) ?? []),
+              ]}
+            />
           </Field>
           <Field label="邮件通道">
-            <select
-              className={selectCls}
+            <FilterSelect
               value={form.emailChannelId}
-              onChange={(e) => setForm({ ...form, emailChannelId: e.target.value })}
-            >
-              <option value="">全部</option>
-              {emailChannels?.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+              onChange={(emailChannelId) => setForm({ ...form, emailChannelId })}
+              options={[
+                { value: '', label: '全部' },
+                ...(emailChannels?.map((a) => ({ value: a.id, label: a.name })) ?? []),
+              ]}
+            />
           </Field>
           <Field label="来源">
-            <select
-              className={selectCls}
+            <FilterSelect
               value={form.source}
-              onChange={(e) => setForm({ ...form, source: e.target.value as Filters['source'] })}
-            >
-              <option value="">全部</option>
-              <option value="campaign">营销活动</option>
-              <option value="automation">自动化</option>
-            </select>
+              onChange={(source) => setForm({ ...form, source })}
+              options={SOURCE_OPTIONS}
+            />
           </Field>
           <Field label="发件域名">
             <Input
@@ -151,15 +150,11 @@ export function SendLogsAdminPage() {
             />
           </Field>
           <Field label="状态">
-            <select
-              className={selectCls}
+            <FilterSelect
               value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value as Filters['status'] })}
-            >
-              <option value="">全部</option>
-              <option value="success">成功</option>
-              <option value="failed">失败</option>
-            </select>
+              onChange={(status) => setForm({ ...form, status })}
+              options={STATUS_OPTIONS}
+            />
           </Field>
           <div className="lg:col-span-2">
             <Field label="时间区间">
@@ -279,9 +274,6 @@ export function SendLogsAdminPage() {
     </div>
   );
 }
-
-const selectCls =
-  'h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-primary';
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

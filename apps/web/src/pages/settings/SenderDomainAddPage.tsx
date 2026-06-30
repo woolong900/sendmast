@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, Copy, Loader2, Mail, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -129,22 +130,19 @@ export function SenderDomainAddPage() {
               </div>
               {multiChannel && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="email-channel">邮件通道</Label>
-                  <select
-                    id="email-channel"
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  <Label>邮件通道</Label>
+                  <FilterSelect
                     value={channelChoice}
-                    onChange={(e) => setEmailChannelChoice(e.target.value)}
-                  >
-                    {emailChannels.data?.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                        {' · '}
-                        {a.provider === 'mailgun' ? 'Mailgun' : 'Azure'}
-                        {a.isPrimary ? ' · 主' : ''}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setEmailChannelChoice}
+                    options={
+                      emailChannels.data?.map((a) => ({
+                        value: a.id,
+                        label: `${a.name} · ${a.provider === 'mailgun' ? 'Mailgun' : 'Azure'}${
+                          a.isPrimary ? ' · 主' : ''
+                        }`,
+                      })) ?? []
+                    }
+                  />
                   <p className="text-xs text-muted-foreground">
                     域名提交后无法更改所属邮件通道,请谨慎选择。
                   </p>

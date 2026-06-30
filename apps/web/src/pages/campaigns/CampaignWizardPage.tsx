@@ -2454,7 +2454,6 @@ function DateTimePopup({
       ?.querySelector<HTMLElement>(`[data-m="${pending.getMinutes()}"]`)
       ?.scrollIntoView({ block: 'center' });
     // run once on mount; pending changes inside the popup don't need re-scroll
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const navMonth = (delta: number) =>

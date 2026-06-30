@@ -7,6 +7,7 @@ import { formatDateTime, formatNumber } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { EmptyStateRow } from '@/components/ui/empty-state';
@@ -25,6 +26,14 @@ const STATUS_LABEL: Record<string, string> = {
   failed: '失败',
   skipped: '已跳过',
 };
+const STATUS_OPTIONS = [
+  { value: '', label: '全部状态' },
+  ...Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label })),
+];
+const AUTOMATION_TYPE_OPTIONS = [
+  { value: '', label: '全部流程' },
+  ...Object.entries(SHOP_AUTOMATION_LABELS).map(([value, label]) => ({ value, label })),
+];
 
 export function AutomationSendsPage() {
   const [connectionId, setConnectionId] = useState('');
@@ -73,51 +82,36 @@ export function AutomationSendsPage() {
 
       <Card>
         <CardContent className="grid gap-3 p-4 md:grid-cols-4">
-          <select
-            className={selectCls}
+          <FilterSelect
             value={connectionId}
-            onChange={(e) => {
-              setConnectionId(e.target.value);
+            onChange={(value) => {
+              setConnectionId(value);
               setPage(1);
             }}
-          >
-            <option value="">全部店铺</option>
-            {connections.data?.connections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.shopName ?? c.shopDomain ?? c.externalStoreId}
-              </option>
-            ))}
-          </select>
-          <select
-            className={selectCls}
+            options={[
+              { value: '', label: '全部店铺' },
+              ...(connections.data?.connections.map((c) => ({
+                value: c.id,
+                label: c.shopName ?? c.shopDomain ?? c.externalStoreId,
+              })) ?? []),
+            ]}
+          />
+          <FilterSelect
             value={automationType}
-            onChange={(e) => {
-              setAutomationType(e.target.value);
+            onChange={(value) => {
+              setAutomationType(value);
               setPage(1);
             }}
-          >
-            <option value="">全部流程</option>
-            {Object.entries(SHOP_AUTOMATION_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <select
-            className={selectCls}
+            options={AUTOMATION_TYPE_OPTIONS}
+          />
+          <FilterSelect
             value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
+            onChange={(value) => {
+              setStatus(value);
               setPage(1);
             }}
-          >
-            <option value="">全部状态</option>
-            {Object.entries(STATUS_LABEL).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+            options={STATUS_OPTIONS}
+          />
           <div className="flex gap-2">
             <Input
               value={emailForm}
@@ -224,5 +218,3 @@ export function AutomationSendsPage() {
     </div>
   );
 }
-
-const selectCls = 'h-9 w-full rounded-md border border-input bg-background px-3 text-sm';
