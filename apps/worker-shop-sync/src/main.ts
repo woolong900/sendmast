@@ -104,6 +104,35 @@ async function resolveFlowAttribution(
 }
 
 /**
+ * Fallback for Shopyy abandoned-order recovery: most paid webhooks do not echo
+ * the checkout URL's `sm_mid` back in `landing_page`. If the same external order
+ * was previously sent an abandoned-cart recovery, attribute the conversion to
+ * the latest sent recovery before payment.
+ */
+async function resolveAbandonedOrderAttribution(opts: {
+  accountId: string;
+  shopConnectionId: string;
+  externalOrderId: string;
+  orderTime: Date;
+}): Promise<{ automationId: string; sendId: string } | null> {
+  const send = await prisma.shopAutomationSend.findFirst({
+    where: {
+      accountId: opts.accountId,
+      status: 'sent',
+      sentAt: { lte: opts.orderTime },
+      dedupKey: { startsWith: `abandoned:order:${opts.externalOrderId}:` },
+      automation: {
+        shopConnectionId: opts.shopConnectionId,
+        type: 'abandoned_cart',
+      },
+    },
+    select: { id: true, automationId: true },
+    orderBy: { sentAt: 'desc' },
+  });
+  return send ? { automationId: send.automationId, sendId: send.id } : null;
+}
+
+/**
  * Hard attribution for campaigns: resolve a `sm_mid` to the campaign recipient
  * it was stamped on. Like the flow case, this is independent of the checkout
  * email and of click tracking (the id rides the link's query string).
@@ -292,7 +321,16 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
   // landing-page sm_mid resolves to exactly one of a flow send or a campaign
   // recipient (each is a distinct random UUID), so we try flow first.
   const mid = shipped ? null : landingPageMid(job.payload);
-  const flowAttr = mid ? await resolveFlowAttribution(job.accountId, mid).catch(() => null) : null;
+  const flowAttr =
+    (mid ? await resolveFlowAttribution(job.accountId, mid).catch(() => null) : null) ??
+    (!shipped
+      ? await resolveAbandonedOrderAttribution({
+          accountId: job.accountId,
+          shopConnectionId: job.connectionId,
+          externalOrderId: order.externalOrderId,
+          orderTime: order.orderTime,
+        }).catch(() => null)
+      : null);
   const campaignHard =
     mid && !flowAttr
       ? await resolveCampaignAttribution(job.accountId, mid).catch(() => null)
@@ -301,7 +339,7 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
   // Last-click is the soft fallback for campaigns; the hard sm_mid match wins
   // when present (works even if the buyer checked out with a different email).
   const lastClick =
-    shipped || campaignHard
+    shipped || campaignHard || flowAttr
       ? null
       : await findLastClick(ch, {
           accountId: job.accountId,
