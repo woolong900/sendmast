@@ -169,7 +169,7 @@ function ChannelsTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-end">
-        <Button onClick={() => setDraft({ ...EMPTY_DRAFT })} disabled={!!draft}>
+        <Button className="w-full sm:w-auto" onClick={() => setDraft({ ...EMPTY_DRAFT })} disabled={!!draft}>
           <Plus className="mr-1 size-4" />
           新增渠道
         </Button>
@@ -568,7 +568,7 @@ function CommissionsTab() {
   return (
     <div className="space-y-4">
       <Card>
-        <CardContent className="flex flex-wrap items-end gap-3 p-4">
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">
           <div className="space-y-1.5">
             <Label htmlFor="month-input">月份</Label>
             <Input
@@ -576,20 +576,20 @@ function CommissionsTab() {
               type="month"
               value={month}
               onChange={(e) => setMonth(e.target.value || currentMonth())}
-              className="w-44"
+              className="w-full sm:w-44"
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label>渠道</Label>
             <FilterSelect
               value={channelId}
               onChange={(v) => setChannelId(v)}
               options={channelOptions}
-              className="w-72"
+              className="w-full sm:w-72"
             />
           </div>
           <Button
-            className="ml-auto"
+            className="sm:ml-auto"
             onClick={exportCsv}
             disabled={!month || (filteredSummary?.totalOrderCount ?? 0) === 0}
             title={
@@ -623,7 +623,8 @@ function CommissionsTab() {
             <div className="border-b bg-muted/40 px-4 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               渠道汇总
             </div>
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[620px] text-sm">
               <thead className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2 font-medium">渠道</th>
@@ -648,6 +649,7 @@ function CommissionsTab() {
                 ))}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
       )}

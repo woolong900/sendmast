@@ -166,7 +166,7 @@ export function SendLogsAdminPage() {
             </Field>
           </div>
 
-          <div className="md:col-span-3 lg:col-span-7 flex items-center justify-end gap-2">
+          <div className="flex items-center justify-end gap-2 md:col-span-3 lg:col-span-7">
             <Button variant="ghost" onClick={reset}>
               重置
             </Button>
@@ -189,7 +189,8 @@ export function SendLogsAdminPage() {
               条{isFetching && !isLoading && <span className="ml-2 opacity-60">刷新中…</span>}
             </div>
           </div>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[1120px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">时间</th>
@@ -256,8 +257,9 @@ export function SendLogsAdminPage() {
               ))}
             </tbody>
           </table>
+          </div>
           {(data?.total ?? 0) > 0 && (
-            <div className="flex items-center justify-end border-t px-4 py-3">
+            <div className="flex items-center justify-end overflow-x-auto border-t px-4 py-3">
               <Pagination
                 page={page}
                 pageSize={pageSize}

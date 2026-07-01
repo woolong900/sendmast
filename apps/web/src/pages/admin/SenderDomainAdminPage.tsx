@@ -34,7 +34,8 @@ export function SenderDomainAdminPage() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">租户</th>
@@ -86,6 +87,7 @@ export function SenderDomainAdminPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
     </div>

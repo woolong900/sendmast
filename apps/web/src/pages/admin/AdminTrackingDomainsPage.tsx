@@ -277,7 +277,7 @@ export function AdminTrackingDomainsPage() {
 
 function UsageHint() {
   return (
-    <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-900">
+    <div className="overflow-hidden rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-900">
       <div className="font-medium">添加新域名的步骤</div>
       <ol className="mt-2 list-decimal space-y-1 pl-5 text-blue-800/90">
         <li>购买域名,DNS 接入 Cloudflare(账号需与现有域同号)。</li>
@@ -291,14 +291,14 @@ function UsageHint() {
         </li>
         <li>
           重新下载 Origin Cert,scp 到服务器
-          <span className="font-mono"> /root/sendmast/docker/certs/</span> 替换原文件。
+          <span className="break-all font-mono"> /root/sendmast/docker/certs/</span> 替换原文件。
         </li>
         <li>
           点本页"添加域名" → 复制 Caddy 片段 → scp 到服务器
-          <span className="font-mono"> /root/sendmast/docker/tracking.d/&lt;domain&gt;.caddy</span>。
+          <span className="break-all font-mono"> /root/sendmast/docker/tracking.d/&lt;domain&gt;.caddy</span>。
         </li>
         <li>
-          SSH 跑 <span className="font-mono">docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile</span>。
+          SSH 跑 <span className="break-all font-mono">docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile</span>。
         </li>
         <li>30 秒内 worker-sender 会把新域名加入轮询池。</li>
       </ol>

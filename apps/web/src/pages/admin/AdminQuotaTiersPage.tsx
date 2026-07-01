@@ -129,7 +129,7 @@ export function AdminQuotaTiersPage() {
       </div>
 
       <Card>
-        <CardContent className="flex items-center justify-between p-4 text-sm">
+        <CardContent className="flex flex-col gap-3 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-0.5">
             <div className="font-medium text-foreground">
               {fx ? (
@@ -164,7 +164,8 @@ export function AdminQuotaTiersPage() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">购买额度</th>
@@ -260,6 +261,7 @@ export function AdminQuotaTiersPage() {
               )}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
     </div>

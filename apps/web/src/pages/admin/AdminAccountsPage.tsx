@@ -217,7 +217,8 @@ export function AdminAccountsPage() {
 
       <Card>
         <CardContent className="p-0">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[940px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">租户</th>
@@ -332,6 +333,7 @@ export function AdminAccountsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
 
@@ -399,8 +401,8 @@ function AccountEditModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <Card className="w-full max-w-lg">
-        <CardContent className="space-y-4 p-5">
+      <Card className="max-h-[90vh] w-full max-w-lg overflow-y-auto">
+        <CardContent className="space-y-4 p-4 sm:p-5">
           <div>
             <h2 className="text-lg font-semibold">修改租户 · {account.name}</h2>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -420,17 +422,17 @@ function AccountEditModal({
                 return (
                   <div
                     key={channel.id}
-                    className="flex items-center justify-between rounded-md border px-3 py-2"
+                    className="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <label className="flex items-center gap-2 text-sm">
+                    <label className="flex min-w-0 items-center gap-2 text-sm">
                       <input
                         type="checkbox"
                         checked={checked}
                         disabled={pending || (inactive && !checked)}
                         onChange={() => toggle(channel.id)}
                       />
-                      <span>{channel.name}</span>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="min-w-0 truncate">{channel.name}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
                         {channel.provider === 'mailgun' ? 'Mailgun' : 'Azure'}
                       </span>
                       {inactive && (

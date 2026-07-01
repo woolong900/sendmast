@@ -143,7 +143,7 @@ function SmtpConfigCard() {
 
         {isLoading ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {Array.from({ length: 8 }, (_, i) => (
                 <div key={i} className="space-y-2">
                   <Skeleton className="h-3 w-20" />
@@ -155,7 +155,7 @@ function SmtpConfigCard() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="SMTP 主机" required>
                 <Input
                   value={form.host}
@@ -255,11 +255,11 @@ function SmtpConfigCard() {
                   使用 <code className="rounded bg-muted px-1">password_reset</code>{' '}
                   模板发送一封示例邮件，用于验证 SMTP 配置是否生效。
                 </p>
-                <div className="mt-3 flex gap-2">
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                   <Input
                     type="email"
                     placeholder="收件人邮箱"
-                    className="max-w-sm"
+                    className="sm:max-w-sm"
                     value={testTo}
                     onChange={(e) => setTestTo(e.target.value)}
                   />
@@ -342,7 +342,8 @@ function TemplatesCard() {
               管理系统通知的邮件主题与正文。模板代码（code）由后端定义，无法新增或删除。
             </p>
           </div>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">模板</th>
@@ -392,6 +393,7 @@ function TemplatesCard() {
               ))}
             </tbody>
           </table>
+          </div>
         </CardContent>
       </Card>
 
