@@ -390,10 +390,10 @@ function EmailContentBlock({
   onPreheader: (v: string) => void;
 }) {
   return (
-    <div className="grid items-stretch gap-5 sm:[grid-template-columns:minmax(0,220px)_minmax(0,1fr)]">
+    <div className="grid items-start gap-5 sm:[grid-template-columns:minmax(0,220px)_minmax(0,1fr)]">
       <div className="flex flex-col">
         <FieldLabel>邮件内容</FieldLabel>
-        <div className="min-h-[160px] flex-1">
+        <div className="h-[180px]">
           <EmailThumb thumbnail={thumbnail} html={html} onEdit={onEdit} />
         </div>
       </div>
