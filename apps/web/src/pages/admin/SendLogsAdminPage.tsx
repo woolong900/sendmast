@@ -396,15 +396,6 @@ function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void 
                 </div>
               )}
             </div>
-
-            {content?.html && (
-              <div>
-                <Label className="mb-1 block text-xs text-muted-foreground">HTML 源码</Label>
-                <pre className="max-h-[320px] overflow-auto rounded-md bg-background p-3 text-xs leading-relaxed">
-                  {content.html}
-                </pre>
-              </div>
-            )}
           </div>
 
           <div>
