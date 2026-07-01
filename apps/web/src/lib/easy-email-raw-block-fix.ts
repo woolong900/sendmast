@@ -45,7 +45,7 @@ if (originalRaw) {
     const value = (params.data?.data?.value as { content?: string } | undefined) ?? {};
     const rawContent: string = value.content ?? '';
 
-    if (mode === 'testing' && idx && isInsideColumn(params.context as IBlockData, idx)) {
+    if (mode === 'testing' && idx) {
       const data = {
         ...params.data,
         attributes: {
@@ -62,12 +62,16 @@ if (originalRaw) {
         },
       };
 
-      return React.createElement(
-        React.Fragment,
-        null,
+      const textPreview = [
         `<mj-text ${getAdapterAttributesString({ ...params, data })}>`,
         rawContent,
         '</mj-text>',
+      ].join('');
+
+      return React.createElement(
+        React.Fragment,
+        null,
+        wrapTestingPreview(textPreview, getParentBlock(params.context as IBlockData, idx)?.type),
       );
     }
 
@@ -108,9 +112,30 @@ if (originalRaw) {
   BlockManager.registerBlocks({ [BasicType.RAW]: patchedRaw });
 }
 
-function isInsideColumn(context: IBlockData | undefined, idx: string): boolean {
-  const parent = getParentBlock(context, idx);
-  return parent?.type === BasicType.COLUMN;
+function wrapTestingPreview(textPreview: string, parentType?: string): string {
+  if (parentType === BasicType.COLUMN || parentType === 'mj-column') {
+    return textPreview;
+  }
+
+  if (
+    parentType === BasicType.SECTION ||
+    parentType === BasicType.GROUP ||
+    parentType === 'mj-section' ||
+    parentType === 'mj-group'
+  ) {
+    return `<mj-column>${textPreview}</mj-column>`;
+  }
+
+  if (
+    parentType === BasicType.WRAPPER ||
+    parentType === BasicType.PAGE ||
+    parentType === 'mj-wrapper' ||
+    parentType === 'page'
+  ) {
+    return `<mj-section><mj-column>${textPreview}</mj-column></mj-section>`;
+  }
+
+  return textPreview;
 }
 
 function getParentBlock(context: IBlockData | undefined, idx: string): IBlockData | null {
