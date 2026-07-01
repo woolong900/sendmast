@@ -335,7 +335,7 @@ function EmailThumb({
       className="group relative block h-full min-h-[160px] w-full overflow-hidden rounded-xl border bg-muted/30 text-left shadow-sm"
     >
       {thumbnail ? (
-        <img src={thumbnail} alt="" className="h-full w-full object-cover object-top" />
+        <img src={thumbnail} alt="" className="h-full w-full object-contain object-left-top" />
       ) : html ? (
         <iframe
           title="email-thumb"

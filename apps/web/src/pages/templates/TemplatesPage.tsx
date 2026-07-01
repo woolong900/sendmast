@@ -207,7 +207,11 @@ function TemplateThumbnail({ template }: { template: TemplateRow }) {
   return (
     <div className="flex aspect-[4/3] items-center justify-center bg-muted">
       {template.thumbnail ? (
-        <img src={template.thumbnail} alt={template.name} className="h-full w-full object-cover" />
+        <img
+          src={template.thumbnail}
+          alt={template.name}
+          className="h-full w-full object-contain object-left-top"
+        />
       ) : (
         <FileText className="size-8 text-muted-foreground" />
       )}
