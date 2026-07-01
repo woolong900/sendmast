@@ -120,10 +120,10 @@ export function PersonalCenterDialog({ open, onClose }: Props) {
           </Button>
         </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
-          <section className="rounded-lg border bg-muted/10">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+          <section className="rounded-lg bg-muted/25">
             <SectionHeader icon={<UserRound className="size-4" />} title="个人资料" />
-            <div className="grid gap-4 p-4 sm:grid-cols-2">
+            <div className="grid gap-4 px-4 pb-4 sm:grid-cols-2">
               <Field label="姓名">
                 <Input
                   autoComplete="name"
@@ -145,16 +145,16 @@ export function PersonalCenterDialog({ open, onClose }: Props) {
                 <Input value={user?.email ?? ''} disabled className="bg-muted/40" />
               </Field>
             </div>
-            <div className="flex items-center justify-end border-t bg-background/60 px-4 py-3">
+            <div className="flex items-center justify-end px-4 pb-4">
               <Button onClick={saveProfile} disabled={pending || profileUnchanged}>
                 {profileMut.isPending ? '保存中…' : '保存资料'}
               </Button>
             </div>
           </section>
 
-          <section className="rounded-lg border bg-muted/10">
+          <section className="rounded-lg bg-muted/25">
             <SectionHeader icon={<LockKeyhole className="size-4" />} title="修改密码" />
-            <div className="space-y-4 p-4">
+            <div className="space-y-4 px-4 pb-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="当前密码" className="sm:col-span-2">
                   <Input
@@ -189,7 +189,7 @@ export function PersonalCenterDialog({ open, onClose }: Props) {
                 修改成功后,你在其它设备/浏览器上的登录会话将被强制下线,需要重新登录。
               </p>
             </div>
-            <div className="flex items-center justify-end border-t bg-background/60 px-4 py-3">
+            <div className="flex items-center justify-end px-4 pb-4">
               <Button onClick={savePassword} disabled={pending}>
                 {passwordMut.isPending ? '提交中…' : '确认修改'}
               </Button>
@@ -203,7 +203,7 @@ export function PersonalCenterDialog({ open, onClose }: Props) {
 
 function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
-    <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-semibold">
+    <div className="flex items-center gap-2 px-4 py-3 text-sm font-semibold">
       <span className="text-muted-foreground">{icon}</span>
       {title}
     </div>
