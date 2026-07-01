@@ -393,7 +393,7 @@ function EmailContentBlock({
     <div className="grid items-start gap-5 sm:[grid-template-columns:minmax(0,220px)_minmax(0,1fr)]">
       <div className="flex flex-col">
         <FieldLabel>邮件内容</FieldLabel>
-        <div className="h-[180px]">
+        <div className="h-[188px]">
           <EmailThumb thumbnail={thumbnail} html={html} onEdit={onEdit} />
         </div>
       </div>
