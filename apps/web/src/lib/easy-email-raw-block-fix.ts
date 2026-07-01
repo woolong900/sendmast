@@ -16,20 +16,25 @@
  * showing the previous block's editor.
  *
  * The fix: re-register Raw with a render that wraps the user-typed content
- * in a `<div class="email-block node-idx-… node-type-raw">…</div>` while
- * we're rendering the canvas (mode === 'testing'). In production we leave
- * the content untouched and still render through easy-email's original Raw so
- * raw HTML is not escaped by React before MJML sees it.
+ * in an `<mj-text>` preview while we're rendering the canvas (mode ===
+ * 'testing'). `mj-raw` is correct for production, but in the canvas it can be
+ * hard to see/select because it does not create a normal MJML content wrapper.
+ * In production we leave the content untouched and still render through
+ * easy-email's original Raw so raw HTML is not escaped by React before MJML
+ * sees it.
  *
  * Side-effect module: import order matters — see easy-email-image-overrides.
  */
+import React from 'react';
 import {
   BasicType,
   BlockManager,
   EMAIL_BLOCK_CLASS_NAME,
+  getAdapterAttributesString,
   getNodeIdxClassName,
   getNodeTypeClassName,
   type IBlock,
+  type IBlockData,
 } from 'easy-email-core';
 
 const originalRaw = BlockManager.getBlockByType(BasicType.RAW);
@@ -38,8 +43,33 @@ if (originalRaw) {
   const patchedRender: IBlock['render'] = (params) => {
     const { idx, mode } = params;
     const value = (params.data?.data?.value as { content?: string } | undefined) ?? {};
-    const rawContent: string =
-      value.content ?? '';
+    const rawContent: string = value.content ?? '';
+
+    if (mode === 'testing' && idx && isInsideColumn(params.context as IBlockData, idx)) {
+      const data = {
+        ...params.data,
+        attributes: {
+          ...params.data.attributes,
+          'css-class': [
+            params.data.attributes?.['css-class'],
+            EMAIL_BLOCK_CLASS_NAME,
+            getNodeIdxClassName(idx),
+            getNodeTypeClassName(BasicType.RAW),
+          ]
+            .filter(Boolean)
+            .join(' '),
+          padding: params.data.attributes?.padding ?? '0px',
+        },
+      };
+
+      return React.createElement(
+        React.Fragment,
+        null,
+        `<mj-text ${getAdapterAttributesString({ ...params, data })}>`,
+        rawContent,
+        '</mj-text>',
+      );
+    }
 
     const content =
       mode === 'testing' && idx
@@ -76,4 +106,25 @@ if (originalRaw) {
   );
 
   BlockManager.registerBlocks({ [BasicType.RAW]: patchedRaw });
+}
+
+function isInsideColumn(context: IBlockData | undefined, idx: string): boolean {
+  const parent = getParentBlock(context, idx);
+  return parent?.type === BasicType.COLUMN;
+}
+
+function getParentBlock(context: IBlockData | undefined, idx: string): IBlockData | null {
+  if (!context) return null;
+  const parentIdx = idx.replace(/\.children\.\[\d+\]$/, '');
+  if (parentIdx === idx) return null;
+
+  let block: IBlockData | undefined = context;
+  const re = /children\.\[(\d+)\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(parentIdx))) {
+    const childIndex = Number(match[1]);
+    block = block?.children?.[childIndex] as IBlockData | undefined;
+    if (!block) return null;
+  }
+  return block ?? null;
 }
