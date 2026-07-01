@@ -971,12 +971,14 @@ async function runFlowSend(job: Job<SendJobData>) {
   const bodyBase = transactional ? bodyHtmlRaw : ensureUnsubscribeFooter(bodyHtmlRaw);
   const bodyHtmlSys = applySystemTags(bodyBase, sysCtx, 'html');
   let bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
+  let preheaderOut: string | null = null;
 
   // Inbox preview text (preheader): resolve tags, then inject a hidden span at
   // the top of the body so clients show it as the preview snippet.
   const preheaderRaw = (send.preheader ?? automation.preheader ?? '').trim();
   if (preheaderRaw) {
     const ph = applyCustomTags(applySystemTags(preheaderRaw, sysCtx, 'text'), tagIndex, 'text');
+    preheaderOut = ph;
     bodyHtml = injectPreheader(bodyHtml, ph);
   }
 
@@ -1060,6 +1062,9 @@ async function runFlowSend(job: Job<SendJobData>) {
         errorMessage: result.errorMessage,
         latencyMs: result.latencyMs,
         responsePayload: toJsonInput(result.providerResponse),
+        finalSubject: subjectOut,
+        finalPreheader: preheaderOut,
+        finalHtml: html,
       },
     });
   } catch (logErr) {

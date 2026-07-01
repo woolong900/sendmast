@@ -923,6 +923,12 @@ model SendLog {
   /// Request body is intentionally NOT stored — it's large and the campaign
   /// row already carries fromEmail / subject / html.
   responsePayload Json?    @map("response_payload")
+  /// Temporary/debug snapshot of the final content submitted to the provider.
+  /// Currently written for automation sends only, after merge vars, preheader,
+  /// unsubscribe footer and tracking-link rewriting have all been applied.
+  finalSubject    String?   @map("final_subject")
+  finalPreheader  String?   @map("final_preheader")
+  finalHtml       String?   @map("final_html") @db.Text
   sentAt          DateTime @default(now()) @map("sent_at")
 
   account              Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)

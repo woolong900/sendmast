@@ -294,7 +294,9 @@ function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void 
   });
   const content = detail?.content;
   const contentSourceLabel =
-    content?.source === 'automation_send'
+    content?.source === 'send_log'
+      ? '最终发送内容'
+      : content?.source === 'automation_send'
       ? '自动化发送快照'
       : content?.source === 'automation'
         ? '自动化配置'

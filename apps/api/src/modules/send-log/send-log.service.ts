@@ -93,10 +93,21 @@ export class SendLogService {
 }
 
 function toContent(r: {
+  finalSubject: string | null;
+  finalPreheader: string | null;
+  finalHtml: string | null;
   campaign: { subject: string; preheader: string | null; html: string | null } | null;
   automation: { subject: string | null; preheader: string | null; html: string | null } | null;
   automationSend: { subject: string | null; preheader: string | null; html: string | null } | null;
 }): SendLogContentView {
+  if (r.finalHtml || r.finalSubject || r.finalPreheader) {
+    return {
+      subject: r.finalSubject,
+      preheader: r.finalPreheader,
+      html: r.finalHtml,
+      source: 'send_log',
+    };
+  }
   if (r.automationSend?.html || r.automationSend?.subject) {
     return {
       subject: r.automationSend.subject,
