@@ -26,6 +26,7 @@ import {
 } from './mapper.js';
 import {
   accountUrlFrom,
+  thanksUrlFrom,
   runAbandonedFromOrder,
   runAbandonedRecovery,
   scheduleAbandonedFromOrder,
@@ -512,6 +513,7 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
     trackingUrl: order.trackingUrl,
     trackingNumber: order.trackingNumber,
     orderUrl: accountUrlFrom(order.landingPage),
+    thanksUrl: thanksUrlFrom(order.shopDomain ?? order.landingPage, order.checkoutToken),
     items: mapLineItems(job.payload),
     addressLines: mapShippingAddressLines(job.payload),
     billingAddressLines: mapBillingAddressLines(job.payload),

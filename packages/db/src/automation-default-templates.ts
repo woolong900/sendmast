@@ -42,7 +42,7 @@ export const orderConfirmationHtml = shell(
 <div style="font-size:13px;font-weight:600;color:#6d7175;text-transform:uppercase;">Order #{{order_no}}</div>
 <h1 style="margin:8px 0 12px;font-size:28px;line-height:1.25;font-weight:600;">Thank you for your purchase!</h1>
 <p style="margin:0 0 28px;font-size:16px;line-height:1.65;color:#6d7175;">Hi {{full_name}}, we're getting your order ready. We'll notify you when it has been sent.</p>
-${button('View your order', '{{order_url}}')}
+${button('View your order', '{{thanks_url}}')}
 <h2 style="margin:36px 0 8px;font-size:18px;font-weight:600;">Order summary</h2>
 {{order_items}}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e1e3e5;"><tr><td style="padding:18px 0;font-size:15px;color:#6d7175;">Total</td><td align="right" style="padding:18px 0;font-size:18px;font-weight:700;">{{order_total}}</td></tr></table>

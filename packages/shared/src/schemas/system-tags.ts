@@ -125,6 +125,13 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
       '电商自动化邮件专用：订单详情或结账恢复链接；弃单召回中为 return to checkout 链接',
   },
   {
+    name: 'thanks_url',
+    placeholder: '{{thanks_url}}',
+    label: '订单感谢页链接',
+    description:
+      '电商自动化邮件专用：订单确认通知中的感谢页链接，格式为店铺域名 + /checkouts/success/ + checkout_token',
+  },
+  {
     name: 'tracking_url',
     placeholder: '{{tracking_url}}',
     label: '物流追踪链接',
@@ -181,6 +188,7 @@ export const MERGE_VAR_TAG_NAMES = [
   'order_total',
   'order_currency',
   'order_url',
+  'thanks_url',
   'tracking_url',
   'tracking_number',
 ] as const;

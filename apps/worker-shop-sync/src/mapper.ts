@@ -84,6 +84,10 @@ export interface NormalizedOrder {
   payUrl?: string;
   /** Storefront page the buyer landed on before ordering. */
   landingPage?: string;
+  /** Storefront domain carried by the order payload. */
+  shopDomain?: string;
+  /** Checkout token used to build the order thank-you page URL. */
+  checkoutToken?: string;
 }
 
 /** Split a single full-name string into first + (remaining) last name. */
@@ -320,6 +324,8 @@ export function mapOrder(payload: Json): NormalizedOrder | null {
     landingPage:
       pickStr(o, ['landing_page', 'landingPage']) ??
       pickStr(payload, ['landing_page', 'landingPage']),
+    shopDomain: pickStr(o, ['domain', 'shop_domain', 'shopDomain', 'store_domain']),
+    checkoutToken: pickStr(o, ['checkout_token', 'checkoutToken', 'token']),
   };
 }
 

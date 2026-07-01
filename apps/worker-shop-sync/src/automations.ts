@@ -37,6 +37,8 @@ export interface OrderContext {
   trackingUrl?: string;
   /** Store account page URL, derived from the order landing page when possible. */
   orderUrl?: string;
+  /** Order thank-you page URL: storefront origin + /checkouts/success/{checkout_token}. */
+  thanksUrl?: string;
   /** Logistics tracking number, present on shipped orders. */
   trackingNumber?: string;
   /** Order line items, rendered into the `{{order_items}}` merge var. */
@@ -161,6 +163,29 @@ export function accountUrlFrom(value: string | null | undefined): string | undef
     const url = new URL(normalized);
     if (!['http:', 'https:'].includes(url.protocol)) return undefined;
     return `${url.origin}/account`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Build the storefront thank-you page from a trusted domain/origin and checkout token. */
+export function thanksUrlFrom(
+  domainOrUrl: string | null | undefined,
+  checkoutToken: string | null | undefined,
+): string | undefined {
+  const token = checkoutToken?.trim();
+  const raw = domainOrUrl?.trim();
+  if (!token || !raw) return undefined;
+  const normalized = /^https?:\/\//i.test(raw)
+    ? raw
+    : /^[a-z0-9.-]+(?::\d+)?(?:\/|$)/i.test(raw)
+      ? `https://${raw}`
+      : undefined;
+  if (!normalized) return undefined;
+  try {
+    const url = new URL(normalized);
+    if (!['http:', 'https:'].includes(url.protocol)) return undefined;
+    return `${url.origin}/checkouts/success/${encodeURIComponent(token)}`;
   } catch {
     return undefined;
   }
@@ -353,6 +378,7 @@ function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Re
     order_total: formatMoney(ctx.value, ctx.currency),
     order_currency: ctx.currency,
     ...(ctx.orderUrl ? { order_url: ctx.orderUrl } : {}),
+    ...(ctx.thanksUrl ? { thanks_url: ctx.thanksUrl } : {}),
     ...(ctx.trackingUrl ? { tracking_url: ctx.trackingUrl } : {}),
     ...(ctx.trackingNumber ? { tracking_number: ctx.trackingNumber } : {}),
     ...(itemsHtml ? { order_items: itemsHtml } : {}),
