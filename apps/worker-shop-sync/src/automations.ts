@@ -507,7 +507,9 @@ export async function runAbandonedRecovery(
     ...(job.value != null && job.currency
       ? { order_total: formatMoney(job.value, job.currency) }
       : {}),
-    ...(job.recoveryUrl ? { tracking_url: job.recoveryUrl } : {}),
+    ...(job.recoveryUrl
+      ? { order_url: job.recoveryUrl, tracking_url: job.recoveryUrl }
+      : {}),
   };
 
   const recipientId = await enqueueTransactional(deps, {
@@ -673,7 +675,7 @@ export async function runAbandonedFromOrder(
     ...(job.value != null && job.currency
       ? { order_total: formatMoney(job.value, job.currency) }
       : {}),
-    ...(recoveryUrl ? { tracking_url: recoveryUrl } : {}),
+    ...(recoveryUrl ? { order_url: recoveryUrl, tracking_url: recoveryUrl } : {}),
     ...(itemsHtml ? { order_items: itemsHtml } : {}),
     ...(job.couponCode
       ? {

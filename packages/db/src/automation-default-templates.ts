@@ -72,7 +72,7 @@ export const abandonedCartHtml = shell(
 {{order_items}}
 {{coupon_block}}
 <div style="height:24px;line-height:24px;">&nbsp;</div>
-${button('Return to checkout', '{{tracking_url}}')}
+${button('Return to checkout', '{{order_url}}')}
 </div>`,
   `Don't want to receive cart reminders from ${STORE_NAME}?`,
 );

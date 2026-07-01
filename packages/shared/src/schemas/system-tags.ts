@@ -120,8 +120,9 @@ export const SYSTEM_TAGS: readonly SystemTagDef[] = [
   {
     name: 'order_url',
     placeholder: '{{order_url}}',
-    label: '订单链接',
-    description: '电商自动化邮件专用：店铺账户页面链接，优先使用订单 landing_page 的域名',
+    label: '订单/结账链接',
+    description:
+      '电商自动化邮件专用：订单详情或结账恢复链接；弃单召回中为 return to checkout 链接',
   },
   {
     name: 'tracking_url',
