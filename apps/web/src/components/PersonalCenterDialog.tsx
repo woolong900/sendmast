@@ -15,19 +15,25 @@ interface Props {
 
 export function PersonalCenterDialog({ open, onClose }: Props) {
   const toast = useToast();
-  const { user, setProfile } = useAuth();
+  const { user, account, setProfile } = useAuth();
   const [displayName, setDisplayName] = useState(user?.displayName ?? '');
+  const [accountName, setAccountName] = useState(account?.name ?? '');
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
 
   useEffect(() => {
-    if (open) setDisplayName(user?.displayName ?? '');
-  }, [open, user?.displayName]);
+    if (!open) return;
+    setDisplayName(user?.displayName ?? '');
+    setAccountName(account?.name ?? '');
+  }, [account?.name, open, user?.displayName]);
 
   const profileMut = useMutation({
     mutationFn: async () => {
-      const r = await api.patch('/api/auth/profile', { displayName: displayName.trim() });
+      const r = await api.patch('/api/auth/profile', {
+        displayName: displayName.trim(),
+        accountName: accountName.trim(),
+      });
       return r.data;
     },
     onSuccess: (data) => {
@@ -61,13 +67,17 @@ export function PersonalCenterDialog({ open, onClose }: Props) {
   function close() {
     resetPassword();
     setDisplayName(user?.displayName ?? '');
+    setAccountName(account?.name ?? '');
     onClose();
   }
 
   function saveProfile() {
     const name = displayName.trim();
+    const workspaceName = accountName.trim();
     if (!name) return toast('请输入姓名', 'error');
     if (name.length > 80) return toast('姓名最多 80 个字符', 'error');
+    if (!workspaceName) return toast('请输入工作区名称', 'error');
+    if (workspaceName.length > 80) return toast('工作区名称最多 80 个字符', 'error');
     profileMut.mutate();
   }
 
@@ -107,6 +117,14 @@ export function PersonalCenterDialog({ open, onClose }: Props) {
                 autoComplete="name"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
+                disabled={pending}
+              />
+            </Field>
+            <Field label="工作区名称">
+              <Input
+                value={accountName}
+                onChange={(e) => setAccountName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
                 disabled={pending}
               />

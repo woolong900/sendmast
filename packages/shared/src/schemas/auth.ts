@@ -92,6 +92,7 @@ export type ChangePasswordInput = z.infer<typeof ChangePasswordSchema>;
 
 export const UpdateProfileSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
+  accountName: z.string().trim().min(1).max(80),
 });
 export type UpdateProfileInput = z.infer<typeof UpdateProfileSchema>;
 

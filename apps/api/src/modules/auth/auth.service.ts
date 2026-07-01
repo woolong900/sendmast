@@ -442,10 +442,16 @@ export class AuthService {
     if (impersonatedBy) {
       throw new ForbiddenException('代登录状态下不能修改租户用户资料');
     }
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { displayName: input.displayName },
-    });
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { displayName: input.displayName },
+      }),
+      this.prisma.account.update({
+        where: { id: accountId },
+        data: { name: input.accountName },
+      }),
+    ]);
     return this.me(userId, accountId, null);
   }
 
