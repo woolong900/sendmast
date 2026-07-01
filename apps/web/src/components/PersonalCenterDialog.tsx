@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { X } from 'lucide-react';
+import { LockKeyhole, Mail, UserRound, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -57,6 +57,9 @@ export function PersonalCenterDialog({ open, onClose }: Props) {
   });
 
   const pending = profileMut.isPending || passwordMut.isPending;
+  const profileUnchanged =
+    displayName.trim() === (user?.displayName ?? '') &&
+    accountName.trim() === (account?.name ?? '');
 
   function resetPassword() {
     setOldPassword('');
@@ -92,84 +95,101 @@ export function PersonalCenterDialog({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4"
       onClick={() => !pending && close()}
     >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-lg bg-card shadow-xl"
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-card shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b px-5 py-3">
-          <h2 className="text-base font-semibold">个人中心</h2>
+        <div className="flex items-start justify-between gap-4 border-b px-5 py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+              {(user?.displayName ?? user?.email ?? '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold">个人中心</h2>
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <Mail className="size-3.5 shrink-0" />
+                <span className="truncate">{user?.email}</span>
+              </div>
+            </div>
+          </div>
           <Button size="icon" variant="ghost" disabled={pending} onClick={close}>
             <X className="size-4" />
           </Button>
         </div>
 
-        <div className="space-y-6 p-5">
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold">个人资料</h3>
-            <Field label="登录邮箱">
-              <Input value={user?.email ?? ''} disabled />
-            </Field>
-            <Field label="姓名">
-              <Input
-                autoComplete="name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
-                disabled={pending}
-              />
-            </Field>
-            <Field label="工作区名称">
-              <Input
-                value={accountName}
-                onChange={(e) => setAccountName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
-                disabled={pending}
-              />
-            </Field>
-            <div className="flex justify-end">
-              <Button onClick={saveProfile} disabled={pending}>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+          <section className="rounded-lg border bg-muted/10">
+            <SectionHeader icon={<UserRound className="size-4" />} title="个人资料" />
+            <div className="grid gap-4 p-4 sm:grid-cols-2">
+              <Field label="姓名">
+                <Input
+                  autoComplete="name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
+                  disabled={pending}
+                />
+              </Field>
+              <Field label="工作区名称">
+                <Input
+                  value={accountName}
+                  onChange={(e) => setAccountName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
+                  disabled={pending}
+                />
+              </Field>
+              <Field label="登录邮箱" className="sm:col-span-2">
+                <Input value={user?.email ?? ''} disabled className="bg-muted/40" />
+              </Field>
+            </div>
+            <div className="flex items-center justify-end border-t bg-background/60 px-4 py-3">
+              <Button onClick={saveProfile} disabled={pending || profileUnchanged}>
                 {profileMut.isPending ? '保存中…' : '保存资料'}
               </Button>
             </div>
           </section>
 
-          <section className="space-y-3 border-t pt-5">
-            <h3 className="text-sm font-semibold">修改密码</h3>
-            <Field label="当前密码">
-              <Input
-                type="password"
-                autoComplete="current-password"
-                value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
-                disabled={pending}
-              />
-            </Field>
-            <Field label="新密码 (至少 8 位)">
-              <Input
-                type="password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                disabled={pending}
-              />
-            </Field>
-            <Field label="确认新密码">
-              <Input
-                type="password"
-                autoComplete="new-password"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && savePassword()}
-                disabled={pending}
-              />
-            </Field>
-            <p className="text-xs text-muted-foreground">
-              修改成功后,你在其它设备/浏览器上的登录会话将被强制下线,需要重新登录。
-            </p>
-            <div className="flex justify-end">
+          <section className="rounded-lg border bg-muted/10">
+            <SectionHeader icon={<LockKeyhole className="size-4" />} title="修改密码" />
+            <div className="space-y-4 p-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="当前密码" className="sm:col-span-2">
+                  <Input
+                    type="password"
+                    autoComplete="current-password"
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
+                    disabled={pending}
+                  />
+                </Field>
+                <Field label="新密码">
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    disabled={pending}
+                  />
+                </Field>
+                <Field label="确认新密码">
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && savePassword()}
+                    disabled={pending}
+                  />
+                </Field>
+              </div>
+              <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                修改成功后,你在其它设备/浏览器上的登录会话将被强制下线,需要重新登录。
+              </p>
+            </div>
+            <div className="flex items-center justify-end border-t bg-background/60 px-4 py-3">
               <Button onClick={savePassword} disabled={pending}>
                 {passwordMut.isPending ? '提交中…' : '确认修改'}
               </Button>
@@ -181,10 +201,27 @@ export function PersonalCenterDialog({ open, onClose }: Props) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
-    <div>
-      <Label className="mb-1 block text-xs text-muted-foreground">{label}</Label>
+    <div className="flex items-center gap-2 border-b px-4 py-3 text-sm font-semibold">
+      <span className="text-muted-foreground">{icon}</span>
+      {title}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">{label}</Label>
       {children}
     </div>
   );
