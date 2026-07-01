@@ -18,16 +18,15 @@
  * The fix: re-register Raw with a render that wraps the user-typed content
  * in a `<div class="email-block node-idx-… node-type-raw">…</div>` while
  * we're rendering the canvas (mode === 'testing'). In production we leave
- * the content untouched so exported MJML / HTML stays clean.
+ * the content untouched and still render through easy-email's original Raw so
+ * raw HTML is not escaped by React before MJML sees it.
  *
  * Side-effect module: import order matters — see easy-email-image-overrides.
  */
-import React from 'react';
 import {
   BasicType,
   BlockManager,
   EMAIL_BLOCK_CLASS_NAME,
-  getAdapterAttributesString,
   getNodeIdxClassName,
   getNodeTypeClassName,
   type IBlock,
@@ -38,21 +37,26 @@ const originalRaw = BlockManager.getBlockByType(BasicType.RAW);
 if (originalRaw) {
   const patchedRender: IBlock['render'] = (params) => {
     const { idx, mode } = params;
+    const value = (params.data?.data?.value as { content?: string } | undefined) ?? {};
     const rawContent: string =
-      (params.data?.data?.value as { content?: string } | undefined)?.content ?? '';
+      value.content ?? '';
 
-    const wrappedContent =
+    const content =
       mode === 'testing' && idx
         ? `<div class="${EMAIL_BLOCK_CLASS_NAME} ${getNodeIdxClassName(idx)} ${getNodeTypeClassName(BasicType.RAW)}">${rawContent}</div>`
         : rawContent;
+    const data = {
+      ...params.data,
+      data: {
+        ...params.data.data,
+        value: {
+          ...value,
+          content,
+        },
+      },
+    };
 
-    return React.createElement(
-      React.Fragment,
-      null,
-      `<mj-raw ${getAdapterAttributesString(params)}>`,
-      wrappedContent,
-      '</mj-raw>',
-    );
+    return originalRaw.render({ ...params, data });
   };
 
   // IMPORTANT: do NOT use `{ ...originalRaw, render: ... }` — easy-email-core
