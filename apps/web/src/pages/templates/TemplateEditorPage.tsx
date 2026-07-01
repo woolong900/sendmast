@@ -10,8 +10,6 @@ import {
   type IEmailTemplate,
 } from 'easy-email-editor';
 import { StandardLayout } from 'easy-email-extensions';
-import { JsonToMjml } from 'easy-email-core';
-import mjml2html from 'mjml-browser';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -21,7 +19,12 @@ import { easyEmailZhCN } from '@/lib/easy-email-locale';
 import { uploadEditorImage } from '@/lib/easy-email-upload';
 import { captureAndUploadThumbnail } from '@/lib/thumbnail';
 import { applyMergePreviewSamples } from '@/lib/email-merge-preview';
-import { blockCategories, emptyEmailTemplate } from '@/lib/easy-email-editor-shared';
+import {
+  blockCategories,
+  compileTemplate,
+  compileThumbnailHtml,
+  emptyEmailTemplate,
+} from '@/lib/easy-email-editor-shared';
 
 import 'easy-email-editor/lib/style.css';
 import 'easy-email-extensions/lib/style.css';
@@ -76,16 +79,11 @@ export function TemplateEditorPage() {
 
   const saveMut = useMutation({
     mutationFn: async (values: IEmailTemplate) => {
-      const mjml = JsonToMjml({
-        data: values.content,
-        mode: 'production',
-        context: values.content,
-      });
-      const html = mjml2html(mjml).html;
+      const { html, mjml } = compileTemplate(values);
       // Generate the preview thumbnail off the freshly compiled HTML and
       // ship the URL as part of the same save payload — see
       // apps/web/src/lib/thumbnail.ts for why this lives client-side.
-      const thumbnail = await captureAndUploadThumbnail(html);
+      const thumbnail = await captureAndUploadThumbnail(compileThumbnailHtml(values));
       const payload = {
         name,
         html,

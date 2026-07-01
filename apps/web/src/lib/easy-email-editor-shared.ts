@@ -8,6 +8,7 @@ import {
 import { type IEmailTemplate } from 'easy-email-editor';
 import mjml2html from 'mjml-browser';
 import { applyMergePreviewSamples } from '@/lib/email-merge-preview';
+import '@/lib/easy-email-raw-block-fix';
 
 /**
  * Shared Easy Email editor building blocks, used by both the template editor and
@@ -123,4 +124,14 @@ export function compileTemplateHtml(values: IEmailTemplate): string {
 
 export function compilePreviewHtml(values: IEmailTemplate): string {
   return applyMergePreviewSamples(compileTemplateHtml(values));
+}
+
+export function compileThumbnailHtml(values: IEmailTemplate): string {
+  const mjml = JsonToMjml({
+    data: values.content,
+    mode: 'testing',
+    context: values.content,
+    idx: 'content',
+  });
+  return applyMergePreviewSamples(mjml2html(mjml).html);
 }

@@ -22,6 +22,7 @@ import {
   blockCategories,
   compilePreviewHtml,
   compileTemplate,
+  compileThumbnailHtml,
   emptyEmailTemplate,
   htmlToEmailTemplate,
 } from '@/lib/easy-email-editor-shared';
@@ -136,7 +137,8 @@ export function AutomationEmailEditor({
                     setSaving(true);
                     try {
                       const { html, mjml } = compileTemplate(values);
-                      const thumbnail = (await captureAndUploadThumbnail(html)) ?? null;
+                      const thumbnail =
+                        (await captureAndUploadThumbnail(compileThumbnailHtml(values))) ?? null;
                       onApply({ html, mjml, designJson: values, thumbnail });
                       onClose();
                     } finally {
