@@ -102,7 +102,8 @@ export class TemplateService {
   }
 }
 
-function normalizeThumbnail(value: string | undefined): string | null | undefined {
+function normalizeThumbnail(value: string | null | undefined): string | null | undefined {
+  if (value === null) return null;
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;

@@ -91,7 +91,7 @@ export function TemplateEditorPage() {
         html,
         mjml,
         designJson: values,
-        ...(thumbnail ? { thumbnail } : {}),
+        thumbnail,
       };
       if (id) return api.patch(`/api/templates/${id}`, payload);
       return api.post('/api/templates', payload);
