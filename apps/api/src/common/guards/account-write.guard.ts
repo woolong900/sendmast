@@ -68,6 +68,7 @@ const WRITE_WHITELIST = new Set<string>([
   '/api/auth/logout',
   '/api/auth/forgot-password',
   '/api/auth/reset-password',
+  '/api/auth/profile',
   '/api/auth/change-password',
   '/api/auth/resend-activation',
   '/api/auth/activate',

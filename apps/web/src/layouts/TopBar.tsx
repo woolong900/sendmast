@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronDown, Headphones, KeyRound, LogOut, Mail, Menu, X } from 'lucide-react';
+import { ChevronDown, Headphones, LogOut, Mail, Menu, UserRound, X } from 'lucide-react';
 import { useAuth } from '@/store/auth';
 import { api } from '@/lib/api';
 import { formatNumber, cn } from '@/lib/utils';
-import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
+import { PersonalCenterDialog } from '@/components/PersonalCenterDialog';
 import { useQuota } from '@/hooks/useQuota';
 
 export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {}) {
@@ -12,7 +12,7 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
-  const [pwOpen, setPwOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const supportRef = useRef<HTMLDivElement>(null);
 
@@ -163,11 +163,11 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {
             // lets the menu grow leftward into the page instead.
             <div className="absolute right-0 top-full z-50 mt-1 min-w-[140px] overflow-hidden rounded-md border bg-popover py-1 shadow-md">
               <MenuItem
-                icon={<KeyRound className="size-4" />}
-                label="修改密码"
+                icon={<UserRound className="size-4" />}
+                label="个人中心"
                 onClick={() => {
                   setMenuOpen(false);
-                  setPwOpen(true);
+                  setProfileOpen(true);
                 }}
               />
               <div className="my-1 border-t" />
@@ -182,7 +182,7 @@ export function TopBar({ onOpenMobileNav }: { onOpenMobileNav?: () => void } = {
         </div>
       </div>
 
-      <ChangePasswordDialog open={pwOpen} onClose={() => setPwOpen(false)} />
+      <PersonalCenterDialog open={profileOpen} onClose={() => setProfileOpen(false)} />
     </header>
   );
 }

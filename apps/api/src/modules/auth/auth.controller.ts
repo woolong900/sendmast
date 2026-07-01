@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Patch,
   Post,
   Query,
   Req,
@@ -23,6 +24,7 @@ import {
   RefreshSchema,
   ResetPasswordSchema,
   SignupSchema,
+  UpdateProfileSchema,
   type ActivateInput,
   type ChangePasswordInput,
   type ForgotPasswordInput,
@@ -30,6 +32,7 @@ import {
   type RefreshInput,
   type ResetPasswordInput,
   type SignupInput,
+  type UpdateProfileInput,
 } from '@sendmast/shared';
 
 @ApiTags('auth')
@@ -75,6 +78,14 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async me(@CurrentUser() user: AuthenticatedUser) {
     return this.auth.me(user.userId, user.accountId, user.impersonatedBy);
+  }
+
+  @Patch('profile')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  async updateProfile(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
+    const input = parse(UpdateProfileSchema, body) as UpdateProfileInput;
+    return this.auth.updateProfile(user.userId, user.accountId, input, user.impersonatedBy);
   }
 
   @Post('change-password')

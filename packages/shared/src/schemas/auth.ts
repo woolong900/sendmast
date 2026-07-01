@@ -90,6 +90,11 @@ export const ChangePasswordSchema = z.object({
 });
 export type ChangePasswordInput = z.infer<typeof ChangePasswordSchema>;
 
+export const UpdateProfileSchema = z.object({
+  displayName: z.string().trim().min(1).max(80),
+});
+export type UpdateProfileInput = z.infer<typeof UpdateProfileSchema>;
+
 export const ForgotPasswordSchema = z.object({
   email: emailField,
 });

@@ -24,6 +24,7 @@ import type {
   MeResponse,
   ResetTokenValidateResponse,
   SignupInput,
+  UpdateProfileInput,
 } from '@sendmast/shared';
 
 const ACCESS_TTL_FALLBACK = '15m';
@@ -430,6 +431,22 @@ export class AuthService {
         data: { revokedAt: new Date() },
       }),
     ]);
+  }
+
+  async updateProfile(
+    userId: string,
+    accountId: string,
+    input: UpdateProfileInput,
+    impersonatedBy: string | null = null,
+  ): Promise<MeResponse> {
+    if (impersonatedBy) {
+      throw new ForbiddenException('代登录状态下不能修改租户用户资料');
+    }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { displayName: input.displayName },
+    });
+    return this.me(userId, accountId, null);
   }
 
   /**
