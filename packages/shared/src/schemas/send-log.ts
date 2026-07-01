@@ -50,3 +50,14 @@ export interface SendLogListResponse {
   offset: number;
   limit: number;
 }
+
+export interface SendLogContentView {
+  subject: string | null;
+  preheader: string | null;
+  html: string | null;
+  source: 'campaign' | 'automation_send' | 'automation' | null;
+}
+
+export interface SendLogDetailResponse extends SendLogView {
+  content: SendLogContentView;
+}

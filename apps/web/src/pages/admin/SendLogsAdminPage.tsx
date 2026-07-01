@@ -14,6 +14,7 @@ import { formatDateTime, formatNumber } from '@/lib/utils';
 import type {
   EmailChannelView,
   AdminAccountView,
+  SendLogDetailResponse,
   SendLogListResponse,
   SendLogView,
 } from '@sendmast/shared';
@@ -287,6 +288,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void }) {
+  const { data: detail, isLoading } = useQuery<SendLogDetailResponse>({
+    queryKey: ['admin', 'send-logs', row.id],
+    queryFn: async () => (await api.get(`/api/admin/send-logs/${row.id}`)).data,
+  });
+  const content = detail?.content;
+  const contentSourceLabel =
+    content?.source === 'automation_send'
+      ? '自动化发送快照'
+      : content?.source === 'automation'
+        ? '自动化配置'
+        : content?.source === 'campaign'
+          ? '营销活动'
+          : '—';
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -346,6 +361,51 @@ function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void 
               </pre>
             </div>
           )}
+
+          <div className="space-y-3 rounded-lg bg-muted/30 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold">邮件内容</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  内容来源: {isLoading ? '加载中…' : contentSourceLabel}
+                </p>
+              </div>
+            </div>
+
+            <Grid>
+              <KV label="主题" value={isLoading ? '加载中…' : content?.subject || '—'} />
+              <KV label="预览文本" value={isLoading ? '加载中…' : content?.preheader || '—'} />
+            </Grid>
+
+            <div>
+              <Label className="mb-1 block text-xs text-muted-foreground">HTML 预览</Label>
+              {isLoading ? (
+                <div className="flex h-56 items-center justify-center rounded-md bg-background text-sm text-muted-foreground">
+                  加载中…
+                </div>
+              ) : content?.html ? (
+                <iframe
+                  title="邮件内容预览"
+                  sandbox=""
+                  srcDoc={content.html}
+                  className="h-[520px] w-full rounded-md bg-white"
+                />
+              ) : (
+                <div className="flex h-32 items-center justify-center rounded-md bg-background text-sm text-muted-foreground">
+                  未找到邮件内容
+                </div>
+              )}
+            </div>
+
+            {content?.html && (
+              <div>
+                <Label className="mb-1 block text-xs text-muted-foreground">HTML 源码</Label>
+                <pre className="max-h-[320px] overflow-auto rounded-md bg-background p-3 text-xs leading-relaxed">
+                  {content.html}
+                </pre>
+              </div>
+            )}
+          </div>
 
           <div>
             <Label className="mb-1 block text-xs text-muted-foreground">

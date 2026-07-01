@@ -1,4 +1,12 @@
-import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlatformAdminGuard } from '../auth/platform-admin.guard';
@@ -18,5 +26,10 @@ export class SendLogController {
     const r = SendLogQuerySchema.safeParse(query);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
     return this.svc.list(r.data);
+  }
+
+  @Get(':id')
+  detail(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.svc.detail(id);
   }
 }

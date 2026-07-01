@@ -1,7 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import type { SendLogListResponse, SendLogQuery, SendLogView } from '@sendmast/shared';
+import type {
+  SendLogContentView,
+  SendLogDetailResponse,
+  SendLogListResponse,
+  SendLogQuery,
+  SendLogView,
+} from '@sendmast/shared';
 
 @Injectable()
 export class SendLogService {
@@ -56,6 +62,66 @@ export class SendLogService {
       rows: rows.map(toView),
     };
   }
+
+  async detail(id: string): Promise<SendLogDetailResponse> {
+    const row = await this.prisma.sendLog.findUnique({
+      where: { id },
+      include: {
+        account: { select: { id: true, name: true, slug: true } },
+        emailChannel: { select: { id: true, name: true } },
+        campaign: { select: { id: true, name: true, subject: true, preheader: true, html: true } },
+        automation: {
+          select: {
+            id: true,
+            type: true,
+            subject: true,
+            preheader: true,
+            html: true,
+            shopConnection: { select: { shopName: true } },
+          },
+        },
+        automationSend: { select: { subject: true, preheader: true, html: true } },
+      },
+    });
+    if (!row) throw new NotFoundException('发送日志不存在');
+
+    return {
+      ...toView(row),
+      content: toContent(row),
+    };
+  }
+}
+
+function toContent(r: {
+  campaign: { subject: string; preheader: string | null; html: string | null } | null;
+  automation: { subject: string | null; preheader: string | null; html: string | null } | null;
+  automationSend: { subject: string | null; preheader: string | null; html: string | null } | null;
+}): SendLogContentView {
+  if (r.automationSend?.html || r.automationSend?.subject) {
+    return {
+      subject: r.automationSend.subject,
+      preheader: r.automationSend.preheader,
+      html: r.automationSend.html,
+      source: 'automation_send',
+    };
+  }
+  if (r.automation?.html || r.automation?.subject) {
+    return {
+      subject: r.automation.subject,
+      preheader: r.automation.preheader,
+      html: r.automation.html,
+      source: 'automation',
+    };
+  }
+  if (r.campaign) {
+    return {
+      subject: r.campaign.subject,
+      preheader: r.campaign.preheader,
+      html: r.campaign.html,
+      source: 'campaign',
+    };
+  }
+  return { subject: null, preheader: null, html: null, source: null };
 }
 
 function toView(r: {
