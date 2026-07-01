@@ -105,17 +105,17 @@ async function resolveFlowAttribution(
 
 /**
  * Fallback for Shopyy abandoned-order recovery: most paid webhooks do not echo
- * the checkout URL's `sm_mid` back in `landing_page`. If the same external order
- * was previously sent an abandoned-cart recovery, attribute the conversion to
- * the latest sent recovery before payment.
+ * the checkout URL's `sm_mid` back in `landing_page`. When the same external
+ * order later becomes paid, attribute it only if the buyer clicked one of that
+ * order's abandoned-cart recovery emails before payment.
  */
-async function resolveAbandonedOrderAttribution(opts: {
+async function resolveClickedAbandonedOrderAttribution(opts: {
   accountId: string;
   shopConnectionId: string;
   externalOrderId: string;
   orderTime: Date;
 }): Promise<{ automationId: string; sendId: string } | null> {
-  const send = await prisma.shopAutomationSend.findFirst({
+  const sends = await prisma.shopAutomationSend.findMany({
     where: {
       accountId: opts.accountId,
       status: 'sent',
@@ -129,7 +129,35 @@ async function resolveAbandonedOrderAttribution(opts: {
     select: { id: true, automationId: true },
     orderBy: { sentAt: 'desc' },
   });
-  return send ? { automationId: send.automationId, sendId: send.id } : null;
+  if (sends.length === 0) return null;
+
+  const rows = (await ch
+    .query({
+      query: `SELECT recipient_id AS sendId
+              FROM sendmast.email_events
+              WHERE account_id = {accountId:UUID}
+                AND source_type = {sourceType:String}
+                AND event_type = {eventType:String}
+                AND recipient_id IN {sendIds:Array(UUID)}
+                AND event_time <= parseDateTime64BestEffort({orderTime:String})
+              ORDER BY event_time DESC
+              LIMIT 1`,
+      query_params: {
+        accountId: opts.accountId,
+        sourceType: 'flow',
+        eventType: 'click',
+        sendIds: sends.map((send) => send.id),
+        orderTime: toClickHouseDateTime(opts.orderTime),
+      },
+      format: 'JSONEachRow',
+    })
+    .then((r) => r.json())
+    .catch(() => [])) as Array<{ sendId: string }>;
+
+  const clickedSendId = rows[0]?.sendId;
+  if (!clickedSendId) return null;
+  const clickedSend = sends.find((send) => send.id === clickedSendId);
+  return clickedSend ? { automationId: clickedSend.automationId, sendId: clickedSend.id } : null;
 }
 
 /**
@@ -324,7 +352,7 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
   const flowAttr =
     (mid ? await resolveFlowAttribution(job.accountId, mid).catch(() => null) : null) ??
     (!shipped
-      ? await resolveAbandonedOrderAttribution({
+      ? await resolveClickedAbandonedOrderAttribution({
           accountId: job.accountId,
           shopConnectionId: job.connectionId,
           externalOrderId: order.externalOrderId,
