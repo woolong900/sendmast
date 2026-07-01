@@ -33,7 +33,7 @@ export class TemplateService {
         accountId,
         scope: 'user',
         name: input.name,
-        thumbnail: input.thumbnail,
+        thumbnail: normalizeThumbnail(input.thumbnail),
         mjml,
         html,
         designJson: (input.designJson as any) ?? undefined,
@@ -46,7 +46,7 @@ export class TemplateService {
     if (!t) throw new NotFoundException('模板不存在');
     const data: any = {};
     if (input.name !== undefined) data.name = input.name;
-    if (input.thumbnail !== undefined) data.thumbnail = input.thumbnail;
+    if (input.thumbnail !== undefined) data.thumbnail = normalizeThumbnail(input.thumbnail);
     // Easy Email path sends both `html` (already rendered client-side via
     // mjml-browser) AND `mjml` (so admins can audit / re-render later).
     // Pure-HTML path (admin paste / future drag-drop without MJML) sends only
@@ -100,4 +100,10 @@ export class TemplateService {
   async preview(mjml: string) {
     return renderMjml(mjml);
   }
+}
+
+function normalizeThumbnail(value: string | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
