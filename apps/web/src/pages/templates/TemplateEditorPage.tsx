@@ -167,7 +167,10 @@ export function TemplateEditorPage() {
         dashed={false}
         locale={easyEmailZhCN}
         onUploadImage={uploadEditorImage}
-        onSubmit={(values) => saveMut.mutate(values)}
+        onSubmit={() => {
+          // Saves are driven from the toolbar via helper.getState().values so
+          // thumbnails are generated from the latest editor state.
+        }}
       >
         {(_props, helper) => (
           <FullscreenEmailEditor
@@ -180,7 +183,12 @@ export function TemplateEditorPage() {
                   placeholder="模板名称"
                   className="w-[220px]"
                 />
-                <Button disabled={saveMut.isPending} onClick={() => helper.submit()}>
+                <Button
+                  disabled={saveMut.isPending}
+                  onClick={() => {
+                    saveMut.mutate(helper.getState().values as IEmailTemplate);
+                  }}
+                >
                   <Save className="mr-1.5 size-4" />
                   {saveMut.isPending ? '保存中...' : '保存'}
                 </Button>

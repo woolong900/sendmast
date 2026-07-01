@@ -104,16 +104,9 @@ export function AutomationEmailEditor({
         dashed={false}
         locale={easyEmailZhCN}
         onUploadImage={uploadEditorImage}
-        onSubmit={async (values) => {
-          setSaving(true);
-          try {
-            const { html, mjml } = compileTemplate(values as IEmailTemplate);
-            const thumbnail = (await captureAndUploadThumbnail(html)) ?? null;
-            onApply({ html, mjml, designJson: values as IEmailTemplate, thumbnail });
-            onClose();
-          } finally {
-            setSaving(false);
-          }
+        onSubmit={() => {
+          // Saves are driven from the toolbar via helper.getState().values so
+          // thumbnails are generated from the latest editor state.
         }}
       >
         {(_props, helper) =>
@@ -136,7 +129,21 @@ export function AutomationEmailEditor({
                   <Eye className="mr-1.5 size-4" />
                   预览
                 </Button>
-                <Button disabled={saving} onClick={() => helper.submit()}>
+                <Button
+                  disabled={saving}
+                  onClick={async () => {
+                    const values = helper.getState().values as IEmailTemplate;
+                    setSaving(true);
+                    try {
+                      const { html, mjml } = compileTemplate(values);
+                      const thumbnail = (await captureAndUploadThumbnail(html)) ?? null;
+                      onApply({ html, mjml, designJson: values, thumbnail });
+                      onClose();
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                >
                   <Save className="mr-1.5 size-4" />
                   {saving ? '保存中...' : '保存'}
                 </Button>
