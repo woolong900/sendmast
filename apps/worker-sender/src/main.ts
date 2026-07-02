@@ -126,6 +126,44 @@ async function resolveEmailChannelIdForDomain(domain: string): Promise<string | 
   return value;
 }
 
+async function persistCampaignTrackingLinks(
+  accountId: string,
+  recipientId: string,
+  links: Array<{ index: number; url: string }>,
+) {
+  await prisma.$transaction(async (tx) => {
+    await tx.trackingLink.deleteMany({ where: { recipientId } });
+    if (links.length === 0) return;
+    await tx.trackingLink.createMany({
+      data: links.map((l) => ({
+        accountId,
+        recipientId,
+        linkIndex: l.index,
+        url: l.url,
+      })),
+    });
+  });
+}
+
+async function persistAutomationTrackingLinks(
+  accountId: string,
+  automationSendId: string,
+  links: Array<{ index: number; url: string }>,
+) {
+  await prisma.$transaction(async (tx) => {
+    await tx.trackingLink.deleteMany({ where: { automationSendId } });
+    if (links.length === 0) return;
+    await tx.trackingLink.createMany({
+      data: links.map((l) => ({
+        accountId,
+        automationSendId,
+        linkIndex: l.index,
+        url: l.url,
+      })),
+    });
+  });
+}
+
 // ============================================================================
 // Dispatch — only materialises recipient rows. Tick handles fan-out.
 // ============================================================================
@@ -686,7 +724,7 @@ async function runSend(job: Job<SendJobData>) {
     bodyHtml = injectPreheader(bodyHtml, ph);
   }
 
-  const { html } = rewriteHtml(bodyHtml, {
+  const { html, links } = rewriteHtml(bodyHtml, {
     baseUrl: trackingBaseUrl,
     secret: TRACKING_SECRET!,
     recipientId: r.id,
@@ -706,6 +744,17 @@ async function runSend(job: Job<SendJobData>) {
     // exact recipient regardless of click tracking or checkout email.
     smMid: r.id,
   });
+
+  try {
+    await persistCampaignTrackingLinks(r.accountId, r.id, links);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await prisma.campaignRecipient.update({
+      where: { id: r.id },
+      data: { status: 'failed', errorMessage: `追踪链接保存失败: ${msg}` },
+    });
+    throw err;
+  }
 
   let transport;
   try {
@@ -982,7 +1031,7 @@ async function runFlowSend(job: Job<SendJobData>) {
     bodyHtml = injectPreheader(bodyHtml, ph);
   }
 
-  const { html } = rewriteHtml(bodyHtml, {
+  const { html, links } = rewriteHtml(bodyHtml, {
     baseUrl: trackingBaseUrl,
     secret: TRACKING_SECRET!,
     recipientId: send.id,
@@ -997,6 +1046,13 @@ async function runFlowSend(job: Job<SendJobData>) {
     // the store echoes sm_mid from the landing URL back in the order webhook.
     smMid: send.id,
   });
+
+  try {
+    await persistAutomationTrackingLinks(send.accountId, send.id, links);
+  } catch (err) {
+    await fail(`追踪链接保存失败: ${err instanceof Error ? err.message : String(err)}`);
+    throw err;
+  }
 
   let transport;
   try {

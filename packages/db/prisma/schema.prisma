@@ -314,6 +314,7 @@ model Account {
   shopOrders             ShopOrder[]
   shopAutomations        ShopAutomation[]
   shopAbandonedCheckouts ShopAbandonedCheckout[]
+  trackingLinks          TrackingLink[]
 
   referredByChannel ReferralChannel? @relation(fields: [referredByChannelId], references: [id], onDelete: SetNull)
 
@@ -328,8 +329,8 @@ model Account {
 model AccountEmailChannel {
   accountId      String   @map("account_id") @db.Uuid
   emailChannelId String   @map("email_channel_id") @db.Uuid
-  isPrimary    Boolean  @default(false) @map("is_primary")
-  createdAt    DateTime @default(now()) @map("created_at")
+  isPrimary      Boolean  @default(false) @map("is_primary")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
   emailChannel EmailChannel @relation(fields: [emailChannelId], references: [id], onDelete: Restrict)
@@ -374,43 +375,43 @@ enum EmailChannelStatus {
 }
 
 model EmailChannel {
-  id                            String           @id @default(uuid()) @db.Uuid
+  id                            String             @id @default(uuid()) @db.Uuid
   /// Sending channel provider.
-  provider                      String           @default("acs") @db.VarChar(16)
+  provider                      String             @default("acs") @db.VarChar(16)
   name                          String
-  rpsLimit                      Int              @map("rps_limit")
-  rpmLimit                      Int              @map("rpm_limit")
-  rphLimit                      Int              @map("rph_limit")
-  rpdLimit                      Int              @map("rpd_limit")
+  rpsLimit                      Int                @map("rps_limit")
+  rpmLimit                      Int                @map("rpm_limit")
+  rphLimit                      Int                @map("rph_limit")
+  rpdLimit                      Int                @map("rpd_limit")
   status                        EmailChannelStatus @default(active)
   // Azure Resource Manager handles for managing domains under this account.
   // All required to drive the Azure ARM SDK; secret is stored verbatim for
   // the MVP — production should encrypt at rest.
-  azureTenantId                 String           @map("azure_tenant_id")
-  azureClientId                 String           @map("azure_client_id")
-  azureClientSecret             String           @map("azure_client_secret") @db.Text
-  azureSubscriptionId           String           @map("azure_subscription_id")
-  azureResourceGroup            String           @map("azure_resource_group")
-  azureEmailServiceName         String           @map("azure_email_service_name")
+  azureTenantId                 String             @map("azure_tenant_id")
+  azureClientId                 String             @map("azure_client_id")
+  azureClientSecret             String             @map("azure_client_secret") @db.Text
+  azureSubscriptionId           String             @map("azure_subscription_id")
+  azureResourceGroup            String             @map("azure_resource_group")
+  azureEmailServiceName         String             @map("azure_email_service_name")
   // Communication Service resource that verified domains get linked to
   // (Microsoft.Communication/communicationServices). Different resource type
   // than EmailService — same RG, but separate name. Required to actually
   // send mail through the domain. Nullable so existing channels (created
   // before this column existed) keep working — they'll be rejected at the
   // link step until an admin edits and fills it in.
-  azureCommunicationServiceName String?          @map("azure_communication_service_name")
+  azureCommunicationServiceName String?            @map("azure_communication_service_name")
   /// Mailgun API settings. `mailgunApiBaseUrl` supports EU accounts
   /// (https://api.eu.mailgun.net) while defaulting to the US endpoint.
-  mailgunApiKey                 String?          @map("mailgun_api_key") @db.Text
-  mailgunApiBaseUrl             String?          @map("mailgun_api_base_url")
-  mailgunWebhookSigningKey      String?          @map("mailgun_webhook_signing_key") @db.Text
+  mailgunApiKey                 String?            @map("mailgun_api_key") @db.Text
+  mailgunApiBaseUrl             String?            @map("mailgun_api_base_url")
+  mailgunWebhookSigningKey      String?            @map("mailgun_webhook_signing_key") @db.Text
   /// Platform-wide default. New tenant signups get a primary
   /// AccountEmailChannel link to this channel. At most one row may be true at a
   /// time — enforced by a partial unique index defined in migration SQL
   /// (Prisma 5 doesn't support partial unique constraints declaratively).
-  isDefault                     Boolean          @default(false) @map("is_default")
-  createdAt                     DateTime         @default(now()) @map("created_at")
-  updatedAt                     DateTime         @updatedAt @map("updated_at")
+  isDefault                     Boolean            @default(false) @map("is_default")
+  createdAt                     DateTime           @default(now()) @map("created_at")
+  updatedAt                     DateTime           @updatedAt @map("updated_at")
 
   senderDomains SenderDomain[]
   accountLinks  AccountEmailChannel[]
@@ -848,33 +849,33 @@ model CampaignArchiveState {
 }
 
 model CampaignRecipient {
-  id           String          @id @default(uuid()) @db.Uuid
-  accountId    String          @map("account_id") @db.Uuid
-  campaignId   String          @map("campaign_id") @db.Uuid
-  contactId    String          @map("contact_id") @db.Uuid
-  email        String
-  status       RecipientStatus @default(pending)
-  messageId    String?         @map("message_id")
-  errorMessage String?         @map("error_message")
-  sentAt       DateTime?       @map("sent_at")
+  id             String          @id @default(uuid()) @db.Uuid
+  accountId      String          @map("account_id") @db.Uuid
+  campaignId     String          @map("campaign_id") @db.Uuid
+  contactId      String          @map("contact_id") @db.Uuid
+  email          String
+  status         RecipientStatus @default(pending)
+  messageId      String?         @map("message_id")
+  errorMessage   String?         @map("error_message")
+  sentAt         DateTime?       @map("sent_at")
   /// Round-robin sender assigned at materialisation when the campaign has
   /// multiple senders. NULL = use Campaign.fromEmail/fromName (single-sender
   /// campaigns and all rows created before this feature).
-  fromEmail    String?         @map("from_email")
-  fromName     String?         @map("from_name")
+  fromEmail      String?         @map("from_email")
+  fromName       String?         @map("from_name")
   /// Email channel this recipient's send is routed through, resolved from the
   /// assigned sender's domain at materialisation. NULL = legacy rows; the
   /// dispatcher falls back to resolving from the from-address domain.
-  emailChannelId String?       @map("email_channel_id") @db.Uuid
+  emailChannelId String?         @map("email_channel_id") @db.Uuid
   /// Name of the campaign target list THIS contact belongs to, captured at
   /// materialisation. When the contact is in several of the campaign's target
   /// lists this is the FIRST one (lowest CampaignList.position) they belong to.
   /// Powers the {{list_name}} system tag without a send-time join and frozen
   /// against later membership changes. NULL = matched only via a segment, or
   /// legacy pre-feature rows.
-  listName     String?         @map("list_name")
-  createdAt    DateTime        @default(now()) @map("created_at")
-  updatedAt    DateTime        @updatedAt @map("updated_at")
+  listName       String?         @map("list_name")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
 
   account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
   campaign Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
@@ -926,17 +927,17 @@ model SendLog {
   /// Temporary/debug snapshot of the final content submitted to the provider.
   /// Currently written for automation sends only, after merge vars, preheader,
   /// unsubscribe footer and tracking-link rewriting have all been applied.
-  finalSubject    String?   @map("final_subject")
-  finalPreheader  String?   @map("final_preheader")
-  finalHtml       String?   @map("final_html") @db.Text
+  finalSubject    String?  @map("final_subject")
+  finalPreheader  String?  @map("final_preheader")
+  finalHtml       String?  @map("final_html") @db.Text
   sentAt          DateTime @default(now()) @map("sent_at")
 
-  account              Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  emailChannel         EmailChannel?       @relation(fields: [emailChannelId], references: [id], onDelete: SetNull)
-  campaign             Campaign?           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  recipient            CampaignRecipient?  @relation(fields: [recipientId], references: [id], onDelete: Cascade)
-  automation           ShopAutomation?     @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  automationSend       ShopAutomationSend? @relation(fields: [automationSendId], references: [id], onDelete: Cascade)
+  account        Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  emailChannel   EmailChannel?       @relation(fields: [emailChannelId], references: [id], onDelete: SetNull)
+  campaign       Campaign?           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipient      CampaignRecipient?  @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  automation     ShopAutomation?     @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  automationSend ShopAutomationSend? @relation(fields: [automationSendId], references: [id], onDelete: Cascade)
 
   @@index([campaignId, sentAt])
   @@index([recipientId, sentAt])
@@ -946,6 +947,28 @@ model SendLog {
   @@index([emailChannelId, ok, sentAt])
   @@index([accountId, sentAt])
   @@map("send_logs")
+}
+
+/// Destination URL lookup for short click-tracking links. The public link only
+/// carries the signed send id + link index; the API resolves the original URL
+/// from this table at click time.
+model TrackingLink {
+  id               String   @id @default(uuid()) @db.Uuid
+  accountId        String   @map("account_id") @db.Uuid
+  recipientId      String?  @map("recipient_id") @db.Uuid
+  automationSendId String?  @map("automation_send_id") @db.Uuid
+  linkIndex        Int      @map("link_index")
+  url              String   @db.Text
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  account        Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  automationSend ShopAutomationSend? @relation(fields: [automationSendId], references: [id], onDelete: Cascade)
+
+  @@unique([recipientId, linkIndex])
+  @@unique([automationSendId, linkIndex])
+  @@index([accountId, createdAt])
+  @@map("tracking_links")
 }
 
 // ============================================================================
@@ -1266,37 +1289,38 @@ model ShopAutomationStep {
 /// pixel/links, by `messageId` for provider reports). `@@unique([automationId,
 /// dedupKey])` makes a re-delivered webhook (same order/checkout) idempotent.
 model ShopAutomationSend {
-  id           String    @id @default(uuid()) @db.Uuid
-  accountId    String    @map("account_id") @db.Uuid
-  automationId String    @map("automation_id") @db.Uuid
-  dedupKey     String    @map("dedup_key")
-  email        String
-  contactId    String?   @map("contact_id") @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
+  accountId      String    @map("account_id") @db.Uuid
+  automationId   String    @map("automation_id") @db.Uuid
+  dedupKey       String    @map("dedup_key")
+  email          String
+  contactId      String?   @map("contact_id") @db.Uuid
   /// Template this send renders. Snapshots the round's template for multi-round
   /// abandoned-cart (where each round has its own); null = use automation's.
-  templateId   String?   @map("template_id") @db.Uuid
+  templateId     String?   @map("template_id") @db.Uuid
   /// Inline email content snapshotted at enqueue time (preferred over template).
-  html         String?   @db.Text
+  html           String?   @db.Text
   /// Inbox preview text snapshotted at enqueue time; injected as a hidden span.
-  preheader    String?
+  preheader      String?
   /// Lifecycle: pending → queued → sent | failed | skipped.
-  status       String    @default("pending")
+  status         String    @default("pending")
   /// Provider operation id, echoed back as messageId on delivery/bounce reports where supported.
-  messageId    String?   @map("message_id")
+  messageId      String?   @map("message_id")
   /// Email channel the send is routed through (resolved from the sender domain).
-  emailChannelId String? @map("email_channel_id") @db.Uuid
+  emailChannelId String?   @map("email_channel_id") @db.Uuid
   /// Sender snapshot at send time.
-  fromEmail    String?   @map("from_email")
-  fromName     String?   @map("from_name")
-  subject      String?
+  fromEmail      String?   @map("from_email")
+  fromName       String?   @map("from_name")
+  subject        String?
   /// Per-send merge values ({{order_total}}, {{tracking_url}}, ...).
-  mergeVars    Json?     @map("merge_vars")
-  errorMessage String?   @map("error_message")
-  sentAt       DateTime? @map("sent_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  mergeVars      Json?     @map("merge_vars")
+  errorMessage   String?   @map("error_message")
+  sentAt         DateTime? @map("sent_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
-  automation ShopAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  sendLogs   SendLog[]
+  automation    ShopAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  sendLogs      SendLog[]
+  trackingLinks TrackingLink[]
 
   @@unique([automationId, dedupKey])
   @@index([accountId, createdAt])

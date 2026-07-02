@@ -19,7 +19,7 @@ export interface RewriteOptions {
   /** When set, utm_source/utm_medium/utm_campaign are appended to each tracked URL. */
   utm?: UtmParams;
   /**
-   * When false, hrefs are NOT wrapped in /t/c/{token}?u=... so click events
+   * When false, hrefs are NOT wrapped in /t/c/{token} so click events
    * won't be recorded. UTM params are still applied to the original URL so
    * downstream analytics (GA, etc.) keep working. Defaults to true.
    */
@@ -93,7 +93,7 @@ function applySmMid(url: string, smMid?: string): string {
   }
 }
 
-/** Wrap http(s) hrefs in /t/c/{token}?u=ENC(url). Adds {pixel} at the body end. */
+/** Wrap http(s) hrefs in /t/c/{token}. Adds {pixel} at the body end. */
 export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
   const links: Array<{ index: number; url: string }> = [];
   const trackClicks = opts.trackClicks !== false;
@@ -115,7 +115,7 @@ export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
     const idx = i++;
     links.push({ index: idx, url: finalUrl });
     const token = signTrackingToken({ r: opts.recipientId, k: 'c', i: idx, ...src }, opts.secret);
-    const wrapped = `${opts.baseUrl.replace(/\/$/, '')}/t/c/${token}?u=${encodeURIComponent(finalUrl)}`;
+    const wrapped = `${opts.baseUrl.replace(/\/$/, '')}/t/c/${token}`;
     return `href=${q1}${encodeHtmlAttribute(wrapped)}${q1}`;
   });
 

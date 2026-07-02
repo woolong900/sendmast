@@ -37,13 +37,18 @@ export class TrackingController {
   ) {
     const payload = this.svc.verify(token);
     let dest = '/';
-    if (payload && payload.k === 'c' && target && /^https?:\/\//i.test(target)) {
-      dest = target;
+    if (payload && payload.k === 'c') {
+      const resolved = await this.svc.resolveClickTarget(payload, target);
+      if (!resolved) {
+        res.redirect(HttpStatus.FOUND, dest);
+        return;
+      }
+      dest = resolved;
       await this.svc.record({
         payload,
         ip: clientIp(req),
         userAgent: req.headers['user-agent']?.toString(),
-        linkUrl: target,
+        linkUrl: resolved,
       });
     }
     res.redirect(HttpStatus.FOUND, dest);

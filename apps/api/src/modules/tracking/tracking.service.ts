@@ -52,6 +52,40 @@ export class TrackingService {
     });
   }
 
+  async resolveClickTarget(
+    payload: TrackingPayload,
+    legacyTarget?: string,
+  ): Promise<string | null> {
+    if (payload.k !== 'c' || payload.i == null) return null;
+
+    const link =
+      payload.s === 'a'
+        ? await this.prisma.trackingLink.findUnique({
+            where: {
+              automationSendId_linkIndex: {
+                automationSendId: payload.r,
+                linkIndex: payload.i,
+              },
+            },
+            select: { url: true },
+          })
+        : await this.prisma.trackingLink.findUnique({
+            where: {
+              recipientId_linkIndex: {
+                recipientId: payload.r,
+                linkIndex: payload.i,
+              },
+            },
+            select: { url: true },
+          });
+    if (link?.url && /^https?:\/\//i.test(link.url)) return link.url;
+
+    // Backward compatibility for emails sent before short-link storage existed:
+    // those links carried the original destination in ?u=...
+    if (legacyTarget && /^https?:\/\//i.test(legacyTarget)) return legacyTarget;
+    return null;
+  }
+
   /** Resolve the (accountId, email) a token's send unit belongs to. */
   private async resolveSendIdentity(
     payload: TrackingPayload,
