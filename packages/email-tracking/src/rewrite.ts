@@ -41,6 +41,32 @@ export interface RewriteResult {
 
 const HREF_REGEX = /href=("|')([^"']+)("|')/gi;
 
+function decodeHtmlAttribute(value: string): string {
+  return value.replace(/&(amp|quot|apos|#39|lt|gt);/gi, (match, entity: string) => {
+    switch (entity.toLowerCase()) {
+      case 'amp':
+        return '&';
+      case 'quot':
+        return '"';
+      case 'apos':
+      case '#39':
+        return "'";
+      case 'lt':
+        return '<';
+      case 'gt':
+        return '>';
+      default:
+        return match;
+    }
+  });
+}
+
+function encodeHtmlAttribute(value: string): string {
+  return value.replace(/[&"']/g, (c) =>
+    ({ '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+}
+
 function applyUtm(url: string, utm?: UtmParams): string {
   if (!utm) return url;
   if (!utm.source && !utm.medium && !utm.campaign) return url;
@@ -74,7 +100,8 @@ export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
   const src = opts.source === 'automation' ? { s: 'a' as const } : {};
   let i = 0;
 
-  const rewritten = html.replace(HREF_REGEX, (match, q1: string, url: string) => {
+  const rewritten = html.replace(HREF_REGEX, (match, q1: string, rawUrl: string) => {
+    const url = decodeHtmlAttribute(rawUrl);
     if (!/^https?:\/\//i.test(url)) return match;
     if (url.includes('{{unsubscribe_url}}')) return match;
     const finalUrl = applySmMid(applyUtm(url, opts.utm), opts.smMid);
@@ -83,13 +110,13 @@ export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
     // token issued. UTM still goes through because that's the destination's
     // own analytics, independent of our open/click pipeline.
     if (!trackClicks) {
-      return finalUrl === url ? match : `href=${q1}${finalUrl}${q1}`;
+      return finalUrl === url ? match : `href=${q1}${encodeHtmlAttribute(finalUrl)}${q1}`;
     }
     const idx = i++;
     links.push({ index: idx, url: finalUrl });
     const token = signTrackingToken({ r: opts.recipientId, k: 'c', i: idx, ...src }, opts.secret);
     const wrapped = `${opts.baseUrl.replace(/\/$/, '')}/t/c/${token}?u=${encodeURIComponent(finalUrl)}`;
-    return `href=${q1}${wrapped}${q1}`;
+    return `href=${q1}${encodeHtmlAttribute(wrapped)}${q1}`;
   });
 
   const openToken = signTrackingToken({ r: opts.recipientId, k: 'o', ...src }, opts.secret);
