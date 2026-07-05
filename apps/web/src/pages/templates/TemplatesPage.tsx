@@ -140,7 +140,7 @@ function TemplateGrid({
   const cover = (t: TemplateRow) => (
     <div className="flex aspect-[4/3] items-center justify-center bg-muted">
       {t.thumbnail ? (
-        <img src={t.thumbnail} alt={t.name} className="h-full w-full object-cover" />
+        <img src={t.thumbnail} alt={t.name} className="h-full w-full object-contain object-left-top" />
       ) : (
         <FileText className="size-8 text-muted-foreground" />
       )}
@@ -159,6 +159,7 @@ function TemplateGrid({
               <button
                 type="button"
                 onClick={() => onPreview(t)}
+                aria-haspopup="dialog"
                 aria-label={`预览系统模板 ${t.name}`}
                 className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
               >
@@ -232,6 +233,10 @@ function SystemTemplatePreview({
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    // Keep the library positioned under the modal, even if the user is
+    // scrolling a long email preview.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     closeRef.current?.focus();
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -239,6 +244,7 @@ function SystemTemplatePreview({
     window.addEventListener('keydown', handleKey);
     return () => {
       window.removeEventListener('keydown', handleKey);
+      document.body.style.overflow = previousOverflow;
       // Return focus to the card just opened, rather than the top of the page.
       previouslyFocused?.focus?.();
     };
