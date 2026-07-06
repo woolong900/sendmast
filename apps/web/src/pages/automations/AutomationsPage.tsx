@@ -27,6 +27,7 @@ import { cn, formatNumber } from '@/lib/utils';
 import { api, apiErrMessage } from '@/lib/api';
 import { applyMergePreviewSamples } from '@/lib/email-merge-preview';
 import {
+  SHOP_AUTOMATION_TYPES,
   SHOP_AUTOMATION_LABELS,
   SHOP_AUTOMATION_DEFAULT_SUBJECT,
   SHOP_AUTOMATION_DEFAULT_PREHEADER,
@@ -75,6 +76,34 @@ const TRIGGERS: Record<ShopAutomationType, string> = {
   abandoned_cart: '当订单创建后超过设定时间仍未支付时发送召回',
 };
 
+const EMPTY_FLOW_STATS = {
+  sent: 0,
+  delivered: 0,
+  opened: 0,
+  clicked: 0,
+  bounced: 0,
+  revenue: 0,
+  currency: 'USD',
+};
+
+const DISCONNECTED_FLOWS: ShopAutomationView[] = SHOP_AUTOMATION_TYPES.map((type) => ({
+  id: `disconnected-${type}`,
+  type,
+  enabled: false,
+  templateId: null,
+  html: null,
+  designJson: null,
+  thumbnail: null,
+  preheader: null,
+  senderDomainId: null,
+  fromEmail: null,
+  fromName: null,
+  subject: null,
+  delayMinutes: type === 'abandoned_cart' ? 30 : 0,
+  steps: [],
+  stats: EMPTY_FLOW_STATS,
+}));
+
 export function AutomationsPage() {
   const { data, isLoading } = useQuery<ShopConnectionsResponse>({
     queryKey: ['shop-connections'],
@@ -105,20 +134,24 @@ export function AutomationsPage() {
       {isLoading && <AutomationLoading />}
 
       {!isLoading && active.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-            <Store className="size-8 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium">尚未连接店铺</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                自动化邮件依赖店铺事件触发，请先连接你的 Shopyy 店铺。
-              </p>
-            </div>
-            <Button asChild size="sm">
-              <Link to="/settings/shop">前往连接店铺</Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center gap-3 py-8 text-center">
+              <Store className="size-8 text-muted-foreground" />
+              <div>
+                <p className="text-sm font-medium">尚未连接店铺</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  自动化任务可先查看，开启与配置需要先连接可用的 Shopyy 店铺。
+                </p>
+              </div>
+              <Button asChild size="sm">
+                <Link to="/settings/shop">前往连接店铺</Link>
+              </Button>
+            </CardContent>
+          </Card>
+
+          <DisabledFlowList />
+        </div>
       )}
 
       {!isLoading && active.length > 0 && selected && (
@@ -141,6 +174,21 @@ export function AutomationsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function DisabledFlowList() {
+  return (
+    <AutomationTable>
+      {DISCONNECTED_FLOWS.map((a) => (
+        <FlowTableRow
+          key={a.id}
+          connectionId=""
+          automation={a}
+          disabledReason="连接店铺后可配置并开启"
+        />
+      ))}
+    </AutomationTable>
   );
 }
 
@@ -526,15 +574,18 @@ function FlowTableRow({
   connectionId,
   automation,
   onEdit,
+  disabledReason,
 }: {
   connectionId: string;
   automation: ShopAutomationView;
-  onEdit: () => void;
+  onEdit?: () => void;
+  disabledReason?: string;
 }) {
   const qc = useQueryClient();
   const toast = useToast();
   const Icon = ICONS[automation.type];
   const isAbandoned = automation.type === 'abandoned_cart';
+  const disabled = !!disabledReason;
   const configured = isAbandoned
     ? automation.steps.length >= 1 &&
       automation.steps.every((r) => !!r.html) &&
@@ -559,8 +610,11 @@ function FlowTableRow({
 
   return (
     <tr
-      className="group cursor-pointer border-b transition-colors last:border-b-0 hover:bg-muted/30"
-      onClick={onEdit}
+      className={cn(
+        'group border-b transition-colors last:border-b-0',
+        disabled ? 'bg-muted/10' : 'cursor-pointer hover:bg-muted/30',
+      )}
+      onClick={disabled ? undefined : onEdit}
     >
       <td className="px-6 py-4 align-middle">
         <div className="flex items-center gap-3">
@@ -586,7 +640,9 @@ function FlowTableRow({
         </div>
       </td>
       <td className="px-6 py-4 align-middle">
-        {automation.enabled ? (
+        {disabled ? (
+          <Badge variant="muted">未连接</Badge>
+        ) : automation.enabled ? (
           <Badge variant="success">已启用</Badge>
         ) : configured ? (
           <Badge variant="muted">已关闭</Badge>
@@ -610,13 +666,20 @@ function FlowTableRow({
         <div className="flex items-center justify-end gap-3" onClick={(e) => e.stopPropagation()}>
           <Switch
             checked={automation.enabled}
-            onCheckedChange={(next) => toggle.mutate(next)}
-            disabled={toggle.isPending}
+            onCheckedChange={(next) => {
+              if (disabled) {
+                toast(disabledReason, 'info');
+                return;
+              }
+              toggle.mutate(next);
+            }}
+            disabled={disabled || toggle.isPending}
           />
           <button
             type="button"
             onClick={onEdit}
-            title={configured ? '编辑' : '配置'}
+            title={disabled ? disabledReason : configured ? '编辑' : '配置'}
+            disabled={disabled}
             className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
           >
             <Pencil className="size-4" />
