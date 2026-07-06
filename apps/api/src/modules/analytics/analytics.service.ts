@@ -47,7 +47,10 @@ export interface CampaignAnalyticsView {
 
 @Injectable()
 export class AnalyticsService {
-  constructor(private readonly prisma: PrismaService, private readonly ch: ClickHouseService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly ch: ClickHouseService,
+  ) {}
 
   async campaign(accountId: string, campaignId: string): Promise<CampaignAnalyticsView> {
     const c = await this.prisma.campaign.findFirst({
@@ -104,10 +107,12 @@ export class AnalyticsService {
     let chOk = false;
 
     try {
-      // One row of recipient-level uniques via uniqExactIf — each metric counts
-      // DISTINCT recipients in that state. `bounces` dedups hard+soft (a single
-      // recipient with both is one bounce), and `terminal` dedups the union of
-      // delivered+bounce for the pending math below.
+      // One row of recipient-level terminal outcomes. A provider can emit
+      // `delivered` and later emit `bounce` for the same recipient (common with
+      // delayed DSNs from mailbox providers such as Gmail). In that case bounce
+      // wins: we must not count the same recipient as both delivered and
+      // bounced, otherwise hard bounces can be hidden behind a 100% delivery
+      // headline.
       // account_id is the leading sort key on email_events; filtering by it
       // first lets CH prune partitions/granules before scanning, AND keeps
       // tenant data strictly isolated as a defence-in-depth.
@@ -121,15 +126,27 @@ export class AnalyticsService {
         unsubscribes: string;
       }>(
         `SELECT
-           toString(uniqExactIf(recipient_id, event_type = 'open')) AS opens,
-           toString(uniqExactIf(recipient_id, event_type = 'click')) AS clicks,
-           toString(uniqExactIf(recipient_id, event_type = 'delivered')) AS delivered,
-           toString(uniqExactIf(recipient_id, event_type = 'bounce')) AS bounces,
-           toString(uniqExactIf(recipient_id, event_type = 'bounce' AND bounce_kind = 'hard')) AS bounces_hard,
-           toString(uniqExactIf(recipient_id, event_type = 'complaint')) AS complaints,
-           toString(uniqExactIf(recipient_id, event_type = 'unsubscribe')) AS unsubscribes
-         FROM sendmast.email_events
-         WHERE account_id = {acc:UUID} AND campaign_id = {cid:UUID}`,
+           toString(countIf(has_open)) AS opens,
+           toString(countIf(has_click)) AS clicks,
+           toString(countIf(has_delivered AND NOT has_bounce)) AS delivered,
+           toString(countIf(has_bounce)) AS bounces,
+           toString(countIf(has_hard_bounce)) AS bounces_hard,
+           toString(countIf(has_complaint)) AS complaints,
+           toString(countIf(has_unsubscribe)) AS unsubscribes
+         FROM (
+           SELECT
+             recipient_id,
+             max(event_type = 'open') AS has_open,
+             max(event_type = 'click') AS has_click,
+             max(event_type = 'delivered') AS has_delivered,
+             max(event_type = 'bounce') AS has_bounce,
+             max(event_type = 'bounce' AND bounce_kind = 'hard') AS has_hard_bounce,
+             max(event_type = 'complaint') AS has_complaint,
+             max(event_type = 'unsubscribe') AS has_unsubscribe
+           FROM sendmast.email_events
+           WHERE account_id = {acc:UUID} AND campaign_id = {cid:UUID}
+           GROUP BY recipient_id
+         )`,
         { acc: accountId, cid: campaignId },
       );
       const r = rows[0];

@@ -123,10 +123,7 @@ export interface OrderRow {
   attribution_model?: string;
 }
 
-export async function insertOrders(
-  client: ClickHouseClient,
-  rows: OrderRow[],
-): Promise<void> {
+export async function insertOrders(client: ClickHouseClient, rows: OrderRow[]): Promise<void> {
   if (rows.length === 0) return;
   await client.insert({
     table: 'sendmast.orders',
@@ -264,34 +261,50 @@ export interface FlowEngagement {
 
 /**
  * Per-automation engagement from email_events (source_type='flow'). Counts
- * unique flow-sends (recipient_id) per event type so a recipient opening twice
- * counts once. `sent` is tracked in Postgres (shop_automation_sends), not here.
+ * unique flow-sends (recipient_id). Bounce wins over delivered when a delayed
+ * DSN arrives after an initial delivery event, matching campaign analytics.
+ * `sent` is tracked in Postgres (shop_automation_sends), not here.
  */
 export async function getAutomationEngagement(
   client: ClickHouseClient,
   opts: { accountId: string; automationId: string },
 ): Promise<FlowEngagement> {
   const r = await client.query({
-    query: `SELECT event_type, toString(uniqExact(recipient_id)) AS uniques
-            FROM sendmast.email_events
-            WHERE account_id = {accountId:UUID}
-              AND source_type = 'flow'
-              AND source_id = {automationId:UUID}
-              AND event_type IN ('delivered','open','click','bounce')
-            GROUP BY event_type`,
+    query: `SELECT
+              toString(countIf(has_delivered AND NOT has_bounce)) AS delivered,
+              toString(countIf(has_open)) AS opened,
+              toString(countIf(has_click)) AS clicked,
+              toString(countIf(has_bounce)) AS bounced
+            FROM (
+              SELECT
+                recipient_id,
+                max(event_type = 'delivered') AS has_delivered,
+                max(event_type = 'open') AS has_open,
+                max(event_type = 'click') AS has_click,
+                max(event_type = 'bounce') AS has_bounce
+              FROM sendmast.email_events
+              WHERE account_id = {accountId:UUID}
+                AND source_type = 'flow'
+                AND source_id = {automationId:UUID}
+                AND event_type IN ('delivered','open','click','bounce')
+              GROUP BY recipient_id
+            )`,
     query_params: { accountId: opts.accountId, automationId: opts.automationId },
     format: 'JSONEachRow',
   });
-  const rows = (await r.json()) as Array<{ event_type: string; uniques: string }>;
-  const out: FlowEngagement = { delivered: 0, opened: 0, clicked: 0, bounced: 0 };
-  for (const row of rows) {
-    const n = Number(row.uniques);
-    if (row.event_type === 'delivered') out.delivered = n;
-    else if (row.event_type === 'open') out.opened = n;
-    else if (row.event_type === 'click') out.clicked = n;
-    else if (row.event_type === 'bounce') out.bounced = n;
-  }
-  return out;
+  const rows = (await r.json()) as Array<{
+    delivered: string;
+    opened: string;
+    clicked: string;
+    bounced: string;
+  }>;
+  const row = rows[0];
+  return {
+    delivered: Number(row?.delivered ?? 0),
+    opened: Number(row?.opened ?? 0),
+    clicked: Number(row?.clicked ?? 0),
+    bounced: Number(row?.bounced ?? 0),
+  };
 }
 
 // ---------------------------------------------------------------------------

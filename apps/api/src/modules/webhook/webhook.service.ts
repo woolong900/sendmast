@@ -1,8 +1,14 @@
-import { Injectable, Logger, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  UnauthorizedException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { QueueService } from '../../common/queue/queue.service';
 import { QUEUE_NAMES } from '@sendmast/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { classifyBounce } from './bounce-classifier';
 
 const MAILGUN_SIGNATURE_MAX_AGE_MS = 15 * 60 * 1000;
 
@@ -26,7 +32,10 @@ export class WebhookService {
     private readonly prisma: PrismaService,
   ) {}
 
-  async handleEventGrid(events: EventGridEvent[]): Promise<{ accepted: number; subscriptionValidationResponse?: { validationResponse: string } }> {
+  async handleEventGrid(events: EventGridEvent[]): Promise<{
+    accepted: number;
+    subscriptionValidationResponse?: { validationResponse: string };
+  }> {
     let validationResponse: string | undefined;
     let accepted = 0;
 
@@ -49,7 +58,9 @@ export class WebhookService {
       const recipientHeader = (data.recipient ?? data.recipientAddress) as string | undefined;
       const messageId = (data.messageId ?? data.id) as string | undefined;
       const ourRecipientId = (data.internalMessageId ??
-        (data as { headers?: Record<string, string> }).headers?.['X-SendMast-Recipient']) as string | undefined;
+        (data as { headers?: Record<string, string> }).headers?.['X-SendMast-Recipient']) as
+        | string
+        | undefined;
 
       // Bounce kind is computed at webhook time so worker-events doesn't have
       // to re-parse the payload. Stored as '' for non-bounce events.
@@ -114,7 +125,10 @@ export class WebhookService {
 
   private async assertMailgunSignature(signature: MailgunSignature): Promise<void> {
     const timestampMs = Number(signature.timestamp) * 1000;
-    if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > MAILGUN_SIGNATURE_MAX_AGE_MS) {
+    if (
+      !Number.isFinite(timestampMs) ||
+      Math.abs(Date.now() - timestampMs) > MAILGUN_SIGNATURE_MAX_AGE_MS
+    ) {
       throw new UnauthorizedException('stale Mailgun webhook signature');
     }
 
@@ -165,9 +179,10 @@ interface MailgunEventData {
   'client-info'?: Record<string, unknown>;
 }
 
-function mapMailgunEvent(
-  data: MailgunEventData,
-): { kind: 'delivered' | 'bounce' | 'complaint' | 'o' | 'c' | 'u' | 'failed'; bounceKind?: 'hard' | 'soft' | '' } | null {
+function mapMailgunEvent(data: MailgunEventData): {
+  kind: 'delivered' | 'bounce' | 'complaint' | 'o' | 'c' | 'u' | 'failed';
+  bounceKind?: 'hard' | 'soft' | '';
+} | null {
   const event = String(data.event ?? '').toLowerCase();
   if (event === 'delivered') return { kind: 'delivered' };
   if (event === 'opened') return { kind: 'o' };
@@ -203,78 +218,9 @@ function eventTimestampMs(value: unknown): number {
   return Number.isFinite(n) ? Math.round(n * 1000) : Date.now();
 }
 
-/**
- * Phrases (and enhanced status codes) that confidently mean "the RECIPIENT
- * mailbox itself is unusable" — i.e. a real 无效邮箱 we should suppress. Matched
- * case-insensitively as plain substrings against the failure message.
- *
- * Deliberately narrow. A bare 5xx is NOT enough: most of our 5xx bounces are
- * sender-side policy / reputation / DNS blocks (e.g. Gmail 550-5.7.1 "low
- * reputation of the sending domain", "Sender verify failed", "no A/AAAA/MX
- * records"), where the recipient address is perfectly fine. Treating those as
- * hard would suppress good contacts over OUR deliverability problem.
- */
-const HARD_BOUNCE_SIGNALS = [
-  '5.1.1', // enhanced status: bad destination mailbox (no such user)
-  '5.1.10', // null MX / recipient does not exist (Office365)
-  'does not exist',
-  'user unknown',
-  'unknown user',
-  'no such user',
-  'no such recipient',
-  'no such mailbox',
-  'user not found',
-  'mailbox not found',
-  'address not found',
-  'invalid recipient',
-  'unknown recipient',
-  'recipient unknown',
-  'recipient address rejected', // Exchange/O365 550 5.1.1 RecipNotFound (real bad address)
-  // NOTE: bare "recipient rejected" is intentionally NOT here. Charter/Spectrum
-  // (*.rr.com, charter.net, roadrunner.com, twc.com, bresnan.net) emit
-  // "<addr> recipient rejected};{MSG=};{FQDN=...charter.net};{IP=...}" with NO
-  // SMTP/enhanced code as an IP/reputation block, not a bad-mailbox signal.
-  // Treating it as hard would suppress good contacts over our deliverability.
-  'not a valid user', // e.g. "x@y is not a valid user"
-  'mailbox is disabled', // Yahoo 554.30 — account deactivated
-  'account is disabled',
-  'is inactive', // Gmail 5.2.1 — "account that you tried to reach is inactive"
-];
-
-/**
- * Phrases that mean the failure is about OUR sending side (the sender domain /
- * MAIL FROM / reputation), NOT the recipient mailbox. These take priority over
- * HARD_BOUNCE_SIGNALS because some sender-side rejections reuse mailbox wording,
- * e.g. "Domain of sender address postal@… does not exist" or "Sender verify
- * failed" — there "does not exist" refers to our domain, not the recipient.
- */
-const SENDER_SIDE_SIGNALS = ['sender', 'mail from', 'reputation'];
-
-/**
- * Classify a bounce as a permanent recipient failure ('hard') vs. anything else
- * ('soft').
- *
- *   1. Any sender-side signal (it's our domain/reputation problem) → 'soft'.
- *   2. Otherwise a HARD_BOUNCE_SIGNAL (recipient mailbox unusable) → 'hard'.
- *   3. Otherwise (transient 4xx, code-less, policy blocks) → 'soft'.
- *
- * We default to soft so we never over-suppress a good recipient over our own
- * deliverability problem. Only 'hard' drives suppression downstream
- * (worker-events).
- *
- * Source: data.deliveryStatusDetails.statusMessage — free-form, often
- * "550 5.1.1 user unknown" or "550 5.7.1 ... message blocked".
- */
-function classifyBounce(data: Record<string, unknown>): 'hard' | 'soft' {
-  const msg = String(
-    (data as { deliveryStatusDetails?: { statusMessage?: string } })
-      .deliveryStatusDetails?.statusMessage ?? '',
-  ).toLowerCase();
-  if (SENDER_SIDE_SIGNALS.some((s) => msg.includes(s))) return 'soft';
-  return HARD_BOUNCE_SIGNALS.some((s) => msg.includes(s)) ? 'hard' : 'soft';
-}
-
-function mapEmailChannelEvent(ev: EventGridEvent): 'delivered' | 'bounce' | 'complaint' | 'failed' | null {
+function mapEmailChannelEvent(
+  ev: EventGridEvent,
+): 'delivered' | 'bounce' | 'complaint' | 'failed' | null {
   if (ev.eventType === 'Microsoft.Communication.EmailDeliveryReportReceived') {
     const status = String((ev.data as { status?: string }).status ?? '').toLowerCase();
     if (status === 'delivered') return 'delivered';
