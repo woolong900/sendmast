@@ -403,7 +403,7 @@ function ThumbnailWithHover({
             src={thumbnail!}
             alt={subject}
             loading="lazy"
-            className="h-full w-full object-contain object-left-top"
+            className="h-full w-full object-contain object-top"
             onError={() => setThumbBroken(true)}
           />
         ) : (
