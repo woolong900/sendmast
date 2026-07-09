@@ -1,11 +1,22 @@
 import { z } from 'zod';
 
+export function normalizeSenderDomain(domain: string): string {
+  return domain.trim().toLowerCase().replace(/^www\./, '');
+}
+
+const DomainName = z
+  .string()
+  .transform(normalizeSenderDomain)
+  .pipe(
+    z
+      .string()
+      .min(3)
+      .max(253)
+      .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i, 'Invalid domain'),
+  );
+
 export const CreateSenderDomainSchema = z.object({
-  domain: z
-    .string()
-    .min(3)
-    .max(253)
-    .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i, 'Invalid domain'),
+  domain: DomainName,
   /**
    * Which email channel to provision the domain under. Optional: required only
    * when the tenant has more than one assigned email channel; otherwise the

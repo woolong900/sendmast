@@ -9,6 +9,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { AzureAcsService } from './azure-acs.service';
 import { MailgunService } from './mailgun.service';
 import { ensureDmarcRecord, applyDmarcDnsVerification } from './dmarc-record';
+import { normalizeSenderDomain } from '@sendmast/shared';
 import type {
   SenderDomainDnsRecord,
   SenderDomainRecordKind,
@@ -93,7 +94,7 @@ export class SenderDomainService {
     domain: string,
     emailChannelId?: string,
   ): Promise<SenderDomainView> {
-    const cleaned = domain.toLowerCase().trim();
+    const cleaned = normalizeSenderDomain(domain);
     const exists = await this.prisma.senderDomain.findFirst({
       where: { accountId, domain: cleaned },
     });
