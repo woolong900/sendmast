@@ -99,6 +99,9 @@ const DISCONNECTED_FLOWS: ShopAutomationView[] = SHOP_AUTOMATION_TYPES.map((type
   fromEmail: null,
   fromName: null,
   subject: null,
+  couponCode: null,
+  couponDiscountKind: null,
+  couponDiscountValue: null,
   delayMinutes: type === 'abandoned_cart' ? 30 : 0,
   steps: [],
   stats: EMPTY_FLOW_STATS,
@@ -491,6 +494,63 @@ function couponOptionLabel(c: ShopCouponView): string {
   return base;
 }
 
+function CouponPicker({
+  value,
+  discountKind,
+  discountValue,
+  coupons,
+  isError,
+  onChange,
+}: {
+  value: string;
+  discountKind: CouponDiscountKind | null;
+  discountValue: number | null;
+  coupons: ShopCouponView[] | undefined;
+  isError: boolean;
+  onChange: (patch: {
+    couponCode: string;
+    couponDiscountKind: CouponDiscountKind | null;
+    couponDiscountValue: number | null;
+  }) => void;
+}) {
+  const rows = coupons ?? [];
+  return (
+    <label className="block">
+      <FieldLabel>
+        优惠券 <span className="font-normal text-muted-foreground">（选填，展示在邮件中）</span>
+      </FieldLabel>
+      <FilterSelect
+        value={value}
+        placeholder="不使用优惠券"
+        onChange={(code) => {
+          const c = rows.find((x) => x.code === code);
+          onChange({
+            couponCode: code,
+            // Snapshot the picked coupon's discount; keep the saved one if
+            // re-selecting an off-list code.
+            couponDiscountKind: c ? c.discountKind : code === value ? discountKind : null,
+            couponDiscountValue: c ? c.discountValue : code === value ? discountValue : null,
+          });
+        }}
+        options={[
+          { value: '', label: '不使用优惠券' },
+          // Keep a saved code selectable even if it's not in the live list.
+          ...(value && !rows.some((c) => c.code === value) ? [{ value, label: value }] : []),
+          ...rows.map((c) => ({
+            value: c.code,
+            label: couponOptionLabel(c),
+          })),
+        ]}
+      />
+      {isError && (
+        <span className="mt-1 block text-xs text-amber-600">
+          无法拉取店铺优惠券：请在 Shopyy 开发者后台为应用开通「优惠券」接口权限后重试。
+        </span>
+      )}
+    </label>
+  );
+}
+
 const MINUTES_PER_DAY = 1440;
 /** Server cap on a round's delay (== 7 days). */
 const MAX_DELAY_MINUTES = 10080;
@@ -704,13 +764,14 @@ function FlowEditor({
   const qc = useQueryClient();
   const toast = useToast();
   const isAbandoned = automation.type === 'abandoned_cart';
+  const supportsCoupon = isAbandoned || automation.type === 'customer_registered';
 
-  // Coupons are fetched live from the store (only for the abandoned flow). The
+  // Coupons are fetched live from the store for flows that can display one. The
   // query 400s when the app lacks the coupon API scope; we surface a hint then.
   const coupons = useQuery<ShopCouponView[]>({
     queryKey: ['shop-coupons', connectionId],
     queryFn: async () => (await api.get(`/api/integrations/shopyy/${connectionId}/coupons`)).data,
-    enabled: isAbandoned,
+    enabled: supportsCoupon,
     retry: false,
   });
 
@@ -723,6 +784,13 @@ function FlowEditor({
   );
   const [preheader, setPreheader] = useState(
     automation.preheader || SHOP_AUTOMATION_DEFAULT_PREHEADER[automation.type],
+  );
+  const [couponCode, setCouponCode] = useState(automation.couponCode ?? '');
+  const [couponDiscountKind, setCouponDiscountKind] = useState<CouponDiscountKind | null>(
+    automation.couponDiscountKind,
+  );
+  const [couponDiscountValue, setCouponDiscountValue] = useState<number | null>(
+    automation.couponDiscountValue,
   );
   // Inline email content for single-template flows.
   const [content, setContent] = useState<EmailContent>(() => ({
@@ -801,6 +869,11 @@ function FlowEditor({
         body.thumbnail = content.thumbnail;
         body.preheader = preheader.trim() || null;
         body.subject = subject.trim() || null;
+        if (automation.type === 'customer_registered') {
+          body.couponCode = couponCode || null;
+          body.couponDiscountKind = couponCode ? couponDiscountKind : null;
+          body.couponDiscountValue = couponCode ? couponDiscountValue : null;
+        }
       }
       return api.patch(
         `/api/integrations/shopyy/${connectionId}/automations/${automation.type}`,
@@ -875,18 +948,36 @@ function FlowEditor({
             <p className="text-sm text-muted-foreground">{TRIGGERS[automation.type]}</p>
 
             {!isAbandoned && (
-              <EmailContentBlock
-                thumbnail={content.thumbnail}
-                html={content.html}
-                onEdit={() => setEditing('single')}
-                fromEmail={fromEmail}
-                onFromEmail={setFromEmail}
-                senderOptions={senderOptions}
-                subject={subject}
-                onSubject={setSubject}
-                preheader={preheader}
-                onPreheader={setPreheader}
-              />
+              <>
+                <EmailContentBlock
+                  thumbnail={content.thumbnail}
+                  html={content.html}
+                  onEdit={() => setEditing('single')}
+                  fromEmail={fromEmail}
+                  onFromEmail={setFromEmail}
+                  senderOptions={senderOptions}
+                  subject={subject}
+                  onSubject={setSubject}
+                  preheader={preheader}
+                  onPreheader={setPreheader}
+                />
+                {automation.type === 'customer_registered' && (
+                  <div className="grid gap-4 border-t pt-4 sm:grid-cols-2">
+                    <CouponPicker
+                      value={couponCode}
+                      discountKind={couponDiscountKind}
+                      discountValue={couponDiscountValue}
+                      coupons={coupons.data}
+                      isError={coupons.isError}
+                      onChange={(patch) => {
+                        setCouponCode(patch.couponCode);
+                        setCouponDiscountKind(patch.couponDiscountKind);
+                        setCouponDiscountValue(patch.couponDiscountValue);
+                      }}
+                    />
+                  </div>
+                )}
+              </>
             )}
 
             {isAbandoned && (
@@ -936,54 +1027,14 @@ function FlowEditor({
                       />
 
                       <div className="mt-4 grid gap-4 border-t pt-4 sm:grid-cols-2">
-                        <label className="block">
-                          <FieldLabel>
-                            优惠券{' '}
-                            <span className="font-normal text-muted-foreground">
-                              （选填，展示在邮件中）
-                            </span>
-                          </FieldLabel>
-                          <FilterSelect
-                            value={r.couponCode}
-                            placeholder="不使用优惠券"
-                            onChange={(code) => {
-                              const c = (coupons.data ?? []).find((x) => x.code === code);
-                              updateRound(i, {
-                                couponCode: code,
-                                // Snapshot the picked coupon's discount; keep the
-                                // saved one if re-selecting an off-list code.
-                                couponDiscountKind: c
-                                  ? c.discountKind
-                                  : code === r.couponCode
-                                    ? r.couponDiscountKind
-                                    : null,
-                                couponDiscountValue: c
-                                  ? c.discountValue
-                                  : code === r.couponCode
-                                    ? r.couponDiscountValue
-                                    : null,
-                              });
-                            }}
-                            options={[
-                              { value: '', label: '不使用优惠券' },
-                              // Keep a saved code selectable even if it's not in the live list.
-                              ...(r.couponCode &&
-                              !(coupons.data ?? []).some((c) => c.code === r.couponCode)
-                                ? [{ value: r.couponCode, label: r.couponCode }]
-                                : []),
-                              ...(coupons.data ?? []).map((c) => ({
-                                value: c.code,
-                                label: couponOptionLabel(c),
-                              })),
-                            ]}
-                          />
-                          {coupons.isError && (
-                            <span className="mt-1 block text-xs text-amber-600">
-                              无法拉取店铺优惠券：请在 Shopyy
-                              开发者后台为应用开通「优惠券」接口权限后重试。
-                            </span>
-                          )}
-                        </label>
+                        <CouponPicker
+                          value={r.couponCode}
+                          discountKind={r.couponDiscountKind}
+                          discountValue={r.couponDiscountValue}
+                          coupons={coupons.data}
+                          isError={coupons.isError}
+                          onChange={(patch) => updateRound(i, patch)}
+                        />
                         <div>
                           <FieldLabel>下单后延迟</FieldLabel>
                           <DelayField

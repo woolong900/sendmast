@@ -1204,35 +1204,41 @@ enum ShopAutomationType {
 /// system Campaign so triggered 1:1 sends reuse the full campaign pipeline
 /// (quota, tracking, events, deliverability stats).
 model ShopAutomation {
-  id               String             @id @default(uuid()) @db.Uuid
-  accountId        String             @map("account_id") @db.Uuid
-  shopConnectionId String             @map("shop_connection_id") @db.Uuid
-  type             ShopAutomationType
-  enabled          Boolean            @default(false)
+  id                  String             @id @default(uuid()) @db.Uuid
+  accountId           String             @map("account_id") @db.Uuid
+  shopConnectionId    String             @map("shop_connection_id") @db.Uuid
+  type                ShopAutomationType
+  enabled             Boolean            @default(false)
   /// Legacy link to a source template; content is now stored inline below.
   /// Kept so existing rows can backfill their content and the worker can fall
   /// back to a template when inline html is missing.
-  templateId       String?            @map("template_id") @db.Uuid
+  templateId          String?            @map("template_id") @db.Uuid
   /// Inline email content (seeded from a system template, then editable in
   /// place). `html` is what gets sent; `designJson` re-opens the block editor.
-  html             String?            @db.Text
-  mjml             String?            @db.Text
-  designJson       Json?              @map("design_json")
-  thumbnail        String?
+  html                String?            @db.Text
+  mjml                String?            @db.Text
+  designJson          Json?              @map("design_json")
+  thumbnail           String?
   /// Optional inbox preview text (preheader), injected as a hidden span on send.
-  preheader        String?
-  senderDomainId   String?            @map("sender_domain_id") @db.Uuid
-  fromEmail        String?            @map("from_email")
-  fromName         String?            @map("from_name")
-  subject          String?
+  preheader           String?
+  senderDomainId      String?            @map("sender_domain_id") @db.Uuid
+  fromEmail           String?            @map("from_email")
+  fromName            String?            @map("from_name")
+  subject             String?
+  /// Store coupon code shown in this flow's email; null = no coupon.
+  couponCode          String?            @map("coupon_code")
+  /// Snapshot of the coupon's discount kind: 'percent' | 'amount' (null = unknown).
+  couponDiscountKind  String?            @map("coupon_discount_kind")
+  /// Snapshot of the coupon's discount value (percent off, or amount off).
+  couponDiscountValue Float?             @map("coupon_discount_value")
   /// abandoned_cart only: minutes to wait after an order is created before the
   /// recall fires (skipped if the order has been paid by then).
-  delayMinutes     Int                @default(60) @map("delay_minutes")
+  delayMinutes        Int                @default(60) @map("delay_minutes")
   /// Backing hidden system campaign id; recipients are attached to it so the
   /// existing send/track/analytics stack applies unchanged.
-  systemCampaignId String?            @map("system_campaign_id") @db.Uuid
-  createdAt        DateTime           @default(now()) @map("created_at")
-  updatedAt        DateTime           @updatedAt @map("updated_at")
+  systemCampaignId    String?            @map("system_campaign_id") @db.Uuid
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
 
   account        Account              @relation(fields: [accountId], references: [id], onDelete: Cascade)
   shopConnection ShopConnection       @relation(fields: [shopConnectionId], references: [id], onDelete: Cascade)

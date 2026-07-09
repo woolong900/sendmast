@@ -140,6 +140,9 @@ function toAutomationView(
     fromEmail: a.fromEmail,
     fromName: a.fromName,
     subject: a.subject,
+    couponCode: a.couponCode,
+    couponDiscountKind: (a.couponDiscountKind as CouponDiscountKind | null) ?? null,
+    couponDiscountValue: a.couponDiscountValue,
     delayMinutes: a.delayMinutes,
     steps: steps
       .slice()
@@ -266,7 +269,9 @@ export class IntegrationsService {
         result.developer_app.openapi_domain,
         result.developer_app.token,
         externalStoreId,
-      )) ?? existing?.storeUrl ?? null;
+      )) ??
+      existing?.storeUrl ??
+      null;
     const data = {
       shopName: result.store.shop_name ?? null,
       shopDomain: result.store.shop_domain ?? null,
@@ -720,7 +725,16 @@ export class IntegrationsService {
   ): Promise<ShopAutomationView> {
     const conn = await this.assertConnection(accountId, connectionId);
     const isAbandoned = type === 'abandoned_cart';
-    const { steps, designJson, ...rest } = input;
+    const isCustomerRegistered = type === 'customer_registered';
+    const { steps, designJson, couponCode: inputCouponCode, ...rest } = input;
+    const couponCode = isCustomerRegistered ? inputCouponCode?.trim() || null : null;
+    const couponPatch = {
+      couponCode,
+      // Only the welcome flow uses a parent-level coupon. Other single-email
+      // flows clear these fields so stale values cannot render later.
+      couponDiscountKind: couponCode ? (input.couponDiscountKind ?? null) : null,
+      couponDiscountValue: couponCode ? (input.couponDiscountValue ?? null) : null,
+    };
     const toJson = (v: unknown): Prisma.InputJsonValue | typeof Prisma.DbNull =>
       v === null || v === undefined ? Prisma.DbNull : (v as Prisma.InputJsonValue);
 
@@ -786,8 +800,11 @@ export class IntegrationsService {
           designJson: toJson(first.designJson),
           thumbnail: first.thumbnail ?? null,
           preheader: first.preheader ?? null,
+          couponCode: null,
+          couponDiscountKind: null,
+          couponDiscountValue: null,
         }
-      : { ...rest, designJson: toJson(designJson) };
+      : { ...rest, ...couponPatch, designJson: toJson(designJson) };
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const a = await tx.shopAutomation.upsert({

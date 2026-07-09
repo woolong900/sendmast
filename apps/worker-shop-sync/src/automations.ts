@@ -118,6 +118,9 @@ interface ResolvedAutomation {
   subject: string;
   html: string;
   preheader: string | null;
+  couponCode: string | null;
+  couponDiscountKind: string | null;
+  couponDiscountValue: number | null;
   delayMinutes: number;
 }
 
@@ -231,13 +234,17 @@ async function loadAutomation(
     subject: a.subject?.trim() || DEFAULT_SUBJECT[type],
     html,
     preheader: a.preheader?.trim() || DEFAULT_PREHEADER[type],
+    couponCode: a.couponCode,
+    couponDiscountKind: a.couponDiscountKind,
+    couponDiscountValue: a.couponDiscountValue,
     delayMinutes: a.delayMinutes,
   };
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
 }
 
@@ -350,9 +357,7 @@ export function renderCouponHtml(
   const c = (code ?? '').trim();
   if (!c) return '';
   const safe = escapeHtml(c);
-  const headline = escapeHtml(
-    couponHeadline(discount?.kind, discount?.value, discount?.currency),
-  );
+  const headline = escapeHtml(couponHeadline(discount?.kind, discount?.value, discount?.currency));
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-spacing:0;border-collapse:collapse;margin:0;">
   <tr><td align="center" style="padding:0;">
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-spacing:0;border-collapse:separate;background:#fff7ed;border:2px dashed #f59e0b;border-radius:12px;">
@@ -366,7 +371,25 @@ export function renderCouponHtml(
 </table>`;
 }
 
-function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Record<string, string> {
+/**
+ * Welcome emails may be custom templates that predate the coupon feature. If a
+ * merchant selects a coupon but the template has no slot, append one before the
+ * footer/body end so the setting always has a visible effect.
+ */
+function withCouponBlockSlot(html: string): string {
+  if (html.includes('{{coupon_block}}')) return html;
+  const slot = '<div style="margin:24px 0;">{{coupon_block}}</div>';
+  const bodyEnd = html.match(/<\/body>/i);
+  if (bodyEnd?.index != null) {
+    return html.slice(0, bodyEnd.index) + slot + html.slice(bodyEnd.index);
+  }
+  return html + slot;
+}
+
+function orderMergeVars(
+  ctx: OrderContext,
+  shopName: Record<string, string>,
+): Record<string, string> {
   const itemsHtml = renderOrderItemsHtml(ctx.items ?? []);
   const addressHtml = renderShippingAddressHtml(ctx.addressLines ?? []);
   const billingAddressHtml = renderShippingAddressHtml(
@@ -387,10 +410,7 @@ function orderMergeVars(ctx: OrderContext, shopName: Record<string, string>): Re
   };
 }
 
-export async function triggerOrderPaid(
-  deps: AutomationDeps,
-  ctx: OrderContext,
-): Promise<void> {
+export async function triggerOrderPaid(deps: AutomationDeps, ctx: OrderContext): Promise<void> {
   const a = await loadAutomation(deps.prisma, ctx.shopConnectionId, 'order_paid');
   if (!a) return;
   const shopName = await shopNameMergeVar(deps.prisma, ctx.shopConnectionId);
@@ -416,6 +436,10 @@ export async function triggerCustomerRegistered(
   const a = await loadAutomation(deps.prisma, ctx.shopConnectionId, 'customer_registered');
   if (!a) return;
   const shopName = await shopNameMergeVar(deps.prisma, ctx.shopConnectionId);
+  const couponBlock = renderCouponHtml(a.couponCode, {
+    kind: a.couponDiscountKind,
+    value: a.couponDiscountValue,
+  });
   await enqueueTransactional(deps, {
     accountId: ctx.accountId,
     automationId: a.id,
@@ -425,16 +449,16 @@ export async function triggerCustomerRegistered(
     subject: a.subject,
     fromEmail: a.fromEmail,
     fromName: a.fromName,
-    html: a.html,
+    html: couponBlock ? withCouponBlockSlot(a.html) : a.html,
     preheader: a.preheader,
-    mergeVars: shopName,
+    mergeVars: {
+      ...shopName,
+      ...(couponBlock ? { coupon_block: couponBlock } : {}),
+    },
   });
 }
 
-export async function triggerOrderShipped(
-  deps: AutomationDeps,
-  ctx: OrderContext,
-): Promise<void> {
+export async function triggerOrderShipped(deps: AutomationDeps, ctx: OrderContext): Promise<void> {
   const a = await loadAutomation(deps.prisma, ctx.shopConnectionId, 'order_shipped');
   if (!a) return;
   const shopName = await shopNameMergeVar(deps.prisma, ctx.shopConnectionId);
@@ -487,10 +511,7 @@ export async function scheduleAbandonedRecovery(
  * the checkout was abandoned. Idempotency is enforced downstream by the
  * `ShopAutomationSend` unique key on (automationId, dedupKey).
  */
-export async function runAbandonedRecovery(
-  deps: AutomationDeps,
-  job: AbandonedJob,
-): Promise<void> {
+export async function runAbandonedRecovery(deps: AutomationDeps, job: AbandonedJob): Promise<void> {
   const a = await loadAutomation(deps.prisma, job.shopConnectionId, 'abandoned_cart');
   if (!a || !job.externalCheckoutId) return;
 
@@ -533,9 +554,7 @@ export async function runAbandonedRecovery(
     ...(job.value != null && job.currency
       ? { order_total: formatMoney(job.value, job.currency) }
       : {}),
-    ...(job.recoveryUrl
-      ? { order_url: job.recoveryUrl, tracking_url: job.recoveryUrl }
-      : {}),
+    ...(job.recoveryUrl ? { order_url: job.recoveryUrl, tracking_url: job.recoveryUrl } : {}),
   };
 
   const recipientId = await enqueueTransactional(deps, {
@@ -591,16 +610,18 @@ export async function scheduleAbandonedFromOrder(
   });
   const rounds = steps.length
     ? steps
-    : [{
-        stepIndex: 1,
-        templateId: a.templateId,
-        html: a.html,
-        subject: a.subject,
-        couponCode: null,
-        couponDiscountKind: null,
-        couponDiscountValue: null,
-        delayMinutes: a.delayMinutes,
-      }];
+    : [
+        {
+          stepIndex: 1,
+          templateId: a.templateId,
+          html: a.html,
+          subject: a.subject,
+          couponCode: null,
+          couponDiscountKind: null,
+          couponDiscountValue: null,
+          delayMinutes: a.delayMinutes,
+        },
+      ];
 
   for (const s of rounds) {
     if (!s.html && !s.templateId) continue; // round not configured → nothing to send

@@ -107,10 +107,7 @@ function validStoreUrl(value: string | null): boolean {
   try {
     const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
     return (
-      ['http:', 'https:'].includes(url.protocol) &&
-      !!url.hostname &&
-      !url.username &&
-      !url.password
+      ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password
     );
   } catch {
     return false;
@@ -209,6 +206,11 @@ export interface ShopAutomationView {
   fromEmail: string | null;
   fromName: string | null;
   subject: string | null;
+  /** Store coupon code shown in this flow's email; null = no coupon. */
+  couponCode: string | null;
+  /** Snapshot of the coupon's discount kind/value, for the email's "Save …" line. */
+  couponDiscountKind: CouponDiscountKind | null;
+  couponDiscountValue: number | null;
   delayMinutes: number;
   /** Recovery rounds — only populated for `abandoned_cart`. */
   steps: ShopAutomationStepView[];
@@ -291,6 +293,9 @@ export const UpdateShopAutomationSchema = z.object({
   fromEmail: z.string().email().nullable().optional(),
   fromName: z.string().max(100).nullable().optional(),
   subject: z.string().max(255).nullable().optional(),
+  couponCode: z.string().max(100).nullable().optional(),
+  couponDiscountKind: z.enum(['percent', 'amount']).nullable().optional(),
+  couponDiscountValue: z.number().nonnegative().nullable().optional(),
   delayMinutes: z.number().int().min(1).max(10080).optional(),
   steps: z
     .array(ShopAutomationStepSchema)
