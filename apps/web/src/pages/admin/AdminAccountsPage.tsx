@@ -365,7 +365,7 @@ function EmailChannelSummary({ channels }: { channels: AssignedEmailChannelView[
   const sorted = [...channels].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
   const first = sorted[0];
   const title = sorted
-    .map((c) => `${c.name}${c.isPrimary ? ' · 主' : ''} · ${usageLabel(c)}`)
+    .map((c) => `${c.name}${c.isPrimary ? ' · 主' : ''}`)
     .join('\n');
   return (
     <div className="max-w-[220px]" title={title}>
@@ -374,19 +374,8 @@ function EmailChannelSummary({ channels }: { channels: AssignedEmailChannelView[
         {first.isPrimary ? ' · 主' : ''}
         {channels.length > 1 ? ` +${channels.length - 1}` : ''}
       </div>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {first.allowMarketing && <Badge variant="muted">营销</Badge>}
-        {first.allowTransactional && <Badge variant="muted">事务</Badge>}
-      </div>
     </div>
   );
-}
-
-function usageLabel(channel: Pick<AssignedEmailChannelView, 'allowMarketing' | 'allowTransactional'>) {
-  if (channel.allowMarketing && channel.allowTransactional) return '营销/事务';
-  if (channel.allowMarketing) return '营销';
-  if (channel.allowTransactional) return '事务';
-  return '未启用';
 }
 
 function AccountEditModal({
