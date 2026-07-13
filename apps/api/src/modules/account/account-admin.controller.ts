@@ -70,6 +70,8 @@ export class AccountAdminController {
           provider: l.emailChannel.provider as 'acs' | 'mailgun',
           status: l.emailChannel.status as 'active' | 'suspended' | 'retired',
           isPrimary: l.isPrimary,
+          allowMarketing: l.allowMarketing,
+          allowTransactional: l.allowTransactional,
         }),
       ),
       senderDomainCount: r._count.senderDomains,
@@ -216,6 +218,8 @@ export class AccountAdminController {
       provider: l.emailChannel.provider as 'acs' | 'mailgun',
       status: l.emailChannel.status as 'active' | 'suspended' | 'retired',
       isPrimary: l.isPrimary,
+      allowMarketing: l.allowMarketing,
+      allowTransactional: l.allowTransactional,
     }));
   }
 
@@ -232,7 +236,19 @@ export class AccountAdminController {
   ) {
     const r = AssignEmailChannelsSchema.safeParse(body);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
-    const { emailChannelIds, primaryEmailChannelId } = r.data;
+    const { primaryEmailChannelId } = r.data;
+    const assignments = (
+      r.data.emailChannels ??
+      (r.data.emailChannelIds ?? []).map((channelId) => ({
+        id: channelId,
+        allowMarketing: true,
+        allowTransactional: true,
+      }))
+    ).map((a) => ({
+      emailChannelId: a.id,
+      allowMarketing: a.allowMarketing,
+      allowTransactional: a.allowTransactional,
+    }));
 
     const account = await this.prisma.account.findUnique({
       where: { id },
@@ -240,7 +256,8 @@ export class AccountAdminController {
     });
     if (!account) throw new BadRequestException('账号不存在');
 
-    const ids = Array.from(new Set(emailChannelIds));
+    const byId = new Map(assignments.map((a) => [a.emailChannelId, a]));
+    const ids = Array.from(byId.keys());
     if (ids.length > 0) {
       const found = await this.prisma.emailChannel.findMany({
         where: { id: { in: ids } },
@@ -278,6 +295,8 @@ export class AccountAdminController {
             accountId: id,
             emailChannelId: channelId,
             isPrimary: channelId === primaryEmailChannelId,
+            allowMarketing: byId.get(channelId)?.allowMarketing ?? true,
+            allowTransactional: byId.get(channelId)?.allowTransactional ?? true,
           })),
         });
       }

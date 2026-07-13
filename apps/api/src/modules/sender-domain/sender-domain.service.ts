@@ -38,15 +38,22 @@ export class SenderDomainService {
   ) {}
 
   async list(accountId: string): Promise<SenderDomainView[]> {
-    const rows = await this.prisma.senderDomain.findMany({
-      where: { accountId },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        senderUsernames: { orderBy: { createdAt: 'asc' } },
-        emailChannel: { select: { id: true, name: true, provider: true } },
-      },
-    });
-    return rows.map((r) => this.toView(r, r.senderUsernames));
+    const [rows, links] = await Promise.all([
+      this.prisma.senderDomain.findMany({
+        where: { accountId },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          senderUsernames: { orderBy: { createdAt: 'asc' } },
+          emailChannel: { select: { id: true, name: true, provider: true } },
+        },
+      }),
+      this.prisma.accountEmailChannel.findMany({
+        where: { accountId },
+        select: { emailChannelId: true, allowMarketing: true, allowTransactional: true },
+      }),
+    ]);
+    const usageByChannel = new Map(links.map((l) => [l.emailChannelId, l]));
+    return rows.map((r) => this.toView(this.withUsage(r, usageByChannel), r.senderUsernames));
   }
 
   async get(accountId: string, id: string): Promise<SenderDomainView> {
@@ -58,7 +65,11 @@ export class SenderDomainService {
       },
     });
     if (!row) throw new NotFoundException('域名不存在');
-    return this.toView(row, row.senderUsernames);
+    const link = await this.prisma.accountEmailChannel.findUnique({
+      where: { accountId_emailChannelId: { accountId, emailChannelId: row.emailChannelId } },
+      select: { emailChannelId: true, allowMarketing: true, allowTransactional: true },
+    });
+    return this.toView(this.withUsage(row, new Map(link ? [[link.emailChannelId, link]] : [])), row.senderUsernames);
   }
 
   /**
@@ -76,6 +87,8 @@ export class SenderDomainService {
       name: l.emailChannel.name,
       provider: l.emailChannel.provider as 'acs' | 'mailgun',
       isPrimary: l.isPrimary,
+      allowMarketing: l.allowMarketing,
+      allowTransactional: l.allowTransactional,
     }));
   }
 
@@ -144,6 +157,9 @@ export class SenderDomainService {
         id: emailChannel.id,
         name: emailChannel.name,
         provider: emailChannel.provider as 'acs' | 'mailgun',
+        allowMarketing: links.find((l) => l.emailChannelId === emailChannel.id)?.allowMarketing ?? true,
+        allowTransactional:
+          links.find((l) => l.emailChannelId === emailChannel.id)?.allowTransactional ?? true,
       },
     });
   }
@@ -412,7 +428,13 @@ export class SenderDomainService {
       id: string;
       domain: string;
       emailChannelId: string;
-      emailChannel?: { id: string; name: string; provider?: string } | null;
+      emailChannel?: {
+        id: string;
+        name: string;
+        provider?: string;
+        allowMarketing?: boolean;
+        allowTransactional?: boolean;
+      } | null;
       status: SenderDomainStatus;
       verificationRecords: Prisma.JsonValue;
       verificationStates: Prisma.JsonValue | null;
@@ -442,6 +464,8 @@ export class SenderDomainService {
             id: row.emailChannel.id,
             name: row.emailChannel.name,
             provider: row.emailChannel.provider as 'acs' | 'mailgun' | undefined,
+            allowMarketing: row.emailChannel.allowMarketing,
+            allowTransactional: row.emailChannel.allowTransactional,
           }
         : null,
       status,
@@ -452,6 +476,27 @@ export class SenderDomainService {
       verifiedAt: row.verifiedAt?.toISOString() ?? null,
       linkedAt: row.linkedAt?.toISOString() ?? null,
       senderUsernames: senderUsernames.map((u) => this.toUsernameView(u, row.domain)),
+    };
+  }
+
+  private withUsage<
+    T extends {
+      emailChannelId: string;
+      emailChannel?: { id: string; name: string; provider?: string } | null;
+    },
+  >(
+    row: T,
+    usageByChannel: Map<string, { allowMarketing: boolean; allowTransactional: boolean }>,
+  ): T {
+    if (!row.emailChannel) return row;
+    const usage = usageByChannel.get(row.emailChannelId);
+    return {
+      ...row,
+      emailChannel: {
+        ...row.emailChannel,
+        allowMarketing: usage?.allowMarketing ?? true,
+        allowTransactional: usage?.allowTransactional ?? true,
+      },
     };
   }
 

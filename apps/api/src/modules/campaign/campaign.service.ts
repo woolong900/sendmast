@@ -1195,6 +1195,7 @@ export class CampaignService {
 
     const status = input.scheduledAt ? 'scheduled' : 'draft';
     const senders = this.senderRoster(input);
+    await this.resolveCampaignSenders(accountId, senders, 'validate');
 
     const created = await this.prisma.campaign.create({
       data: {
@@ -1256,6 +1257,56 @@ export class CampaignService {
       });
     }
     return out;
+  }
+
+  private async resolveCampaignSenders(
+    accountId: string,
+    senders: Array<{ fromEmail: string; fromName: string }>,
+    mode: 'validate' | 'send',
+  ): Promise<Array<{ fromEmail: string; fromName: string; emailChannelId: string }>> {
+    const domainEmailChannel = new Map<string, string>();
+    const enriched: Array<{ fromEmail: string; fromName: string; emailChannelId: string }> = [];
+    for (const s of senders) {
+      const domain = s.fromEmail.split('@')[1]?.toLowerCase();
+      if (!domain) throw new BadRequestException(`寄件邮箱 ${s.fromEmail} 格式不正确`);
+      let channelId = domainEmailChannel.get(domain);
+      if (!channelId) {
+        const verified = await this.prisma.senderDomain.findFirst({
+          where: { accountId, domain, status: 'verified' },
+          include: { emailChannel: true },
+        });
+        if (!verified) {
+          throw new BadRequestException(`寄件域名 ${domain} 尚未验证`);
+        }
+        if (!verified.emailChannel) {
+          throw new BadRequestException(`寄件域名 ${domain} 未分配邮件通道`);
+        }
+        if (verified.emailChannel.status !== 'active') {
+          throw new BadRequestException(
+            `邮件通道 ${verified.emailChannel.name} 当前状态为 ${verified.emailChannel.status}`,
+          );
+        }
+        const link = await this.prisma.accountEmailChannel.findUnique({
+          where: {
+            accountId_emailChannelId: {
+              accountId,
+              emailChannelId: verified.emailChannel.id,
+            },
+          },
+          select: { allowMarketing: true },
+        });
+        if (!link?.allowMarketing) {
+          const action = mode === 'send' ? '发送普通 Campaign' : '用于普通 Campaign';
+          throw new BadRequestException(
+            `邮件通道 ${verified.emailChannel.name} 未开启营销场景，不能${action}`,
+          );
+        }
+        channelId = verified.emailChannel.id;
+        domainEmailChannel.set(domain, channelId);
+      }
+      enriched.push({ ...s, emailChannelId: channelId });
+    }
+    return enriched;
   }
 
   /**
@@ -1345,6 +1396,7 @@ export class CampaignService {
           senders: input.senders,
         })
       : null;
+    if (senders) await this.resolveCampaignSenders(accountId, senders, 'validate');
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (input.listIds) {
@@ -1486,36 +1538,7 @@ export class CampaignService {
         ? c.senders.map((s) => ({ fromEmail: s.fromEmail, fromName: s.fromName }))
         : [{ fromEmail: c.fromEmail, fromName: c.fromName }];
 
-    const domainEmailChannel = new Map<string, string>();
-    const enrichedSenders: Array<{
-      fromEmail: string;
-      fromName: string;
-      emailChannelId: string;
-    }> = [];
-    for (const s of senders) {
-      const domain = s.fromEmail.split('@')[1];
-      let channelId = domainEmailChannel.get(domain);
-      if (!channelId) {
-        const verified = await this.prisma.senderDomain.findFirst({
-          where: { accountId, domain, status: 'verified' },
-          include: { emailChannel: true },
-        });
-        if (!verified) {
-          throw new BadRequestException(`寄件域名 ${domain} 尚未验证`);
-        }
-        if (!verified.emailChannel) {
-          throw new BadRequestException(`寄件域名 ${domain} 未分配邮件通道`);
-        }
-        if (verified.emailChannel.status !== 'active') {
-          throw new BadRequestException(
-            `邮件通道 ${verified.emailChannel.name} 当前状态为 ${verified.emailChannel.status}`,
-          );
-        }
-        channelId = verified.emailChannel.id;
-        domainEmailChannel.set(domain, channelId);
-      }
-      enrichedSenders.push({ ...s, emailChannelId: channelId });
-    }
+    const enrichedSenders = await this.resolveCampaignSenders(accountId, senders, 'send');
 
     // Audience resolution & recipient materialisation strategy:
     //

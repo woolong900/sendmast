@@ -763,9 +763,11 @@ export class IntegrationsService {
       }));
     }
 
+    const willBeEnabled = input.enabled ?? existing?.enabled ?? false;
+
     // Enabling requires a deliverable config: a verified sender + a template
     // (every round for abandoned_cart, the single template otherwise).
-    if (input.enabled) {
+    if (willBeEnabled) {
       // No usable store binding → the flow could never fire (no webhooks).
       // Revoked = unbound; expired = token dead until re-authorized.
       if (conn.status !== 'active') {
@@ -777,6 +779,7 @@ export class IntegrationsService {
       }
       const fromEmail = rest.fromEmail ?? existing?.fromEmail;
       if (!fromEmail) throw new BadRequestException('启用前请先选择发件邮箱');
+      await this.assertTransactionalSender(accountId, fromEmail);
       if (isAbandoned) {
         if (!effectiveSteps?.length || effectiveSteps.some((s) => !(s.html ?? s.templateId))) {
           throw new BadRequestException('启用前请为每一轮设置邮件内容');
@@ -856,6 +859,35 @@ export class IntegrationsService {
         })
       : [];
     return toAutomationView(updated, stepRows, await this.automationStats(accountId, updated.id));
+  }
+
+  private async assertTransactionalSender(accountId: string, fromEmail: string): Promise<void> {
+    const domain = fromEmail.split('@')[1]?.toLowerCase();
+    if (!domain) throw new BadRequestException(`发件邮箱 ${fromEmail} 格式不正确`);
+    const senderDomain = await this.prisma.senderDomain.findFirst({
+      where: { accountId, domain, status: 'verified' },
+      include: { emailChannel: true },
+    });
+    if (!senderDomain) throw new BadRequestException(`发件域名 ${domain} 尚未验证`);
+    if (senderDomain.emailChannel.status !== 'active') {
+      throw new BadRequestException(
+        `邮件通道 ${senderDomain.emailChannel.name} 当前状态为 ${senderDomain.emailChannel.status}`,
+      );
+    }
+    const link = await this.prisma.accountEmailChannel.findUnique({
+      where: {
+        accountId_emailChannelId: {
+          accountId,
+          emailChannelId: senderDomain.emailChannelId,
+        },
+      },
+      select: { allowTransactional: true },
+    });
+    if (!link?.allowTransactional) {
+      throw new BadRequestException(
+        `邮件通道 ${senderDomain.emailChannel.name} 未开启事务场景，不能发送自动化事务邮件`,
+      );
+    }
   }
 
   /**

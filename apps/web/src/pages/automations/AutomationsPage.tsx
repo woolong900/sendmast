@@ -218,7 +218,10 @@ function FlowList({
   });
 
   const senderOptions = useMemo(() => {
-    const verified = domains.data?.filter((d) => d.status === 'verified') ?? [];
+    const verified =
+      domains.data?.filter(
+        (d) => d.status === 'verified' && d.emailChannel?.allowTransactional !== false,
+      ) ?? [];
     return verified.flatMap((d) =>
       d.senderUsernames.map((u) => ({
         value: u.fullAddress,

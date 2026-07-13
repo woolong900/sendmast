@@ -327,10 +327,12 @@ model Account {
 /// a partial unique index in migration SQL) and is used as the default when
 /// adding a sender domain.
 model AccountEmailChannel {
-  accountId      String   @map("account_id") @db.Uuid
-  emailChannelId String   @map("email_channel_id") @db.Uuid
-  isPrimary      Boolean  @default(false) @map("is_primary")
-  createdAt      DateTime @default(now()) @map("created_at")
+  accountId            String   @map("account_id") @db.Uuid
+  emailChannelId       String   @map("email_channel_id") @db.Uuid
+  isPrimary            Boolean  @default(false) @map("is_primary")
+  allowMarketing       Boolean  @default(true) @map("allow_marketing")
+  allowTransactional   Boolean  @default(true) @map("allow_transactional")
+  createdAt            DateTime @default(now()) @map("created_at")
 
   account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
   emailChannel EmailChannel @relation(fields: [emailChannelId], references: [id], onDelete: Restrict)

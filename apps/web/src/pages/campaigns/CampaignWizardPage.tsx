@@ -377,7 +377,10 @@ export function CampaignWizardPage() {
   const quotaExhausted = quota.data !== undefined && quotaRemaining <= 0;
 
   const verifiedDomains = useMemo(
-    () => domains.data?.filter((d) => d.status === 'verified') ?? [],
+    () =>
+      domains.data?.filter(
+        (d) => d.status === 'verified' && d.emailChannel?.allowMarketing !== false,
+      ) ?? [],
     [domains.data],
   );
 

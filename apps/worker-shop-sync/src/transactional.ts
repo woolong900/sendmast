@@ -65,14 +65,25 @@ async function resolveEmailChannelId(
   prisma: PrismaClient,
   accountId: string,
   fromEmail: string,
-): Promise<string | null> {
+): Promise<{ emailChannelId: string } | { error: string }> {
   const domain = fromEmail.split('@')[1]?.toLowerCase();
-  if (!domain) return null;
+  if (!domain) return { error: `发件邮箱 ${fromEmail} 格式不正确` };
   const sd = await prisma.senderDomain.findFirst({
-    where: { accountId, domain },
-    select: { emailChannelId: true },
+    where: { accountId, domain, status: 'verified' },
+    include: { emailChannel: { select: { id: true, name: true, status: true } } },
   });
-  return sd?.emailChannelId ?? null;
+  if (!sd) return { error: `发件域名 ${domain} 未在本账户验证` };
+  if (sd.emailChannel.status !== 'active') {
+    return { error: `邮件通道 ${sd.emailChannel.name} 当前状态为 ${sd.emailChannel.status}` };
+  }
+  const link = await prisma.accountEmailChannel.findUnique({
+    where: { accountId_emailChannelId: { accountId, emailChannelId: sd.emailChannelId } },
+    select: { allowTransactional: true },
+  });
+  if (!link?.allowTransactional) {
+    return { error: `邮件通道 ${sd.emailChannel.name} 未开启事务场景，不能发送自动化事务邮件` };
+  }
+  return { emailChannelId: sd.emailChannelId };
 }
 
 /**
@@ -115,21 +126,22 @@ export async function enqueueTransactional(
     throw err;
   }
 
-  const emailChannelId = await resolveEmailChannelId(
+  const resolved = await resolveEmailChannelId(
     prisma,
     params.accountId,
     params.fromEmail,
   );
-  if (!emailChannelId) {
+  if ('error' in resolved) {
     await prisma.shopAutomationSend.update({
       where: { id: sendId },
       data: {
         status: 'failed',
-        errorMessage: `发件域名 ${params.fromEmail.split('@')[1] ?? ''} 未在本账户验证`,
+        errorMessage: resolved.error,
       },
     });
     return null;
   }
+  const { emailChannelId } = resolved;
 
   await prisma.shopAutomationSend.update({
     where: { id: sendId },

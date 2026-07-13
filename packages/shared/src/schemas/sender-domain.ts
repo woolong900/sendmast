@@ -33,6 +33,8 @@ export interface TenantEmailChannelView {
   name: string;
   provider: 'acs' | 'mailgun';
   isPrimary: boolean;
+  allowMarketing: boolean;
+  allowTransactional: boolean;
 }
 
 /**
@@ -94,7 +96,13 @@ export interface SenderDomainView {
   provisioningError: string | null;
   emailChannelId: string;
   /** The sending channel this domain is bound to (name shown in the domain list). */
-  emailChannel: { id: string; name: string; provider?: 'acs' | 'mailgun' } | null;
+  emailChannel: {
+    id: string;
+    name: string;
+    provider?: 'acs' | 'mailgun';
+    allowMarketing?: boolean;
+    allowTransactional?: boolean;
+  } | null;
   /**
    * DNS records the customer should add. Empty while `status === 'provisioning'`
    * (Azure hasn't returned them yet); populated once provisioning succeeds.

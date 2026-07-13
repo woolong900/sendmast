@@ -95,14 +95,30 @@ export interface EmailChannelView {
  */
 export const AssignEmailChannelsSchema = z
   .object({
-    emailChannelIds: z.array(z.string().uuid()).max(50),
+    emailChannelIds: z.array(z.string().uuid()).max(50).optional(),
+    emailChannels: z
+      .array(
+        z
+          .object({
+            id: z.string().uuid(),
+            allowMarketing: z.boolean().default(true),
+            allowTransactional: z.boolean().default(true),
+          })
+          .refine((v) => v.allowMarketing || v.allowTransactional, {
+            message: '邮件通道至少需要选择一个可用场景',
+          }),
+      )
+      .max(50)
+      .optional(),
     primaryEmailChannelId: z.string().uuid().nullable(),
   })
   .refine(
-    (v) =>
-      v.emailChannelIds.length === 0
+    (v) => {
+      const ids = v.emailChannels?.map((a) => a.id) ?? v.emailChannelIds ?? [];
+      return ids.length === 0
         ? v.primaryEmailChannelId === null
-        : v.primaryEmailChannelId !== null && v.emailChannelIds.includes(v.primaryEmailChannelId),
+        : v.primaryEmailChannelId !== null && ids.includes(v.primaryEmailChannelId);
+    },
     { message: '主邮件通道必须是已分配集合中的一个' },
   );
 export type AssignEmailChannelsInput = z.infer<typeof AssignEmailChannelsSchema>;
@@ -114,6 +130,8 @@ export interface AssignedEmailChannelView {
   provider: EmailChannelProviderValue;
   status: EmailChannelStatusValue;
   isPrimary: boolean;
+  allowMarketing: boolean;
+  allowTransactional: boolean;
 }
 
 export interface AdminAccountView {

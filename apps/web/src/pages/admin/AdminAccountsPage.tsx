@@ -12,6 +12,7 @@ import { useAuth } from '@/store/auth';
 import {
   ACCOUNT_ROLES,
   type AccountRole,
+  type AssignedEmailChannelView,
   type EmailChannelView,
   type AdminAccountView,
   type AuthTokens,
@@ -180,7 +181,11 @@ export function AdminAccountsPage() {
   }
 
   async function handleSaveEdit(
-    emailChannelIds: string[],
+    emailChannels: Array<{
+      id: string;
+      allowMarketing: boolean;
+      allowTransactional: boolean;
+    }>,
     primaryEmailChannelId: string | null,
     remaining: number,
     role: AccountRole,
@@ -189,7 +194,7 @@ export function AdminAccountsPage() {
     setSavingEdit(true);
     try {
       await api.put(`/api/admin/accounts/${editingAccount.id}/email-channels`, {
-        emailChannelIds,
+        emailChannels,
         primaryEmailChannelId,
       });
       await api.patch(`/api/admin/accounts/${editingAccount.id}/quota`, { remaining });
@@ -211,19 +216,20 @@ export function AdminAccountsPage() {
       <div>
         <h1 className="text-xl font-semibold">租户管理</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          管理租户状态、分配邮件通道(可多选,标记一个为主)、设置剩余发送额度。封禁后该租户所有写操作会被拦截;额度 0 时活动会立即停止发送。
+          管理租户状态、分配邮件通道(可多选,标记一个为主并设置营销/事务用途)、设置剩余发送额度。封禁后该租户所有写操作会被拦截;额度 0 时活动会立即停止发送。
         </p>
       </div>
 
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[940px] text-sm">
+          <table className="w-full min-w-[1060px] text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">租户</th>
                 <th className="px-4 py-3 font-medium">状态</th>
                 <th className="px-4 py-3 font-medium">角色</th>
+                <th className="px-4 py-3 font-medium">邮件通道</th>
                 <th className="px-4 py-3 font-medium">已添加域名</th>
                 <th className="px-4 py-3 font-medium">剩余发送额度</th>
                 <th className="px-4 py-3 font-medium">注册时间</th>
@@ -231,9 +237,9 @@ export function AdminAccountsPage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading && <TableSkeletonRows columns={7} />}
+              {isLoading && <TableSkeletonRows columns={8} />}
               {!isLoading && accounts && accounts.length === 0 && (
-                <EmptyStateRow colSpan={7} />
+                <EmptyStateRow colSpan={8} />
               )}
               {accounts?.map((a) => (
                 <tr key={a.id} className="border-b last:border-0">
@@ -256,6 +262,9 @@ export function AdminAccountsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <RoleBadge role={a.role} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <EmailChannelSummary channels={a.emailChannels} />
                   </td>
                   <td className="px-4 py-3">
                     <Badge variant={a.senderDomainCount > 0 ? 'default' : 'muted'}>
@@ -351,6 +360,35 @@ export function AdminAccountsPage() {
 }
 
 /** 邮件通道列:只展示首个(优先主账号),绑定多个时追加省略号,悬浮显示全部。 */
+function EmailChannelSummary({ channels }: { channels: AssignedEmailChannelView[] }) {
+  if (channels.length === 0) return <span className="text-xs text-muted-foreground">未分配</span>;
+  const sorted = [...channels].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
+  const first = sorted[0];
+  const title = sorted
+    .map((c) => `${c.name}${c.isPrimary ? ' · 主' : ''} · ${usageLabel(c)}`)
+    .join('\n');
+  return (
+    <div className="max-w-[220px]" title={title}>
+      <div className="truncate text-sm font-medium">
+        {first.name}
+        {first.isPrimary ? ' · 主' : ''}
+        {channels.length > 1 ? ` +${channels.length - 1}` : ''}
+      </div>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {first.allowMarketing && <Badge variant="muted">营销</Badge>}
+        {first.allowTransactional && <Badge variant="muted">事务</Badge>}
+      </div>
+    </div>
+  );
+}
+
+function usageLabel(channel: Pick<AssignedEmailChannelView, 'allowMarketing' | 'allowTransactional'>) {
+  if (channel.allowMarketing && channel.allowTransactional) return '营销/事务';
+  if (channel.allowMarketing) return '营销';
+  if (channel.allowTransactional) return '事务';
+  return '未启用';
+}
+
 function AccountEditModal({
   account,
   emailChannels,
@@ -363,7 +401,11 @@ function AccountEditModal({
   pending: boolean;
   onClose: () => void;
   onSave: (
-    emailChannelIds: string[],
+    emailChannels: Array<{
+      id: string;
+      allowMarketing: boolean;
+      allowTransactional: boolean;
+    }>,
     primaryEmailChannelId: string | null,
     remaining: number,
     role: AccountRole,
@@ -377,6 +419,19 @@ function AccountEditModal({
   );
   const [quota, setQuota] = useState<string>(() => String(account.sendQuotaRemaining));
   const [role, setRole] = useState<AccountRole>(() => account.role);
+  const [usage, setUsage] = useState<
+    Record<string, { allowMarketing: boolean; allowTransactional: boolean }>
+  >(() =>
+    Object.fromEntries(
+      account.emailChannels.map((a) => [
+        a.id,
+        {
+          allowMarketing: a.allowMarketing,
+          allowTransactional: a.allowTransactional,
+        },
+      ]),
+    ),
+  );
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -387,17 +442,42 @@ function AccountEditModal({
       } else {
         next.add(id);
         if (primary === null) setPrimary(id);
+        setUsage((u) => ({
+          ...u,
+          [id]: u[id] ?? { allowMarketing: true, allowTransactional: true },
+        }));
       }
       return next;
     });
   }
 
+  function toggleUsage(id: string, key: 'allowMarketing' | 'allowTransactional') {
+    setUsage((prev) => {
+      const current = prev[id] ?? { allowMarketing: true, allowTransactional: true };
+      const next = { ...current, [key]: !current[key] };
+      return { ...prev, [id]: next };
+    });
+  }
+
   const ids = [...selected];
   const channelValid =
-    ids.length === 0 ? primary === null : primary !== null && selected.has(primary);
+    ids.length === 0
+      ? primary === null
+      : primary !== null &&
+        selected.has(primary) &&
+        ids.every((id) => {
+          const u = usage[id] ?? { allowMarketing: true, allowTransactional: true };
+          return u.allowMarketing || u.allowTransactional;
+        });
   const quotaNum = Number(quota);
   const quotaValid = Number.isInteger(quotaNum) && quotaNum >= 0;
   const valid = channelValid && quotaValid;
+  const assignments: Array<Pick<AssignedEmailChannelView, 'id' | 'allowMarketing' | 'allowTransactional'>> =
+    ids.map((id) => ({
+      id,
+      allowMarketing: usage[id]?.allowMarketing ?? true,
+      allowTransactional: usage[id]?.allowTransactional ?? true,
+    }));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -439,20 +519,45 @@ function AccountEditModal({
                         <span className="text-xs text-muted-foreground">({channel.status})</span>
                       )}
                     </label>
-                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <input
-                        type="radio"
-                        name="primary-channel"
-                        checked={primary === channel.id}
-                        disabled={pending || !checked}
-                        onChange={() => setPrimary(channel.id)}
-                      />
-                      主
-                    </label>
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                      <label className="flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={usage[channel.id]?.allowMarketing ?? checked}
+                          disabled={pending || !checked}
+                          onChange={() => toggleUsage(channel.id, 'allowMarketing')}
+                        />
+                        营销
+                      </label>
+                      <label className="flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={usage[channel.id]?.allowTransactional ?? checked}
+                          disabled={pending || !checked}
+                          onChange={() => toggleUsage(channel.id, 'allowTransactional')}
+                        />
+                        事务
+                      </label>
+                      <label className="flex items-center gap-1">
+                        <input
+                          type="radio"
+                          name="primary-channel"
+                          checked={primary === channel.id}
+                          disabled={pending || !checked}
+                          onChange={() => setPrimary(channel.id)}
+                        />
+                        主
+                      </label>
+                    </div>
                   </div>
                 );
               })}
             </div>
+            {!channelValid && ids.length > 0 && (
+              <p className="mt-1 text-xs text-destructive">
+                每个已分配通道至少需要勾选一个可用场景，并指定一个主通道。
+              </p>
+            )}
           </div>
 
           <div>
@@ -506,7 +611,7 @@ function AccountEditModal({
               取消
             </Button>
             <Button
-              onClick={() => onSave(ids, primary, quotaNum, role)}
+              onClick={() => onSave(assignments, primary, quotaNum, role)}
               disabled={pending || !valid}
             >
               {pending ? '保存中…' : '保存'}
