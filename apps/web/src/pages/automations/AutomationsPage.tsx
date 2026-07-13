@@ -388,9 +388,7 @@ function EmailThumb({
       onClick={onEdit}
       className="group relative block h-full min-h-[160px] w-full overflow-hidden rounded-xl border bg-muted/30 text-left shadow-sm"
     >
-      {thumbnail ? (
-        <img src={thumbnail} alt="" className="h-full w-full object-cover object-top" />
-      ) : html ? (
+      {html ? (
         <iframe
           title="email-thumb"
           srcDoc={applyMergePreviewSamples(html)}
@@ -398,6 +396,8 @@ function EmailThumb({
           scrolling="no"
           className="pointer-events-none h-[300%] w-[300%] origin-top-left scale-[0.333] border-0 bg-white"
         />
+      ) : thumbnail ? (
+        <img src={thumbnail} alt="" className="h-full w-full object-cover object-top" />
       ) : (
         <div className="flex h-full items-center justify-center px-3 text-center text-xs text-muted-foreground">
           点击设置邮件内容

@@ -127,11 +127,5 @@ export function compilePreviewHtml(values: IEmailTemplate): string {
 }
 
 export function compileThumbnailHtml(values: IEmailTemplate): string {
-  const mjml = JsonToMjml({
-    data: values.content,
-    mode: 'testing',
-    context: values.content,
-    idx: 'content',
-  });
-  return applyMergePreviewSamples(mjml2html(mjml).html);
+  return compileTemplateHtml(values);
 }
