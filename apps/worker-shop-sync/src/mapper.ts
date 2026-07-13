@@ -64,6 +64,33 @@ function pickDate(obj: Json, keys: string[]): Date {
   return new Date();
 }
 
+function pickPositiveDate(obj: Json, keys: string[]): Date | undefined {
+  for (const k of keys) {
+    const raw = obj[k];
+    if (raw == null) continue;
+    const text = typeof raw === 'string' ? raw.trim() : raw;
+    if (text === '') continue;
+    const n = Number(text);
+    const d =
+      !Number.isNaN(n) && n > 0
+        ? new Date(n < 1e12 ? n * 1000 : n)
+        : typeof text === 'string'
+          ? new Date(text)
+          : undefined;
+    if (d && !Number.isNaN(d.getTime())) return d;
+  }
+  return undefined;
+}
+
+function pickOrderTime(o: Json): Date {
+  // Shopyy paid events carry `pay_at` as the actual conversion timestamp.
+  // Unpaid create events report `pay_at=0`, so fall back to create/order time.
+  return (
+    pickPositiveDate(o, ['pay_at', 'paid_at', 'paidAt']) ??
+    pickDate(o, ['created_at', 'createdAt', 'order_time', 'orderTime', 'updated_at'])
+  );
+}
+
 export interface NormalizedOrder {
   externalOrderId: string;
   orderNo?: string;
@@ -309,15 +336,7 @@ export function mapOrder(payload: Json): NormalizedOrder | null {
       ]) ?? 0,
     currency: pickStr(o, ['currency', 'currency_code', 'currencyCode']) ?? 'USD',
     status: pickStr(o, ['status', 'financial_status', 'order_status', 'state']) ?? 'paid',
-    orderTime: pickDate(o, [
-      'paid_at',
-      'paidAt',
-      'created_at',
-      'createdAt',
-      'order_time',
-      'orderTime',
-      'updated_at',
-    ]),
+    orderTime: pickOrderTime(o),
     trackingUrl: pickTrackingUrl(o),
     trackingNumber: pickTrackingNumber(o),
     payUrl: pickRecoveryUrl(o),
