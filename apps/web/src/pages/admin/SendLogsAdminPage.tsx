@@ -191,73 +191,73 @@ export function SendLogsAdminPage() {
             </div>
           </div>
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[1120px] text-sm">
-            <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">时间</th>
-                <th className="px-4 py-3 font-medium">租户</th>
-                <th className="px-4 py-3 font-medium">通道</th>
-                <th className="px-4 py-3 font-medium">来源</th>
-                <th className="px-4 py-3 font-medium">发件人</th>
-                <th className="px-4 py-3 font-medium">收件人</th>
-                <th className="px-4 py-3 font-medium">状态</th>
-                <th className="px-4 py-3 font-medium">耗时</th>
-                <th className="px-4 py-3 font-medium">message id</th>
-                <th className="px-4 py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && <TableSkeletonRows columns={10} cellClassName="px-4 py-3" />}
-              {!isLoading && data?.rows.length === 0 && <EmptyStateRow colSpan={10} />}
-              {data?.rows.map((r) => (
-                <tr
-                  key={r.id}
-                  className="cursor-pointer border-b last:border-0 hover:bg-muted/30"
-                  onClick={() => setDetail(r)}
-                >
-                  <td className="px-4 py-2 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                    {formatDateTime(r.sentAt)}
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="font-medium">{r.account.name}</div>
-                    <div className="text-xs text-muted-foreground">{r.account.slug}</div>
-                  </td>
-                  <td className="px-4 py-2 text-muted-foreground">
-                    {r.emailChannel?.name ?? <span className="opacity-60">— 已删除</span>}
-                  </td>
-                  <td className="px-4 py-2">
-                    <Badge variant={r.source === 'automation' ? 'warning' : 'muted'}>
-                      {r.source === 'automation' ? '自动化' : '营销活动'}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">{r.fromAddress}</td>
-                  <td className="px-4 py-2 text-xs">{r.toAddress}</td>
-                  <td className="px-4 py-2">
-                    {r.ok ? (
-                      <Badge variant="success">成功</Badge>
-                    ) : (
-                      <Badge variant="danger">{r.providerStatus ?? '失败'}</Badge>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-xs tabular-nums text-muted-foreground">
-                    {r.latencyMs != null ? `${r.latencyMs} ms` : '—'}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-[11px] text-muted-foreground">
-                    {r.messageId ? (
-                      <span title={r.messageId}>{r.messageId.slice(0, 12)}…</span>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <Button size="sm" variant="ghost">
-                      查看
-                    </Button>
-                  </td>
+            <table className="w-full min-w-[1120px] text-sm">
+              <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 font-medium">时间</th>
+                  <th className="px-4 py-3 font-medium">租户</th>
+                  <th className="px-4 py-3 font-medium">通道</th>
+                  <th className="px-4 py-3 font-medium">来源</th>
+                  <th className="px-4 py-3 font-medium">发件人</th>
+                  <th className="px-4 py-3 font-medium">收件人</th>
+                  <th className="px-4 py-3 font-medium">状态</th>
+                  <th className="px-4 py-3 font-medium">耗时</th>
+                  <th className="px-4 py-3 font-medium">message id</th>
+                  <th className="px-4 py-3"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {isLoading && <TableSkeletonRows columns={10} cellClassName="px-4 py-3" />}
+                {!isLoading && data?.rows.length === 0 && <EmptyStateRow colSpan={10} />}
+                {data?.rows.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="cursor-pointer border-b last:border-0 hover:bg-muted/30"
+                    onClick={() => setDetail(r)}
+                  >
+                    <td className="px-4 py-2 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                      {formatDateTime(r.sentAt)}
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="font-medium">{r.account.name}</div>
+                      <div className="text-xs text-muted-foreground">{r.account.slug}</div>
+                    </td>
+                    <td className="px-4 py-2 text-muted-foreground">
+                      {r.emailChannel?.name ?? <span className="opacity-60">— 已删除</span>}
+                    </td>
+                    <td className="px-4 py-2">
+                      <Badge variant={r.source === 'automation' ? 'warning' : 'muted'}>
+                        {r.source === 'automation' ? '自动化' : '营销活动'}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">{r.fromAddress}</td>
+                    <td className="px-4 py-2 text-xs">{r.toAddress}</td>
+                    <td className="px-4 py-2">
+                      {r.ok ? (
+                        <Badge variant="success">成功</Badge>
+                      ) : (
+                        <Badge variant="danger">{r.providerStatus ?? '失败'}</Badge>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-xs tabular-nums text-muted-foreground">
+                      {r.latencyMs != null ? `${r.latencyMs} ms` : '—'}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-[11px] text-muted-foreground">
+                      {r.messageId ? (
+                        <span title={r.messageId}>{r.messageId.slice(0, 12)}…</span>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <Button size="sm" variant="ghost">
+                        查看
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
           {(data?.total ?? 0) > 0 && (
             <div className="flex items-center justify-end overflow-x-auto border-t px-4 py-3">
@@ -293,16 +293,17 @@ function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void 
     queryFn: async () => (await api.get(`/api/admin/send-logs/${row.id}`)).data,
   });
   const content = detail?.content;
+  const isAutomationLog = row.source === 'automation';
   const contentSourceLabel =
     content?.source === 'send_log'
       ? '最终发送内容'
       : content?.source === 'automation_send'
-      ? '自动化发送快照'
-      : content?.source === 'automation'
-        ? '自动化配置'
-        : content?.source === 'campaign'
-          ? '营销活动'
-          : '—';
+        ? '自动化发送快照'
+        : content?.source === 'automation'
+          ? '自动化配置'
+          : content?.source === 'campaign'
+            ? '营销活动'
+            : '—';
 
   return (
     <div
@@ -392,6 +393,10 @@ function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void 
                   srcDoc={content.html}
                   className="h-[520px] w-full rounded-md bg-white"
                 />
+              ) : isAutomationLog ? (
+                <div className="flex h-32 items-center justify-center rounded-md bg-background px-4 text-center text-sm text-muted-foreground">
+                  自动化邮件不在发送日志中保存完整内容
+                </div>
               ) : (
                 <div className="flex h-32 items-center justify-center rounded-md bg-background text-sm text-muted-foreground">
                   未找到邮件内容

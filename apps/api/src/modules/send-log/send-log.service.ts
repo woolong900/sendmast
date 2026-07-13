@@ -76,11 +76,10 @@ export class SendLogService {
             type: true,
             subject: true,
             preheader: true,
-            html: true,
             shopConnection: { select: { shopName: true } },
           },
         },
-        automationSend: { select: { subject: true, preheader: true, html: true } },
+        automationSend: { select: { subject: true, preheader: true } },
       },
     });
     if (!row) throw new NotFoundException('发送日志不存在');
@@ -93,13 +92,27 @@ export class SendLogService {
 }
 
 function toContent(r: {
+  source: string;
   finalSubject: string | null;
   finalPreheader: string | null;
   finalHtml: string | null;
   campaign: { subject: string; preheader: string | null; html: string | null } | null;
-  automation: { subject: string | null; preheader: string | null; html: string | null } | null;
-  automationSend: { subject: string | null; preheader: string | null; html: string | null } | null;
+  automation: { subject: string | null; preheader: string | null } | null;
+  automationSend: { subject: string | null; preheader: string | null } | null;
 }): SendLogContentView {
+  if (r.source === 'automation') {
+    return {
+      subject: r.finalSubject ?? r.automationSend?.subject ?? r.automation?.subject ?? null,
+      preheader: r.finalPreheader ?? r.automationSend?.preheader ?? r.automation?.preheader ?? null,
+      html: null,
+      source:
+        r.finalSubject || r.finalPreheader
+          ? 'send_log'
+          : r.automationSend
+            ? 'automation_send'
+            : 'automation',
+    };
+  }
   if (r.finalHtml || r.finalSubject || r.finalPreheader) {
     return {
       subject: r.finalSubject,
@@ -108,19 +121,19 @@ function toContent(r: {
       source: 'send_log',
     };
   }
-  if (r.automationSend?.html || r.automationSend?.subject) {
+  if (r.automationSend?.subject) {
     return {
       subject: r.automationSend.subject,
       preheader: r.automationSend.preheader,
-      html: r.automationSend.html,
+      html: null,
       source: 'automation_send',
     };
   }
-  if (r.automation?.html || r.automation?.subject) {
+  if (r.automation?.subject) {
     return {
       subject: r.automation.subject,
       preheader: r.automation.preheader,
-      html: r.automation.html,
+      html: null,
       source: 'automation',
     };
   }

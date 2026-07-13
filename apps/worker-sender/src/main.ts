@@ -1098,8 +1098,8 @@ async function runFlowSend(job: Job<SendJobData>) {
   });
 
   // Unified provider attempt log: automation sends appear beside campaign sends in
-  // the platform-admin send log. Best-effort so observability cannot block the
-  // send state transition or BullMQ acknowledgement.
+  // the platform-admin send log. Keep only metadata here; the full automation
+  // body belongs to the automation send snapshot, not the admin send log.
   try {
     await prisma.sendLog.create({
       data: {
@@ -1120,7 +1120,6 @@ async function runFlowSend(job: Job<SendJobData>) {
         responsePayload: toJsonInput(result.providerResponse),
         finalSubject: subjectOut,
         finalPreheader: preheaderOut,
-        finalHtml: html,
       },
     });
   } catch (logErr) {
