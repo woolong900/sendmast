@@ -258,6 +258,11 @@ export class AccountAdminController {
 
     const byId = new Map(assignments.map((a) => [a.emailChannelId, a]));
     const ids = Array.from(byId.keys());
+    const existingLinks = await this.prisma.accountEmailChannel.findMany({
+      where: { accountId: id },
+      select: { emailChannelId: true },
+    });
+    const existingEmailChannelIds = new Set(existingLinks.map((l) => l.emailChannelId));
     if (ids.length > 0) {
       const found = await this.prisma.emailChannel.findMany({
         where: { id: { in: ids } },
@@ -266,7 +271,9 @@ export class AccountAdminController {
       if (found.length !== ids.length) {
         throw new BadRequestException('包含不存在的邮件通道');
       }
-      const inactive = found.find((a) => a.status !== 'active');
+      const inactive = found.find(
+        (a) => a.status !== 'active' && !existingEmailChannelIds.has(a.id),
+      );
       if (inactive) {
         throw new BadRequestException(`邮件通道 ${inactive.id} 当前状态为 ${inactive.status}，无法分配`);
       }
