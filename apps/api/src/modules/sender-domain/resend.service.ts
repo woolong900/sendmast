@@ -40,9 +40,10 @@ export class ResendService {
     acct: EmailChannel,
     domainId: string,
   ): Promise<SenderDomainVerificationStates> {
-    await this.request(acct, `/domains/${encodeURIComponent(domainId)}/verify`, {
-      method: 'POST',
-    });
+    // Resend's POST /verify is not a harmless status refresh: calling it can
+    // move an already-verified domain back to pending while Resend rechecks
+    // DNS. The UI's "检查" button should only observe the current provider
+    // state, so use GET here.
     const json = await this.getDomain(acct, domainId);
     return this.toStates(json);
   }
@@ -149,7 +150,9 @@ export class ResendService {
   }
 }
 
-function aggregateStatuses(statuses: SenderDomainVerificationStatus[]): SenderDomainVerificationStatus {
+function aggregateStatuses(
+  statuses: SenderDomainVerificationStatus[],
+): SenderDomainVerificationStatus {
   if (statuses.length === 0) return 'Unknown';
   if (statuses.every((s) => s === 'Verified')) return 'Verified';
   if (statuses.some((s) => s === 'VerificationFailed')) return 'VerificationFailed';
