@@ -183,7 +183,7 @@ export class SenderDomainService {
             ? await this.resend.createDomain(emailChannel, domain)
             : await this.azure.createDomain(emailChannel, domain);
       const { records: providerRecords } = created;
-      const records = ensureDmarcRecord(providerRecords);
+      const records = recordsForProvider(emailChannel.provider, providerRecords);
       await this.prisma.senderDomain.update({
         where: { id: rowId },
         data: {
@@ -232,9 +232,8 @@ export class SenderDomainService {
       throw new BadRequestException('域名配置失败，请删除后重新添加。');
     }
 
-    // Always include platform-mandatory DMARC even when Azure didn't return it.
     const storedRecords = (row.verificationRecords as unknown as SenderDomainDnsRecord[]) ?? [];
-    const records = ensureDmarcRecord(storedRecords);
+    const records = recordsForProvider(row.emailChannel.provider, storedRecords);
     if (records.length !== storedRecords.length) {
       await this.prisma.senderDomain.update({
         where: { id: row.id },
@@ -272,7 +271,9 @@ export class SenderDomainService {
         ? await this.azure.getStates(row.emailChannel, row.domain)
         : states;
 
-    refreshed = await applyDmarcDnsVerification(row.domain, refreshed);
+    if (row.emailChannel.provider !== 'resend') {
+      refreshed = await applyDmarcDnsVerification(row.domain, refreshed);
+    }
 
     // "All verified" means every DNS record we showed the user is verified.
     // Using `recordKinds` (not RECORD_KINDS) keeps this aligned with the UI:
@@ -312,7 +313,10 @@ export class SenderDomainService {
         verifiedAt: allVerified ? row.verifiedAt ?? new Date() : row.verifiedAt,
         linkedAt,
       },
-      include: { senderUsernames: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        senderUsernames: { orderBy: { createdAt: 'asc' } },
+        emailChannel: { select: { id: true, name: true, provider: true } },
+      },
     });
     return this.toView(updated, updated.senderUsernames);
   }
@@ -468,14 +472,19 @@ export class SenderDomainService {
     },
     senderUsernames: SenderUsernameRow[] = [],
   ): SenderDomainView {
-    const records = ensureDmarcRecord(
+    const records = recordsForProvider(
+      row.emailChannel?.provider,
       (row.verificationRecords as unknown as SenderDomainDnsRecord[]) ?? [],
     );
     const states = (row.verificationStates as unknown as SenderDomainVerificationStates) ?? {};
     // A domain marked verified before we enforced DMARC must re-verify DMARC
     // before the UI treats it as fully ready (step 3+ in the add-domain wizard).
     let status = row.status;
-    if (status === 'verified' && states.DMARC?.status !== 'Verified') {
+    if (
+      status === 'verified' &&
+      row.emailChannel?.provider !== 'resend' &&
+      states.DMARC?.status !== 'Verified'
+    ) {
       status = 'pending';
     }
     return {
@@ -542,4 +551,14 @@ export class SenderDomainService {
       createdAt: u.createdAt.toISOString(),
     };
   }
+}
+
+function recordsForProvider(
+  provider: string | undefined,
+  records: SenderDomainDnsRecord[],
+): SenderDomainDnsRecord[] {
+  if (provider === 'resend') {
+    return records.filter((record) => record.kind !== 'DMARC');
+  }
+  return ensureDmarcRecord(records);
 }
