@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const EmailChannelStatusSchema = z.enum(['active', 'suspended', 'retired']);
 export type EmailChannelStatusValue = z.infer<typeof EmailChannelStatusSchema>;
-export const EmailChannelProviderSchema = z.enum(['acs', 'mailgun']);
+export const EmailChannelProviderSchema = z.enum(['acs', 'mailgun', 'resend']);
 export type EmailChannelProviderValue = z.infer<typeof EmailChannelProviderSchema>;
 
 const EmailChannelBaseSchema = z.object({
@@ -26,6 +26,8 @@ const EmailChannelBaseSchema = z.object({
   mailgunApiKey: z.string().max(2000).optional().nullable(),
   mailgunApiBaseUrl: z.string().url().max(200).optional().nullable(),
   mailgunWebhookSigningKey: z.string().max(2000).optional().nullable(),
+  resendApiKey: z.string().max(2000).optional().nullable(),
+  resendApiBaseUrl: z.string().url().max(200).optional().nullable(),
 });
 
 function validateProviderConfig(
@@ -52,6 +54,9 @@ function validateProviderConfig(
   }
   if (v.provider === 'mailgun' && !v.mailgunApiKey?.trim()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['mailgunApiKey'], message: 'Required for Mailgun' });
+  }
+  if (v.provider === 'resend' && !v.resendApiKey?.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['resendApiKey'], message: 'Required for Resend' });
   }
 }
 
@@ -81,6 +86,8 @@ export interface EmailChannelView {
   mailgunApiKey: string | null;
   mailgunApiBaseUrl: string | null;
   mailgunWebhookSigningKey: string | null;
+  resendApiKey: string | null;
+  resendApiBaseUrl: string | null;
   /** Whether this account is the platform-wide default for new signups. */
   isDefault: boolean;
   senderDomainCount: number;

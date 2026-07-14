@@ -30,10 +30,12 @@ interface ClientCacheEntry {
   key: string;
 }
 
-const RECORD_KINDS: SenderDomainRecordKind[] = ['Domain', 'SPF', 'DKIM', 'DKIM2', 'DMARC'];
+type AzureRecordKind = Exclude<SenderDomainRecordKind, 'Tracking'>;
+
+const RECORD_KINDS: AzureRecordKind[] = ['Domain', 'SPF', 'DKIM', 'DKIM2', 'DMARC'];
 
 /** Map our shared `SenderDomainRecordKind` → the SDK's verificationType / verificationRecords keys. */
-const KIND_TO_SDK_VERIFY: Record<SenderDomainRecordKind, 'Domain' | 'SPF' | 'DKIM' | 'DKIM2' | 'DMARC'> =
+const KIND_TO_SDK_VERIFY: Record<AzureRecordKind, 'Domain' | 'SPF' | 'DKIM' | 'DKIM2' | 'DMARC'> =
   {
     Domain: 'Domain',
     SPF: 'SPF',
@@ -106,6 +108,7 @@ export class AzureAcsService {
     domain: string,
     kind: SenderDomainRecordKind,
   ): Promise<void> {
+    if (kind === 'Tracking') return;
     const client = this.clientFor(emailChannel);
     try {
       await client.domains.beginInitiateVerification(

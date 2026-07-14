@@ -41,11 +41,14 @@ const EMPTY: FormState = {
   mailgunApiKey: '',
   mailgunApiBaseUrl: 'https://api.mailgun.net',
   mailgunWebhookSigningKey: '',
+  resendApiKey: '',
+  resendApiBaseUrl: 'https://api.resend.com',
 };
 
 const PROVIDER_OPTIONS: Array<{ value: EmailChannelProviderValue; label: string }> = [
   { value: 'acs', label: 'Azure ACS' },
   { value: 'mailgun', label: 'Mailgun API' },
+  { value: 'resend', label: 'Resend API' },
 ];
 
 const STATUS_LABELS: Record<EmailChannelStatusValue, string> = {
@@ -91,7 +94,7 @@ export function EmailChannelListPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-semibold">邮件通道</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            管理 Azure ACS / Mailgun API 发送通道:发送配额 + 域名管理凭证。可将其中一个标记为默认,新注册的租户会自动绑定到默认通道。
+            管理 Azure ACS / Mailgun / Resend 发送通道:发送配额 + 域名管理凭证。可将其中一个标记为默认,新注册的租户会自动绑定到默认通道。
           </p>
         </div>
         <Button className="w-full sm:w-auto" onClick={() => setEditing({ ...EMPTY })}>
@@ -132,8 +135,8 @@ export function EmailChannelListPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <Badge variant={a.provider === 'mailgun' ? 'success' : 'muted'}>
-                      {a.provider === 'mailgun' ? 'Mailgun' : 'Azure ACS'}
+                    <Badge variant={a.provider === 'mailgun' ? 'success' : a.provider === 'resend' ? 'warning' : 'muted'}>
+                      {providerLabel(a.provider)}
                     </Badge>
                   </td>
                   <td className="px-4 py-3">
@@ -233,6 +236,8 @@ export function EmailChannelListPage() {
                             mailgunApiKey: full.mailgunApiKey ?? '',
                             mailgunApiBaseUrl: full.mailgunApiBaseUrl ?? 'https://api.mailgun.net',
                             mailgunWebhookSigningKey: full.mailgunWebhookSigningKey ?? '',
+                            resendApiKey: full.resendApiKey ?? '',
+                            resendApiBaseUrl: full.resendApiBaseUrl ?? 'https://api.resend.com',
                           });
                         }}
                       >
@@ -341,6 +346,8 @@ function AccountEditor({
         mailgunApiKey: form.mailgunApiKey?.trim() || null,
         mailgunApiBaseUrl: form.mailgunApiBaseUrl?.trim() || null,
         mailgunWebhookSigningKey: form.mailgunWebhookSigningKey?.trim() || null,
+        resendApiKey: form.resendApiKey?.trim() || null,
+        resendApiBaseUrl: form.resendApiBaseUrl?.trim() || null,
       };
       return isEdit
         ? api.patch(`/api/admin/email-channels/${state.id}`, body)
@@ -460,7 +467,7 @@ function AccountEditor({
                 </p>
               </div>
             </Section>
-          ) : (
+          ) : form.provider === 'mailgun' ? (
             <Section title="Mailgun API">
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">API Key</Label>
@@ -479,6 +486,17 @@ function AccountEditor({
                 <p className="mt-1 text-xs text-muted-foreground">
                   用于校验 Mailgun 推送到 /api/webhooks/mailgun 的事件签名。
                 </p>
+              </div>
+            </Section>
+          ) : (
+            <Section title="Resend API">
+              <div className="sm:col-span-2">
+                <Label className="mb-1.5 block">API Key</Label>
+                <Input type="password" value={form.resendApiKey ?? ''} onChange={(e) => setForm({ ...form, resendApiKey: e.target.value })} placeholder="re_..." />
+              </div>
+              <div className="sm:col-span-2">
+                <Label className="mb-1.5 block">API Base URL</Label>
+                <Input value={form.resendApiBaseUrl ?? ''} onChange={(e) => setForm({ ...form, resendApiBaseUrl: e.target.value })} placeholder="https://api.resend.com" />
               </div>
             </Section>
           )}
@@ -500,6 +518,12 @@ function AccountEditor({
       </div>
     </div>
   );
+}
+
+function providerLabel(provider: EmailChannelProviderValue): string {
+  if (provider === 'mailgun') return 'Mailgun';
+  if (provider === 'resend') return 'Resend';
+  return 'Azure ACS';
 }
 
 function Section({

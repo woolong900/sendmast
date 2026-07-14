@@ -407,6 +407,10 @@ model EmailChannel {
   mailgunApiKey                 String?            @map("mailgun_api_key") @db.Text
   mailgunApiBaseUrl             String?            @map("mailgun_api_base_url")
   mailgunWebhookSigningKey      String?            @map("mailgun_webhook_signing_key") @db.Text
+  /// Resend API settings. `resendApiBaseUrl` defaults to
+  /// https://api.resend.com and exists mainly for tests/proxies.
+  resendApiKey                  String?            @map("resend_api_key") @db.Text
+  resendApiBaseUrl              String?            @map("resend_api_base_url")
   /// Platform-wide default. New tenant signups get a primary
   /// AccountEmailChannel link to this channel. At most one row may be true at a
   /// time — enforced by a partial unique index defined in migration SQL
@@ -446,6 +450,7 @@ model SenderDomain {
   verificationRecords Json               @map("verification_records")
   // Latest verificationStates per record from the provider, refreshed on `verify`.
   verificationStates  Json?              @map("verification_states")
+  resendDomainId      String?            @map("resend_domain_id")
   provisioningError   String?            @map("provisioning_error") @db.Text
   status              SenderDomainStatus @default(pending)
   lastCheckedAt       DateTime?          @map("last_checked_at")

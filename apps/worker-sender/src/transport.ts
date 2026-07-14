@@ -80,6 +80,8 @@ function cacheKey(acct: EmailChannel): string {
     acct.azureClientSecret.slice(0, 8),
     acct.mailgunApiBaseUrl ?? '',
     acct.mailgunApiKey?.slice(0, 8) ?? '',
+    acct.resendApiBaseUrl ?? '',
+    acct.resendApiKey?.slice(0, 8) ?? '',
   ].join('|');
 }
 
@@ -101,6 +103,7 @@ export function getTransportForAccount(acct: EmailChannel): Promise<MailTranspor
 
 async function buildTransport(acct: EmailChannel): Promise<MailTransport> {
   if (acct.provider === 'mailgun') return buildMailgunTransport(acct);
+  if (acct.provider === 'resend') return buildResendTransport(acct);
   return buildEmailChannelTransport(acct);
 }
 
@@ -278,6 +281,78 @@ function buildMailgunTransport(acct: EmailChannel): MailTransport {
   };
 }
 
+function buildResendTransport(acct: EmailChannel): MailTransport {
+  if (!acct.resendApiKey) {
+    throw new Error(`Resend channel ${acct.name}: API Key is not configured`);
+  }
+  const base = (acct.resendApiBaseUrl || 'https://api.resend.com').replace(/\/+$/, '');
+
+  return {
+    async send(msg) {
+      const startedAt = Date.now();
+      try {
+        const headers = { ...(msg.headers ?? {}) };
+        if (msg.operationId) headers['X-SendMast-Operation-Id'] = msg.operationId;
+        const res = await withTimeout(
+          fetch(`${base}/emails`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${acct.resendApiKey}`,
+              'Content-Type': 'application/json',
+              'User-Agent': 'sendmast/1.0',
+              ...(msg.operationId ? { 'Idempotency-Key': msg.operationId } : {}),
+            },
+            body: JSON.stringify({
+              from: formatFrom(msg.from.name, msg.from.address),
+              to: [msg.to],
+              subject: msg.subject,
+              html: msg.html,
+              headers,
+              tags: resendTags(msg.headers ?? {}, msg.operationId),
+            }),
+          }),
+          SEND_TIMEOUT_MS,
+          'Resend send',
+        );
+        const text = await res.text();
+        const payload = parseJson(text);
+        const latencyMs = Date.now() - startedAt;
+        if (!res.ok) {
+          return {
+            ok: false,
+            messageId: '',
+            providerStatus: `Http${res.status}`,
+            latencyMs,
+            errorMessage: providerMessage(payload, text),
+            providerResponse: payload,
+          };
+        }
+        return {
+          ok: true,
+          messageId:
+            typeof payload === 'object' && payload && 'id' in payload
+              ? String((payload as { id?: unknown }).id ?? msg.operationId ?? '')
+              : msg.operationId ?? '',
+          providerStatus: 'Accepted',
+          latencyMs,
+          providerResponse: payload,
+        };
+      } catch (err) {
+        const latencyMs = Date.now() - startedAt;
+        return {
+          ok: false,
+          messageId: '',
+          providerStatus: 'Error',
+          latencyMs,
+          errorCode: (err as { code?: string })?.code,
+          errorMessage: err instanceof Error ? err.message : String(err),
+          providerResponse: serialiseError(err),
+        };
+      }
+    },
+  };
+}
+
 function mailgunVariables(
   headers: Record<string, string>,
   operationId?: string,
@@ -292,6 +367,22 @@ function mailgunVariables(
   if (headers['X-SendMast-Automation']) out.sendmast_automation_id = headers['X-SendMast-Automation'];
   if (operationId) out.sendmast_operation_id = operationId;
   return out;
+}
+
+function resendTags(
+  headers: Record<string, string>,
+  operationId?: string,
+): Array<{ name: string; value: string }> {
+  return Object.entries(mailgunVariables(headers, operationId))
+    .map(([name, value]) => ({
+      name: sanitiseResendTagPart(name),
+      value: sanitiseResendTagPart(value),
+    }))
+    .filter((tag) => tag.name && tag.value);
+}
+
+function sanitiseResendTagPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 256);
 }
 
 function formatFrom(name: string, address: string): string {
@@ -312,6 +403,9 @@ function parseJson(text: string): unknown {
 function providerMessage(payload: unknown, fallback: string): string {
   if (payload && typeof payload === 'object' && 'message' in payload) {
     return String((payload as { message?: unknown }).message ?? fallback);
+  }
+  if (payload && typeof payload === 'object' && 'name' in payload) {
+    return String((payload as { name?: unknown }).name ?? fallback);
   }
   return fallback;
 }

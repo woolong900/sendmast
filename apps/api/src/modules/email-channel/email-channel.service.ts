@@ -32,6 +32,8 @@ interface EmailChannelRow {
   mailgunApiKey: string | null;
   mailgunApiBaseUrl: string | null;
   mailgunWebhookSigningKey: string | null;
+  resendApiKey: string | null;
+  resendApiBaseUrl: string | null;
   isDefault: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -78,6 +80,8 @@ export class EmailChannelService {
         mailgunApiKey: input.mailgunApiKey?.trim() || null,
         mailgunApiBaseUrl: input.mailgunApiBaseUrl?.trim() || null,
         mailgunWebhookSigningKey: input.mailgunWebhookSigningKey?.trim() || null,
+        resendApiKey: input.resendApiKey?.trim() || null,
+        resendApiBaseUrl: input.resendApiBaseUrl?.trim() || null,
       },
     });
     return this.toView(row, 0, false);
@@ -107,6 +111,10 @@ export class EmailChannelService {
       data.mailgunApiBaseUrl = input.mailgunApiBaseUrl?.trim() || null;
     if (input.mailgunWebhookSigningKey !== undefined)
       data.mailgunWebhookSigningKey = input.mailgunWebhookSigningKey?.trim() || null;
+    if (input.resendApiKey !== undefined)
+      data.resendApiKey = input.resendApiKey?.trim() || null;
+    if (input.resendApiBaseUrl !== undefined)
+      data.resendApiBaseUrl = input.resendApiBaseUrl?.trim() || null;
 
     try {
       const row = await this.prisma.emailChannel.update({
@@ -202,6 +210,12 @@ export class EmailChannelService {
           ? redact(row.mailgunWebhookSigningKey)
           : row.mailgunWebhookSigningKey
         : null,
+      resendApiKey: row.resendApiKey
+        ? redactSecrets
+          ? redact(row.resendApiKey)
+          : row.resendApiKey
+        : null,
+      resendApiBaseUrl: row.resendApiBaseUrl,
       isDefault: row.isDefault,
       senderDomainCount,
       createdAt: row.createdAt.toISOString(),

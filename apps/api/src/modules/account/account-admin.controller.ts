@@ -67,7 +67,7 @@ export class AccountAdminController {
         (l): AssignedEmailChannelView => ({
           id: l.emailChannel.id,
           name: l.emailChannel.name,
-          provider: l.emailChannel.provider as 'acs' | 'mailgun',
+          provider: l.emailChannel.provider as 'acs' | 'mailgun' | 'resend',
           status: l.emailChannel.status as 'active' | 'suspended' | 'retired',
           isPrimary: l.isPrimary,
           allowMarketing: l.allowMarketing,
@@ -215,7 +215,7 @@ export class AccountAdminController {
     return links.map((l) => ({
       id: l.emailChannel.id,
       name: l.emailChannel.name,
-      provider: l.emailChannel.provider as 'acs' | 'mailgun',
+      provider: l.emailChannel.provider as 'acs' | 'mailgun' | 'resend',
       status: l.emailChannel.status as 'active' | 'suspended' | 'retired',
       isPrimary: l.isPrimary,
       allowMarketing: l.allowMarketing,

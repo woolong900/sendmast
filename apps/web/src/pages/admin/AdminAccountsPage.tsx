@@ -502,7 +502,11 @@ function AccountEditModal({
                       />
                       <span className="min-w-0 truncate">{channel.name}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">
-                        {channel.provider === 'mailgun' ? 'Mailgun' : 'Azure'}
+                        {channel.provider === 'mailgun'
+                          ? 'Mailgun'
+                          : channel.provider === 'resend'
+                            ? 'Resend'
+                            : 'Azure'}
                       </span>
                       {inactive && (
                         <span className="text-xs text-muted-foreground">({channel.status})</span>

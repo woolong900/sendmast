@@ -26,7 +26,14 @@ const RECORD_LABELS: Record<SenderDomainRecordKind, string> = {
   DKIM: 'DKIM',
   DKIM2: 'DKIM (备用)',
   DMARC: 'DMARC',
+  Tracking: 'Tracking',
 };
+
+function providerLabel(provider: TenantEmailChannelView['provider']): string {
+  if (provider === 'mailgun') return 'Mailgun';
+  if (provider === 'resend') return 'Resend';
+  return 'Azure';
+}
 
 export function SenderDomainAddPage() {
   const [params, setParams] = useSearchParams();
@@ -137,7 +144,7 @@ export function SenderDomainAddPage() {
                     options={
                       emailChannels.data?.map((a) => ({
                         value: a.id,
-                        label: `${a.name} · ${a.provider === 'mailgun' ? 'Mailgun' : 'Azure'}${
+                        label: `${a.name} · ${providerLabel(a.provider)}${
                           a.isPrimary ? ' · 主' : ''
                         }`,
                       })) ?? []
@@ -198,12 +205,12 @@ export function SenderDomainAddPage() {
               </h2>
               <p className="text-sm text-muted-foreground">
                 请在您的 DNS 服务商处（Cloudflare / 阿里云 / 腾讯云 等）添加以下{' '}
-                <b>全部</b> 记录（含 DMARC，均为必填）。DKIM 是 CNAME，其余是 TXT。DNS 生效通常需要几分钟到几小时。
+                <b>全部</b> 记录（含 DMARC，均为必填）。DNS 生效通常需要几分钟到几小时。
               </p>
 
               {view.records.map((rec) => (
                 <DnsRow
-                  key={rec.kind}
+                  key={`${rec.kind}-${rec.type}-${rec.name}`}
                   record={rec}
                   state={view.states[rec.kind]?.status}
                 />
@@ -584,6 +591,7 @@ function DnsRow({
           <div className="text-muted-foreground">值</div>
           <div className="mt-1 break-all font-mono">
             {record.value}
+            {record.priority !== undefined ? ` (priority ${record.priority})` : ''}
             <CopyIconButton copied={copied === 'value'} onClick={() => copy(record.value, 'value')} />
           </div>
         </div>

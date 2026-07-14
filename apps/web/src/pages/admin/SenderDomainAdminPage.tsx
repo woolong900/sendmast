@@ -14,7 +14,7 @@ interface AdminSenderDomain {
   verifiedAt: string | null;
   createdAt: string;
   account: { id: string; name: string; slug: string };
-  emailChannel: { id: string; name: string; provider: 'acs' | 'mailgun'; status: string } | null;
+  emailChannel: { id: string; name: string; provider: 'acs' | 'mailgun' | 'resend'; status: string } | null;
 }
 
 export function SenderDomainAdminPage() {
@@ -73,7 +73,11 @@ export function SenderDomainAdminPage() {
                       <div className="flex items-center gap-2">
                         <span>{d.emailChannel.name}</span>
                         <Badge variant="muted">
-                          {d.emailChannel.provider === 'mailgun' ? 'Mailgun' : 'Azure'}
+                          {d.emailChannel.provider === 'mailgun'
+                            ? 'Mailgun'
+                            : d.emailChannel.provider === 'resend'
+                              ? 'Resend'
+                              : 'Azure'}
                         </Badge>
                       </div>
                     ) : (

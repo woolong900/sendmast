@@ -8,6 +8,7 @@ import { Prisma, type EmailChannel } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AzureAcsService } from './azure-acs.service';
 import { MailgunService } from './mailgun.service';
+import { ResendService } from './resend.service';
 import { ensureDmarcRecord, applyDmarcDnsVerification } from './dmarc-record';
 import { normalizeSenderDomain } from '@sendmast/shared';
 import type {
@@ -35,6 +36,7 @@ export class SenderDomainService {
     private readonly prisma: PrismaService,
     private readonly azure: AzureAcsService,
     private readonly mailgun: MailgunService,
+    private readonly resend: ResendService,
   ) {}
 
   async list(accountId: string): Promise<SenderDomainView[]> {
@@ -85,7 +87,7 @@ export class SenderDomainService {
     return links.map((l) => ({
       id: l.emailChannel.id,
       name: l.emailChannel.name,
-      provider: l.emailChannel.provider as 'acs' | 'mailgun',
+      provider: l.emailChannel.provider as 'acs' | 'mailgun' | 'resend',
       isPrimary: l.isPrimary,
       allowMarketing: l.allowMarketing,
       allowTransactional: l.allowTransactional,
@@ -156,7 +158,7 @@ export class SenderDomainService {
       emailChannel: {
         id: emailChannel.id,
         name: emailChannel.name,
-        provider: emailChannel.provider as 'acs' | 'mailgun',
+        provider: emailChannel.provider as 'acs' | 'mailgun' | 'resend',
         allowMarketing: links.find((l) => l.emailChannelId === emailChannel.id)?.allowMarketing ?? true,
         allowTransactional:
           links.find((l) => l.emailChannelId === emailChannel.id)?.allowTransactional ?? true,
@@ -174,15 +176,22 @@ export class SenderDomainService {
     domain: string,
   ): Promise<void> {
     try {
-      const { records: providerRecords } =
+      const created =
         emailChannel.provider === 'mailgun'
           ? await this.mailgun.createDomain(emailChannel, domain)
-          : await this.azure.createDomain(emailChannel, domain);
+          : emailChannel.provider === 'resend'
+            ? await this.resend.createDomain(emailChannel, domain)
+            : await this.azure.createDomain(emailChannel, domain);
+      const { records: providerRecords } = created;
       const records = ensureDmarcRecord(providerRecords);
       await this.prisma.senderDomain.update({
         where: { id: rowId },
         data: {
           verificationRecords: records as unknown as Prisma.InputJsonValue,
+          resendDomainId:
+            'providerDomainId' in created
+              ? (created.providerDomainId as string | null)
+              : undefined,
           provisioningError: null,
           status: 'pending',
         },
@@ -239,7 +248,9 @@ export class SenderDomainService {
     const states =
       row.emailChannel.provider === 'mailgun'
         ? await this.mailgun.verifyDomain(row.emailChannel, row.domain)
-        : await this.azure.getStates(row.emailChannel, row.domain);
+        : row.emailChannel.provider === 'resend'
+          ? await this.verifyResendDomain(row.emailChannel, row.resendDomainId)
+          : await this.azure.getStates(row.emailChannel, row.domain);
 
     // Kick off Azure verification for Domain/SPF/DKIM/DKIM2 only. DMARC is
     // customer-managed in public DNS — Azure's API never flips it to
@@ -249,7 +260,7 @@ export class SenderDomainService {
       const s = states[k]?.status;
       return !s || s === 'NotStarted' || s === 'Unknown' || s === 'VerificationFailed';
     });
-    if (row.emailChannel.provider !== 'mailgun') {
+    if (row.emailChannel.provider === 'acs') {
       await Promise.all(
         toInitiate.map((k) => this.azure.initiateVerification(row.emailChannel, row.domain, k)),
       );
@@ -257,7 +268,7 @@ export class SenderDomainService {
 
     // Re-read Azure states after kicking things off.
     let refreshed: SenderDomainVerificationStates =
-      toInitiate.length > 0 && row.emailChannel.provider !== 'mailgun'
+      toInitiate.length > 0 && row.emailChannel.provider === 'acs'
         ? await this.azure.getStates(row.emailChannel, row.domain)
         : states;
 
@@ -279,7 +290,7 @@ export class SenderDomainService {
     if (
       allVerified &&
       !linkedAt &&
-      row.emailChannel.provider !== 'mailgun' &&
+      row.emailChannel.provider === 'acs' &&
       row.emailChannel.azureCommunicationServiceName
     ) {
       try {
@@ -345,7 +356,7 @@ export class SenderDomainService {
     }
 
     const azureResult =
-      row.emailChannel.provider === 'mailgun'
+      row.emailChannel.provider !== 'acs'
         ? { azureResourceId: null }
         : await this.azure.createSenderUsername(
             row.emailChannel,
@@ -380,7 +391,7 @@ export class SenderDomainService {
     });
     if (!u) return;
 
-    if (row.emailChannel.provider !== 'mailgun') {
+    if (row.emailChannel.provider === 'acs') {
       await this.azure.deleteSenderUsername(row.emailChannel, row.domain, u.username);
     }
     await this.prisma.senderUsername.deleteMany({ where: { id: u.id } });
@@ -402,6 +413,18 @@ export class SenderDomainService {
         this.logger.warn(
           `Mailgun domain ${row.domain} was not found upstream; deleting local row only.`,
         );
+      }
+    } else if (row.emailChannel.provider === 'resend') {
+      if (row.resendDomainId) {
+        try {
+          await this.resend.deleteDomain(row.emailChannel, row.resendDomainId);
+        } catch (err) {
+          const message = (err as Error).message;
+          if (!message.includes('Resend API 404')) throw err;
+          this.logger.warn(
+            `Resend domain ${row.domain} was not found upstream; deleting local row only.`,
+          );
+        }
       }
     } else {
       // Unlink first so the domain isn't referenced by the CommunicationService
@@ -463,7 +486,7 @@ export class SenderDomainService {
         ? {
             id: row.emailChannel.id,
             name: row.emailChannel.name,
-            provider: row.emailChannel.provider as 'acs' | 'mailgun' | undefined,
+            provider: row.emailChannel.provider as 'acs' | 'mailgun' | 'resend' | undefined,
             allowMarketing: row.emailChannel.allowMarketing,
             allowTransactional: row.emailChannel.allowTransactional,
           }
@@ -477,6 +500,16 @@ export class SenderDomainService {
       linkedAt: row.linkedAt?.toISOString() ?? null,
       senderUsernames: senderUsernames.map((u) => this.toUsernameView(u, row.domain)),
     };
+  }
+
+  private async verifyResendDomain(
+    emailChannel: EmailChannel,
+    resendDomainId: string | null,
+  ): Promise<SenderDomainVerificationStates> {
+    if (!resendDomainId) {
+      throw new BadRequestException('Resend 域名 ID 缺失，请删除后重新添加。');
+    }
+    return this.resend.verifyDomain(emailChannel, resendDomainId);
   }
 
   private withUsage<
