@@ -411,6 +411,7 @@ model EmailChannel {
   /// https://api.resend.com and exists mainly for tests/proxies.
   resendApiKey                  String?            @map("resend_api_key") @db.Text
   resendApiBaseUrl              String?            @map("resend_api_base_url")
+  resendWebhookSigningKey       String?            @map("resend_webhook_signing_key") @db.Text
   /// Platform-wide default. New tenant signups get a primary
   /// AccountEmailChannel link to this channel. At most one row may be true at a
   /// time — enforced by a partial unique index defined in migration SQL

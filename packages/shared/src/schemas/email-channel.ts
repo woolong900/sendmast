@@ -28,6 +28,7 @@ const EmailChannelBaseSchema = z.object({
   mailgunWebhookSigningKey: z.string().max(2000).optional().nullable(),
   resendApiKey: z.string().max(2000).optional().nullable(),
   resendApiBaseUrl: z.string().url().max(200).optional().nullable(),
+  resendWebhookSigningKey: z.string().max(2000).optional().nullable(),
 });
 
 function validateProviderConfig(
@@ -88,6 +89,7 @@ export interface EmailChannelView {
   mailgunWebhookSigningKey: string | null;
   resendApiKey: string | null;
   resendApiBaseUrl: string | null;
+  resendWebhookSigningKey: string | null;
   /** Whether this account is the platform-wide default for new signups. */
   isDefault: boolean;
   senderDomainCount: number;

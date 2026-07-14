@@ -43,6 +43,7 @@ const EMPTY: FormState = {
   mailgunWebhookSigningKey: '',
   resendApiKey: '',
   resendApiBaseUrl: 'https://api.resend.com',
+  resendWebhookSigningKey: '',
 };
 
 const PROVIDER_OPTIONS: Array<{ value: EmailChannelProviderValue; label: string }> = [
@@ -238,6 +239,7 @@ export function EmailChannelListPage() {
                             mailgunWebhookSigningKey: full.mailgunWebhookSigningKey ?? '',
                             resendApiKey: full.resendApiKey ?? '',
                             resendApiBaseUrl: full.resendApiBaseUrl ?? 'https://api.resend.com',
+                            resendWebhookSigningKey: full.resendWebhookSigningKey ?? '',
                           });
                         }}
                       >
@@ -348,6 +350,7 @@ function AccountEditor({
         mailgunWebhookSigningKey: form.mailgunWebhookSigningKey?.trim() || null,
         resendApiKey: form.resendApiKey?.trim() || null,
         resendApiBaseUrl: form.resendApiBaseUrl?.trim() || null,
+        resendWebhookSigningKey: form.resendWebhookSigningKey?.trim() || null,
       };
       return isEdit
         ? api.patch(`/api/admin/email-channels/${state.id}`, body)
@@ -497,6 +500,13 @@ function AccountEditor({
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">API Base URL</Label>
                 <Input value={form.resendApiBaseUrl ?? ''} onChange={(e) => setForm({ ...form, resendApiBaseUrl: e.target.value })} placeholder="https://api.resend.com" />
+              </div>
+              <div className="sm:col-span-2">
+                <Label className="mb-1.5 block">Webhook Signing Secret</Label>
+                <Input type="password" value={form.resendWebhookSigningKey ?? ''} onChange={(e) => setForm({ ...form, resendWebhookSigningKey: e.target.value })} placeholder="whsec_..." />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  用于校验 Resend 推送到 /api/webhooks/resend 的 Svix 签名。
+                </p>
               </div>
             </Section>
           )}

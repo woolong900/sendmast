@@ -4,9 +4,11 @@ import {
   Headers,
   HttpCode,
   Post,
+  Req,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -48,6 +50,22 @@ export class WebhookController {
   @HttpCode(200)
   async mailgun(@Body() body: unknown) {
     return this.svc.handleMailgun(body);
+  }
+
+  /** Resend webhook endpoint. Configure this URL in Resend as /api/webhooks/resend. */
+  @Post('resend')
+  @HttpCode(200)
+  async resend(
+    @Req() req: Request & { rawBody?: Buffer },
+    @Headers('svix-id') svixId: string | undefined,
+    @Headers('svix-timestamp') svixTimestamp: string | undefined,
+    @Headers('svix-signature') svixSignature: string | undefined,
+  ) {
+    return this.svc.handleResend(req.rawBody?.toString('utf8') ?? '', {
+      id: svixId,
+      timestamp: svixTimestamp,
+      signature: svixSignature,
+    });
   }
 
   /**
