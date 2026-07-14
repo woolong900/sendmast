@@ -10,6 +10,10 @@ interface ResendDomainResponse {
   id?: string;
   name?: string;
   status?: string;
+  capabilities?: {
+    sending?: string;
+    receiving?: string;
+  };
   records?: ResendRecord[];
 }
 
@@ -70,7 +74,10 @@ export class ResendService {
     for (const [kind, statuses] of grouped.entries()) {
       states[kind] = { status: aggregateStatuses(statuses) };
     }
-    if (json.status === 'verified') {
+    if (
+      json.status?.toLowerCase() === 'verified' ||
+      json.capabilities?.sending?.toLowerCase() === 'enabled'
+    ) {
       for (const kind of ['Domain', 'SPF', 'DKIM', 'DKIM2', 'Tracking'] as const) {
         if (states[kind]) states[kind] = { status: 'Verified' };
       }
