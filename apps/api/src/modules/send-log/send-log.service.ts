@@ -145,9 +145,9 @@ function toContent(r: {
     return {
       subject: r.finalSubject ?? r.automationSend?.subject ?? r.automation?.subject ?? null,
       preheader: r.finalPreheader ?? r.automationSend?.preheader ?? r.automation?.preheader ?? null,
-      html: null,
+      html: r.finalHtml,
       source:
-        r.finalSubject || r.finalPreheader
+        r.finalSubject || r.finalPreheader || r.finalHtml
           ? 'send_log'
           : r.automationSend
             ? 'automation_send'

@@ -430,7 +430,7 @@ function DetailDialog({ row, onClose }: { row: SendLogView; onClose: () => void 
                 />
               ) : isAutomationLog ? (
                 <div className="flex h-32 items-center justify-center rounded-md bg-background px-4 text-center text-sm text-muted-foreground">
-                  自动化邮件不在发送日志中保存完整内容
+                  这条自动化发送日志未保存完整 HTML
                 </div>
               ) : (
                 <div className="flex h-32 items-center justify-center rounded-md bg-background text-sm text-muted-foreground">
