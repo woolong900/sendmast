@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,13 +9,16 @@ import { Label } from '@/components/ui/label';
 import { Pagination } from '@/components/ui/pagination';
 import { DateRangePicker, type DateRange } from '@/components/ui/date-range-picker';
 import { FilterSelect } from '@/components/ui/filter-select';
-import { api } from '@/lib/api';
+import { Switch } from '@/components/ui/switch';
+import { useToast } from '@/components/ui/toast';
+import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime, formatNumber } from '@/lib/utils';
 import type {
   EmailChannelView,
   AdminAccountView,
   SendLogDetailResponse,
   SendLogListResponse,
+  SendLogSettingView,
   SendLogView,
 } from '@sendmast/shared';
 import { EmptyStateRow } from '@/components/ui/empty-state';
@@ -52,6 +55,8 @@ const STATUS_OPTIONS: Array<{ value: Filters['status']; label: string }> = [
 ];
 
 export function SendLogsAdminPage() {
+  const qc = useQueryClient();
+  const toast = useToast();
   // Two layers of state: the form (mutable as user types) and the active
   // query (frozen until "搜索" is clicked). This avoids hammering the API
   // on every keystroke in the domain input.
@@ -68,6 +73,19 @@ export function SendLogsAdminPage() {
   const { data: emailChannels } = useQuery<EmailChannelView[]>({
     queryKey: ['admin', 'email-channels'],
     queryFn: async () => (await api.get('/api/admin/email-channels')).data,
+  });
+  const { data: settings } = useQuery<SendLogSettingView>({
+    queryKey: ['admin', 'send-logs', 'settings'],
+    queryFn: async () => (await api.get('/api/admin/send-logs/settings')).data,
+  });
+  const updateSettingsMut = useMutation({
+    mutationFn: (automationFinalHtmlLogEnabled: boolean) =>
+      api.put('/api/admin/send-logs/settings', { automationFinalHtmlLogEnabled }),
+    onSuccess: () => {
+      toast('发送日志设置已更新', 'success');
+      qc.invalidateQueries({ queryKey: ['admin', 'send-logs', 'settings'] });
+    },
+    onError: (e) => toast(apiErrMessage(e), 'error'),
   });
 
   const queryParams = useMemo(() => {
@@ -112,6 +130,23 @@ export function SendLogsAdminPage() {
           每次邮件通道调用的发送记录,用于排查发送失败、监控延迟、审计租户使用情况。
         </p>
       </div>
+
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">自动化邮件完整 HTML</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              开启后,新的自动化发送日志会保存最终提交给邮件通道的完整 HTML。
+            </p>
+          </div>
+          <Switch
+            checked={settings?.automationFinalHtmlLogEnabled ?? false}
+            disabled={!settings || updateSettingsMut.isPending}
+            onCheckedChange={(checked) => updateSettingsMut.mutate(checked)}
+            aria-label="记录自动化邮件完整 HTML"
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3 lg:grid-cols-7">

@@ -1088,6 +1088,17 @@ model ReferralSetting {
   @@map("referral_settings")
 }
 
+/// Singleton settings for provider send logs.
+model SendLogSetting {
+  id                              String   @id @default("singleton")
+  automationFinalHtmlLogEnabled   Boolean  @default(false) @map("automation_final_html_log_enabled")
+  updatedBy                       String?  @map("updated_by") @db.Uuid
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+  createdAt                       DateTime @default(now()) @map("created_at")
+
+  @@map("send_log_settings")
+}
+
 // ============================================================================
 // Shop Integrations (shopyy / OEMSAAS)
 //

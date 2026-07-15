@@ -61,3 +61,14 @@ export interface SendLogContentView {
 export interface SendLogDetailResponse extends SendLogView {
   content: SendLogContentView;
 }
+
+export const SendLogSettingInputSchema = z.object({
+  automationFinalHtmlLogEnabled: z.boolean(),
+});
+export type SendLogSettingInput = z.infer<typeof SendLogSettingInputSchema>;
+
+export interface SendLogSettingView {
+  automationFinalHtmlLogEnabled: boolean;
+  updatedAt: string;
+  updatedBy: string | null;
+}

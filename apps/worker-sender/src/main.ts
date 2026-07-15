@@ -34,6 +34,7 @@ const SEND_CONCURRENCY = Number(process.env.SEND_CONCURRENCY ?? '8');
 const MAX_INFLIGHT_PER_CHANNEL = Number(process.env.MAX_INFLIGHT_PER_CHANNEL ?? '2000');
 const FLOW_RECOVERY_AGE_MS = Number(process.env.FLOW_RECOVERY_AGE_MS ?? '10000');
 const FLOW_RECOVERY_BATCH = Number(process.env.FLOW_RECOVERY_BATCH ?? '100');
+const SEND_LOG_SETTINGS_TTL_MS = 30_000;
 
 if (!TRACKING_SECRET) {
   throw new Error('TRACKING_TOKEN_SECRET is required');
@@ -103,6 +104,34 @@ async function getEmailChannel(id: string): Promise<EmailChannel | null> {
   if (fresh) emailChannelCache.set(id, { account: fresh, loadedAt: now });
   else emailChannelCache.delete(id);
   return fresh;
+}
+
+let sendLogSettingsCache:
+  | { automationFinalHtmlLogEnabled: boolean; loadedAt: number }
+  | null = null;
+
+async function shouldLogAutomationFinalHtml(): Promise<boolean> {
+  const now = Date.now();
+  if (
+    sendLogSettingsCache &&
+    sendLogSettingsCache.loadedAt + SEND_LOG_SETTINGS_TTL_MS > now
+  ) {
+    return sendLogSettingsCache.automationFinalHtmlLogEnabled;
+  }
+
+  try {
+    const row = await prisma.sendLogSetting.findUnique({
+      where: { id: 'singleton' },
+      select: { automationFinalHtmlLogEnabled: true },
+    });
+    const enabled = row?.automationFinalHtmlLogEnabled ?? false;
+    sendLogSettingsCache = { automationFinalHtmlLogEnabled: enabled, loadedAt: now };
+    return enabled;
+  } catch (err) {
+    console.error('[send-log-settings] failed to load setting:', err);
+    sendLogSettingsCache = { automationFinalHtmlLogEnabled: false, loadedAt: now };
+    return false;
+  }
 }
 
 // ============================================================================
@@ -1097,9 +1126,11 @@ async function runFlowSend(job: Job<SendJobData>) {
     headers,
   });
 
+  const logAutomationFinalHtml = await shouldLogAutomationFinalHtml();
+
   // Unified provider attempt log: automation sends appear beside campaign sends in
-  // the platform-admin send log. Keep only metadata here; the full automation
-  // body belongs to the automation send snapshot, not the admin send log.
+  // the platform-admin send log. Full HTML is stored only when the admin setting
+  // is enabled because it can be large and may contain rendered customer data.
   try {
     await prisma.sendLog.create({
       data: {
@@ -1120,6 +1151,7 @@ async function runFlowSend(job: Job<SendJobData>) {
         responsePayload: toJsonInput(result.providerResponse),
         finalSubject: subjectOut,
         finalPreheader: preheaderOut,
+        finalHtml: logAutomationFinalHtml ? html : null,
       },
     });
   } catch (logErr) {

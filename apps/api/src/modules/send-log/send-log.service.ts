@@ -6,12 +6,41 @@ import type {
   SendLogDetailResponse,
   SendLogListResponse,
   SendLogQuery,
+  SendLogSettingView,
   SendLogView,
 } from '@sendmast/shared';
 
 @Injectable()
 export class SendLogService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async getSettings(): Promise<SendLogSettingView> {
+    const row = await this.prisma.sendLogSetting.upsert({
+      where: { id: 'singleton' },
+      create: { id: 'singleton' },
+      update: {},
+    });
+    return toSettingView(row);
+  }
+
+  async updateSettings(
+    automationFinalHtmlLogEnabled: boolean,
+    updatedBy: string,
+  ): Promise<SendLogSettingView> {
+    const row = await this.prisma.sendLogSetting.upsert({
+      where: { id: 'singleton' },
+      create: {
+        id: 'singleton',
+        automationFinalHtmlLogEnabled,
+        updatedBy,
+      },
+      update: {
+        automationFinalHtmlLogEnabled,
+        updatedBy,
+      },
+    });
+    return toSettingView(row);
+  }
 
   async list(query: SendLogQuery): Promise<SendLogListResponse> {
     const where: Prisma.SendLogWhereInput = {};
@@ -89,6 +118,18 @@ export class SendLogService {
       content: toContent(row),
     };
   }
+}
+
+function toSettingView(r: {
+  automationFinalHtmlLogEnabled: boolean;
+  updatedAt: Date;
+  updatedBy: string | null;
+}): SendLogSettingView {
+  return {
+    automationFinalHtmlLogEnabled: r.automationFinalHtmlLogEnabled,
+    updatedAt: r.updatedAt.toISOString(),
+    updatedBy: r.updatedBy,
+  };
 }
 
 function toContent(r: {
