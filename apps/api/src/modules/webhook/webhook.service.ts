@@ -8,7 +8,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { QueueService } from '../../common/queue/queue.service';
 import { QUEUE_NAMES } from '@sendmast/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { classifyBounce } from './bounce-classifier';
+import { classifyBounce, classifyMailgunBounce } from './bounce-classifier';
 
 const MAILGUN_SIGNATURE_MAX_AGE_MS = 15 * 60 * 1000;
 const RESEND_SIGNATURE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -144,9 +144,7 @@ export class WebhookService {
     const data = payload.data ?? {};
     const tags = normaliseVariables(data.tags);
     const messageId =
-      tags.sendmast_operation_id ??
-      stringValue(data.email_id) ??
-      stringValue(data.message_id);
+      tags.sendmast_operation_id ?? stringValue(data.email_id) ?? stringValue(data.message_id);
 
     await this.queue.add(QUEUE_NAMES.EVENTS_INGEST, 'event', {
       kind: mapped.kind,
@@ -167,7 +165,8 @@ export class WebhookService {
           : mapped.kind === 'o'
             ? stringValue(data.open?.userAgent)
             : undefined,
-      receivedAt: isoTimestampMs(payload.created_at) ?? isoTimestampMs(data.created_at) ?? Date.now(),
+      receivedAt:
+        isoTimestampMs(payload.created_at) ?? isoTimestampMs(data.created_at) ?? Date.now(),
       rawMeta: payload as Record<string, unknown>,
       bounceKind: mapped.bounceKind,
     });
@@ -235,8 +234,8 @@ export class WebhookService {
       const key = row.resendWebhookSigningKey;
       if (!key) return false;
       const expected = createSvixSignature(key, signed);
-      return signatures.some((incoming) =>
-        incoming.length === expected.length && timingSafeEqual(incoming, expected),
+      return signatures.some(
+        (incoming) => incoming.length === expected.length && timingSafeEqual(incoming, expected),
       );
     });
     if (!ok) throw new UnauthorizedException('invalid Resend webhook signature');
@@ -314,7 +313,7 @@ function mapMailgunEvent(data: MailgunEventData): {
   if (event === 'failed') {
     return {
       kind: 'bounce',
-      bounceKind: String(data.severity ?? '').toLowerCase() === 'permanent' ? 'hard' : 'soft',
+      bounceKind: classifyMailgunBounce(data as Record<string, unknown>),
     };
   }
   if (event === 'rejected') return { kind: 'failed' };

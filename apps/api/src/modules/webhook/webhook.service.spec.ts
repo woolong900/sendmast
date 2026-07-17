@@ -1,4 +1,4 @@
-import { classifyBounce } from './bounce-classifier';
+import { classifyBounce, classifyMailgunBounce } from './bounce-classifier';
 
 describe('classifyBounce', () => {
   it('classifies Gmail no-such-user DSNs as hard bounces', () => {
@@ -21,5 +21,38 @@ describe('classifyBounce', () => {
         },
       }),
     ).toBe('soft');
+  });
+
+  it('keeps Mailgun content denials soft even when severity is permanent', () => {
+    expect(
+      classifyMailgunBounce({
+        event: 'failed',
+        severity: 'permanent',
+        reason: 'generic',
+        'delivery-status': {
+          code: 550,
+          message:
+            'Mail content denied [MbmMx8+oB+H1+VyaOvrrH9UCZO1fWqsXnmylrrJhCQNZGfrq2l5Zc7k= IP: 69.72.42.252]. https://open.work.weixin.qq.com/help2/pc/20056.',
+          'bounce-type': 'soft',
+          'enhanced-code': '',
+          'mx-host': 'mxbiz1.qq.com',
+        },
+      }),
+    ).toBe('soft');
+  });
+
+  it('classifies Mailgun no-such-user failures as hard', () => {
+    expect(
+      classifyMailgunBounce({
+        event: 'failed',
+        severity: 'permanent',
+        'delivery-status': {
+          code: 550,
+          message: '550 5.1.1 user unknown',
+          'bounce-type': 'hard',
+          'enhanced-code': '5.1.1',
+        },
+      }),
+    ).toBe('hard');
   });
 });

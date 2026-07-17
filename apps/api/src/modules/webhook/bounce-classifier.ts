@@ -46,6 +46,30 @@ const HARD_BOUNCE_SIGNALS = [
 const SENDER_SIDE_SIGNALS = ['sender', 'mail from', 'reputation'];
 
 /**
+ * Phrases that indicate the recipient server rejected the message for policy,
+ * content, authentication, DNS, rate-limit, or sender reputation reasons. These
+ * are deliverability problems, not proof that the destination mailbox is dead.
+ */
+const POLICY_OR_CONTENT_SIGNALS = [
+  'content denied',
+  'mail content denied',
+  'message blocked',
+  'message rejected',
+  'policy',
+  'spam',
+  'abuse',
+  'blacklist',
+  'blocklist',
+  'reputation',
+  'rate limit',
+  'throttl',
+  'dns',
+  'dkim',
+  'spf',
+  'dmarc',
+];
+
+/**
  * Classify a bounce as a permanent recipient failure ('hard') vs. anything else
  * ('soft').
  *
@@ -66,5 +90,29 @@ export function classifyBounce(data: Record<string, unknown>): 'hard' | 'soft' {
       ?.statusMessage ?? '',
   ).toLowerCase();
   if (SENDER_SIDE_SIGNALS.some((s) => msg.includes(s))) return 'soft';
+  if (POLICY_OR_CONTENT_SIGNALS.some((s) => msg.includes(s))) return 'soft';
   return HARD_BOUNCE_SIGNALS.some((s) => msg.includes(s)) ? 'hard' : 'soft';
+}
+
+/**
+ * Mailgun's top-level `severity=permanent` is too broad for suppression: a
+ * 550 content/policy rejection can be permanent for that message while the
+ * recipient mailbox is perfectly valid. Prefer Mailgun's delivery-status
+ * bounce-type when it says soft, then fall back to the same narrow recipient
+ * failure signals used for ACS.
+ */
+export function classifyMailgunBounce(data: Record<string, unknown>): 'hard' | 'soft' {
+  const deliveryStatus = data['delivery-status'] as Record<string, unknown> | undefined;
+  const bounceType = String(deliveryStatus?.['bounce-type'] ?? '').toLowerCase();
+  if (bounceType.includes('soft') || bounceType.includes('temporary')) return 'soft';
+
+  const message = String(deliveryStatus?.message ?? '').toLowerCase();
+  const enhancedCode = String(deliveryStatus?.['enhanced-code'] ?? '').toLowerCase();
+  const description = String(deliveryStatus?.description ?? '').toLowerCase();
+  const reason = String(data.reason ?? '').toLowerCase();
+  const combined = [message, enhancedCode, description, reason].filter(Boolean).join(' ');
+
+  if (SENDER_SIDE_SIGNALS.some((s) => combined.includes(s))) return 'soft';
+  if (POLICY_OR_CONTENT_SIGNALS.some((s) => combined.includes(s))) return 'soft';
+  return HARD_BOUNCE_SIGNALS.some((s) => combined.includes(s)) ? 'hard' : 'soft';
 }
