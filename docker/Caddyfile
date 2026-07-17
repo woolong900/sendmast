@@ -123,11 +123,9 @@ api.sendmast.com {
 		reverse_proxy api:4000
 	}
 
-	# Public bucket assets. The API stores image upload URLs as
-	# `/sendmast-public/<key>` — Caddy forwards the request as-is to
-	# MinIO; MinIO resolves the bucket name from the path. URLs stay
-	# port-less and origin-relative (Easy Email's canvas inline-style
-	# parser breaks on URLs containing `:port`, see vite.config.ts).
+	# Public bucket assets. With S3_PUBLIC_BASE_URL=/sendmast-public, the API
+	# returns absolute email image URLs on the app origin; Caddy forwards the
+	# path as-is to MinIO, and MinIO resolves the bucket name from the path.
 	# SVG is intentionally blocked even for legacy uploads: active SVG content
 	# on the app origin could execute script and read persisted auth tokens.
 	@publicSvg path_regexp publicSvg ^/sendmast-public/.*\.svg$

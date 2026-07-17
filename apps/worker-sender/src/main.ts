@@ -21,6 +21,7 @@ const TRACKING_SECRET = process.env.TRACKING_TOKEN_SECRET;
 // schemas for the API's own URL building (none today; placeholder for
 // future). Pool empty = send fails — see the recipient-fail path below.
 const SEND_CONCURRENCY = Number(process.env.SEND_CONCURRENCY ?? '8');
+const PUBLIC_ASSET_BASE_URL = publicAssetBaseUrl();
 
 // Fairness cap: max recipients kept in-flight (queued but not yet sent) per channel
 // account. Sends drain through ONE shared FIFO queue, so without this cap an
@@ -84,6 +85,16 @@ interface SendJobData {
 /** Automation types that are transactional (no unsubscribe, sent regardless of opt-out). */
 const TRANSACTIONAL_AUTOMATIONS = new Set(['order_paid', 'order_shipped']);
 
+function publicAssetBaseUrl(): string | undefined {
+  const raw = process.env.S3_PUBLIC_BASE_URL?.replace(/\/+$/, '');
+  if (!raw) return undefined;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (!raw.startsWith('/')) return undefined;
+
+  const origin = (process.env.WEB_BASE_URL ?? process.env.API_BASE_URL)?.replace(/\/+$/, '');
+  return origin ? `${origin}${raw}` : undefined;
+}
+
 // ============================================================================
 // EmailChannel cache (rebuilt by tick at most every 30s)
 // ============================================================================
@@ -106,16 +117,12 @@ async function getEmailChannel(id: string): Promise<EmailChannel | null> {
   return fresh;
 }
 
-let sendLogSettingsCache:
-  | { automationFinalHtmlLogEnabled: boolean; loadedAt: number }
-  | null = null;
+let sendLogSettingsCache: { automationFinalHtmlLogEnabled: boolean; loadedAt: number } | null =
+  null;
 
 async function shouldLogAutomationFinalHtml(): Promise<boolean> {
   const now = Date.now();
-  if (
-    sendLogSettingsCache &&
-    sendLogSettingsCache.loadedAt + SEND_LOG_SETTINGS_TTL_MS > now
-  ) {
+  if (sendLogSettingsCache && sendLogSettingsCache.loadedAt + SEND_LOG_SETTINGS_TTL_MS > now) {
     return sendLogSettingsCache.automationFinalHtmlLogEnabled;
   }
 
@@ -768,6 +775,7 @@ async function runSend(job: Job<SendJobData>) {
         }
       : undefined,
     trackClicks: c.trackClicks,
+    assetBaseUrl: PUBLIC_ASSET_BASE_URL,
     // Hard-attribution id: the store echoes this link's query in the order's
     // landing_page, letting the order webhook attribute the conversion to this
     // exact recipient regardless of click tracking or checkout email.
@@ -1071,6 +1079,7 @@ async function runFlowSend(job: Job<SendJobData>) {
       campaign: automation.type,
     },
     trackClicks: true,
+    assetBaseUrl: PUBLIC_ASSET_BASE_URL,
     // Keep flow sends attributable in the same way as campaign recipients:
     // the store echoes sm_mid from the landing URL back in the order webhook.
     smMid: send.id,

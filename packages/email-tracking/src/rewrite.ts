@@ -25,6 +25,11 @@ export interface RewriteOptions {
    */
   trackClicks?: boolean;
   /**
+   * Absolute base URL for public uploaded assets. When set, origin-relative
+   * image srcs under the same path are made absolute for email clients.
+   */
+  assetBaseUrl?: string;
+  /**
    * When set, `sm_mid=<id>` is appended to every http(s) link's destination so
    * a downstream conversion can be hard-attributed back to this exact send: the
    * store echoes the link's query string in the order's `landing_page`, which
@@ -40,6 +45,7 @@ export interface RewriteResult {
 }
 
 const HREF_REGEX = /href=("|')([^"']+)("|')/gi;
+const SRC_REGEX = /src=("|')([^"']+)("|')/gi;
 
 function decodeHtmlAttribute(value: string): string {
   return value.replace(/&(amp|quot|apos|#39|lt|gt);/gi, (match, entity: string) => {
@@ -62,9 +68,7 @@ function decodeHtmlAttribute(value: string): string {
 }
 
 function encodeHtmlAttribute(value: string): string {
-  return value.replace(/[&"']/g, (c) =>
-    ({ '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c]!,
-  );
+  return value.replace(/[&"']/g, (c) => ({ '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
 function applyUtm(url: string, utm?: UtmParams): string {
@@ -72,8 +76,10 @@ function applyUtm(url: string, utm?: UtmParams): string {
   if (!utm.source && !utm.medium && !utm.campaign) return url;
   try {
     const u = new URL(url);
-    if (utm.source && !u.searchParams.has('utm_source')) u.searchParams.set('utm_source', utm.source);
-    if (utm.medium && !u.searchParams.has('utm_medium')) u.searchParams.set('utm_medium', utm.medium);
+    if (utm.source && !u.searchParams.has('utm_source'))
+      u.searchParams.set('utm_source', utm.source);
+    if (utm.medium && !u.searchParams.has('utm_medium'))
+      u.searchParams.set('utm_medium', utm.medium);
     if (utm.campaign && !u.searchParams.has('utm_campaign'))
       u.searchParams.set('utm_campaign', utm.campaign);
     return u.toString();
@@ -93,6 +99,25 @@ function applySmMid(url: string, smMid?: string): string {
   }
 }
 
+function absoluteAssetSrc(src: string, assetBaseUrl?: string): string {
+  if (!assetBaseUrl || /^(data|cid):/i.test(src)) return src;
+
+  try {
+    const assetBase = new URL(assetBaseUrl);
+    const pathPrefix = assetBase.pathname.replace(/\/+$/, '');
+    const brokenHttpPath = `http:///${pathPrefix.replace(/^\/+/, '')}/`;
+    if (/^https?:\/\//i.test(src) && !src.startsWith(brokenHttpPath)) return src;
+    const normalisedSrc = src.startsWith(brokenHttpPath)
+      ? `${pathPrefix}/${src.slice(brokenHttpPath.length)}`
+      : src;
+
+    if (!normalisedSrc.startsWith(`${pathPrefix}/`)) return src;
+    return `${assetBase.origin}${normalisedSrc}`;
+  } catch {
+    return src;
+  }
+}
+
 /** Wrap http(s) hrefs in /t/c/{token}. Adds {pixel} at the body end. */
 export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
   const links: Array<{ index: number; url: string }> = [];
@@ -100,7 +125,13 @@ export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
   const src = opts.source === 'automation' ? { s: 'a' as const } : {};
   let i = 0;
 
-  const rewritten = html.replace(HREF_REGEX, (match, q1: string, rawUrl: string) => {
+  const assetSafeHtml = html.replace(SRC_REGEX, (match, q1: string, rawSrc: string) => {
+    const src = decodeHtmlAttribute(rawSrc);
+    const absoluteSrc = absoluteAssetSrc(src, opts.assetBaseUrl);
+    return absoluteSrc === src ? match : `src=${q1}${encodeHtmlAttribute(absoluteSrc)}${q1}`;
+  });
+
+  const rewritten = assetSafeHtml.replace(HREF_REGEX, (match, q1: string, rawUrl: string) => {
     const url = decodeHtmlAttribute(rawUrl);
     if (!/^https?:\/\//i.test(url)) return match;
     if (url.includes('{{unsubscribe_url}}')) return match;

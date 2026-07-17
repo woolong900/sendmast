@@ -17,6 +17,8 @@ export class S3Service {
   public readonly bucket: string;
   public readonly publicBucket: string;
   private readonly endpoint: string;
+  private readonly publicBaseUrl: string;
+  private readonly webBaseUrl: string;
 
   constructor(config: ConfigService) {
     this.endpoint = config.getOrThrow<string>('S3_ENDPOINT');
@@ -31,6 +33,10 @@ export class S3Service {
     });
     this.bucket = config.get('S3_BUCKET') ?? 'sendmast-uploads';
     this.publicBucket = config.get('S3_PUBLIC_BUCKET') ?? 'sendmast-public';
+    this.publicBaseUrl =
+      config.get<string>('S3_PUBLIC_BASE_URL') ?? `${this.endpoint}/${this.publicBucket}`;
+    this.webBaseUrl =
+      config.get<string>('WEB_BASE_URL') ?? config.getOrThrow<string>('API_BASE_URL');
   }
 
   async ensureBucket(): Promise<void> {
@@ -75,17 +81,19 @@ export class S3Service {
   }
 
   /**
-   * Build the externally-reachable URL for an object in the public bucket.
-   * In dev this points at the local MinIO (`http://localhost:9000/<bucket>/<key>`);
-   * in prod it should be fronted by a CDN — operators can override the base
-   * via S3_PUBLIC_BASE_URL when that day comes.
+   * Build an absolute, externally-reachable URL for an object in the public
+   * bucket. Email clients do not have a page origin, so origin-relative image
+   * paths become broken after delivery.
    */
   getPublicUrl(key: string): string {
-    const base = (process.env.S3_PUBLIC_BASE_URL ?? `${this.endpoint}/${this.publicBucket}`).replace(
-      /\/+$/,
-      '',
-    );
-    return `${base}/${key}`;
+    const base = this.absolutePublicBaseUrl().replace(/\/+$/, '');
+    return `${base}/${key.replace(/^\/+/, '')}`;
+  }
+
+  private absolutePublicBaseUrl(): string {
+    if (!this.publicBaseUrl.startsWith('/')) return this.publicBaseUrl;
+    const origin = this.webBaseUrl.replace(/\/+$/, '');
+    return `${origin}${this.publicBaseUrl}`;
   }
 
   async getObjectStream(key: string): Promise<Readable> {

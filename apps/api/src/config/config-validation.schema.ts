@@ -21,6 +21,13 @@ const ConfigSchema = z
     S3_SECRET_KEY: z.string().min(1),
     S3_BUCKET: z.string().default('sendmast-uploads'),
     S3_PUBLIC_BUCKET: z.string().default('sendmast-public'),
+    S3_PUBLIC_BASE_URL: z
+      .string()
+      .min(1)
+      .refine((value) => value.startsWith('/') || z.string().url().safeParse(value).success, {
+        message: 'Must be either an absolute URL or an origin-relative path',
+      })
+      .optional(),
 
     // HS256 secret strength: NIST SP 800-107 recommends >= key-length-equivalent
     // of the HMAC output (32 bytes for SHA-256). 16-byte secrets are brute-force-
