@@ -25,6 +25,7 @@ interface CampaignDetail {
   createdAt: string;
   html: string | null;
   lists: Array<{ list: { id: string; name: string } }>;
+  segments: Array<{ segment: { id: string; name: string } }>;
   senders: Array<{ id: string; fromName: string; fromEmail: string; position: number }>;
 }
 
@@ -169,7 +170,8 @@ export function CampaignDetailPage() {
                   title: '取消活动',
                   description: (
                     <>
-                      确定取消「<span className="font-medium">{data.name}</span>」吗?已发送的邮件无法撤回。
+                      确定取消「<span className="font-medium">{data.name}</span>
+                      」吗?已发送的邮件无法撤回。
                     </>
                   ),
                   confirmLabel: '取消活动',
@@ -201,7 +203,8 @@ export function CampaignDetailPage() {
                   title: '删除活动',
                   description: (
                     <>
-                      确定删除活动「<span className="font-medium">{data.name}</span>」吗?该操作不可撤销。
+                      确定删除活动「<span className="font-medium">{data.name}</span>
+                      」吗?该操作不可撤销。
                     </>
                   ),
                   confirmLabel: '删除',
@@ -234,7 +237,15 @@ export function CampaignDetailPage() {
               />
               <Field label="回复地址" value={data.replyTo} />
               <Field label="收件人数量" value={formatNumber(data.totalRecipients)} />
-              <Field label="收件列表" value={data.lists.map((l) => l.list.name).join(', ')} />
+              <Field
+                label="收件列表"
+                value={
+                  <TargetListValue
+                    lists={data.lists.map((l) => l.list)}
+                    segments={data.segments.map((s) => s.segment)}
+                  />
+                }
+              />
               <Field label="计划发送时间" value={formatDateTime(data.scheduledAt)} />
               <Field label="实际发送时间" value={formatDateTime(data.sentAt)} />
             </div>
@@ -298,6 +309,32 @@ function SenderValue({
   );
 }
 
+function TargetListValue({
+  lists,
+  segments,
+}: {
+  lists: Array<{ id: string; name: string }>;
+  segments: Array<{ id: string; name: string }>;
+}) {
+  const targets = [
+    ...lists.map((l) => ({ ...l, kind: '联系人列表' })),
+    ...segments.map((s) => ({ ...s, kind: '动态分群' })),
+  ];
+  if (targets.length === 0) return null;
+
+  return (
+    <span className="inline-flex flex-wrap gap-x-2 gap-y-1">
+      {targets.map((t, i) => (
+        <span key={`${t.kind}-${t.id}`}>
+          {i > 0 && <span className="mr-2 text-muted-foreground">,</span>}
+          <span>{t.name}</span>
+          <span className="ml-1 text-xs text-muted-foreground">({t.kind})</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
@@ -323,14 +360,16 @@ function statusLabel(s: string): string {
 
 function statusVariant(s: string): 'success' | 'muted' | 'warning' | 'danger' | 'default' {
   return (
-    {
-      draft: 'muted',
-      scheduled: 'warning',
-      sending: 'default',
-      sent: 'success',
-      paused: 'muted',
-      failed: 'danger',
-      canceled: 'muted',
-    } as const
-  )[s as 'draft'] ?? 'default';
+    (
+      {
+        draft: 'muted',
+        scheduled: 'warning',
+        sending: 'default',
+        sent: 'success',
+        paused: 'muted',
+        failed: 'danger',
+        canceled: 'muted',
+      } as const
+    )[s as 'draft'] ?? 'default'
+  );
 }

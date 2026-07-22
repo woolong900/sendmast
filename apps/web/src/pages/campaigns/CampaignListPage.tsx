@@ -33,8 +33,11 @@ interface CampaignListItem {
   sentAt: string | null;
   createdAt: string;
   lists: Array<{ id: string; name: string }>;
+  segments: Array<{ id: string; name: string }>;
   stats: { sent: number; opened: number; clicked: number };
 }
+
+type SendTarget = { id: string; name: string; kind: 'list' | 'segment' };
 
 const STATUS_LABEL: Record<CampaignListItem['status'], string> = {
   draft: '草稿',
@@ -244,7 +247,7 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
             </div>
             <div className="flex leading-5">
               <span className="shrink-0">发送列表：</span>
-              <SendListSummary lists={c.lists} />
+              <SendListSummary lists={c.lists} segments={c.segments} />
             </div>
           </div>
           <div className="flex shrink-0 gap-4 sm:gap-7">
@@ -274,26 +277,39 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
 }
 
 /**
- * 发送列表展示:列表多时只显示首个 + "…等 N 个列表",鼠标悬浮弹出全部。
+ * 发送列表展示:目标多时只显示首个 + "…等 N 个目标",鼠标悬浮弹出全部。
  * 用具名 group/sl 避免和外层行的 `group`(hover 高亮)冲突;浮层从 top-full
  * 紧贴并用 pt-1 透明桥接,鼠标移向浮层时不会脱离 hover 导致闪退。
  */
-function SendListSummary({ lists }: { lists: Array<{ id: string; name: string }> }) {
-  if (lists.length === 0) return <>-</>;
-  if (lists.length === 1) return <span className="min-w-0 truncate">{lists[0].name}</span>;
+function SendListSummary({
+  lists,
+  segments,
+}: {
+  lists: Array<{ id: string; name: string }>;
+  segments: Array<{ id: string; name: string }>;
+}) {
+  const targets: SendTarget[] = [
+    ...lists.map((l) => ({ ...l, kind: 'list' as const })),
+    ...segments.map((s) => ({ ...s, kind: 'segment' as const })),
+  ];
+  if (targets.length === 0) return <>-</>;
+  if (targets.length === 1) return <span className="min-w-0 truncate">{targets[0].name}</span>;
 
   return (
     <span className="group/sl relative inline-flex min-w-0 items-center gap-1 align-bottom">
-      <span className="min-w-0 truncate">{lists[0].name}</span>
+      <span className="min-w-0 truncate">{targets[0].name}</span>
       <span className="shrink-0 cursor-default text-muted-foreground">
-        …等 {lists.length} 个列表
+        …等 {targets.length} 个目标
       </span>
       <div className="invisible absolute left-0 top-full z-30 pt-1 opacity-0 transition-opacity group-hover/sl:visible group-hover/sl:opacity-100">
         <div className="max-h-64 w-max max-w-md overflow-auto rounded-md border bg-popover p-2 text-xs shadow-lg">
-          <div className="mb-1 font-medium text-muted-foreground">全部 {lists.length} 个列表</div>
-          {lists.map((l) => (
-            <div key={l.id} className="whitespace-nowrap py-0.5 text-foreground">
-              {l.name}
+          <div className="mb-1 font-medium text-muted-foreground">全部 {targets.length} 个目标</div>
+          {targets.map((t) => (
+            <div key={`${t.kind}-${t.id}`} className="whitespace-nowrap py-0.5 text-foreground">
+              {t.name}
+              <span className="ml-2 text-muted-foreground">
+                {t.kind === 'segment' ? '动态分群' : '联系人列表'}
+              </span>
             </div>
           ))}
         </div>
@@ -344,14 +360,16 @@ function ThumbnailWithHover({
   // `enabled: open` keeps the fetch off until the user actually hovers.
   const preview = useQuery<{ html: string | null }>({
     queryKey: ['campaign-html', campaignId],
-    queryFn: async () =>
-      (await api.get(`/api/campaigns/${campaignId}`)).data,
+    queryFn: async () => (await api.get(`/api/campaigns/${campaignId}`)).data,
     enabled: open,
   });
 
-  useEffect(() => () => {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    },
+    [],
+  );
 
   const show = () => {
     // Skip the hover preview on touch-only devices: mouseenter still fires on
@@ -360,10 +378,7 @@ function ThumbnailWithHover({
     // no obvious way to dismiss it without leaving the row. On true hover-
     // capable devices (desktop, laptop with trackpad, iPad with mouse) the
     // matchMedia probe is true and the preview behaves as before.
-    if (
-      typeof window !== 'undefined' &&
-      !window.matchMedia('(hover: hover)').matches
-    ) {
+    if (typeof window !== 'undefined' && !window.matchMedia('(hover: hover)').matches) {
       return;
     }
     if (closeTimer.current) {
@@ -448,19 +463,11 @@ function ThumbnailWithHover({
   );
 }
 
-function StatusFilter({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
+function StatusFilter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
   const stopBlur = (e: React.MouseEvent) => e.preventDefault();
-  const label = value
-    ? STATUS_LABEL[value as CampaignListItem['status']]
-    : '全部状态';
+  const label = value ? STATUS_LABEL[value as CampaignListItem['status']] : '全部状态';
 
   return (
     <div className="relative">
@@ -498,20 +505,18 @@ function StatusFilter({
           >
             全部状态
           </StatusItem>
-          {(Object.keys(STATUS_LABEL) as CampaignListItem['status'][]).map(
-            (s) => (
-              <StatusItem
-                key={s}
-                active={value === s}
-                onClick={() => {
-                  onChange(s);
-                  close();
-                }}
-              >
-                {STATUS_LABEL[s]}
-              </StatusItem>
-            ),
-          )}
+          {(Object.keys(STATUS_LABEL) as CampaignListItem['status'][]).map((s) => (
+            <StatusItem
+              key={s}
+              active={value === s}
+              onClick={() => {
+                onChange(s);
+                close();
+              }}
+            >
+              {STATUS_LABEL[s]}
+            </StatusItem>
+          ))}
         </div>
       )}
     </div>
@@ -662,7 +667,8 @@ function ActionMenu({ c }: { c: CampaignListItem }) {
                   title: '取消活动',
                   description: (
                     <>
-                      确定取消「<span className="font-medium">{c.name}</span>」吗?已发送的邮件无法撤回。
+                      确定取消「<span className="font-medium">{c.name}</span>
+                      」吗?已发送的邮件无法撤回。
                     </>
                   ),
                   confirmLabel: '取消活动',
@@ -692,7 +698,8 @@ function ActionMenu({ c }: { c: CampaignListItem }) {
                   title: '删除活动',
                   description: (
                     <>
-                      确定删除活动「<span className="font-medium">{c.name}</span>」吗?该操作不可撤销。
+                      确定删除活动「<span className="font-medium">{c.name}</span>
+                      」吗?该操作不可撤销。
                     </>
                   ),
                   confirmLabel: '删除',
