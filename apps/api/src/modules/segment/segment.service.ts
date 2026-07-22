@@ -26,6 +26,14 @@ import { compileSegment, type EventConstraint } from './segment-evaluator';
  * scan; revisit when a tenant actually hits the ceiling.
  */
 const EVENT_CONSTRAINT_HARD_CAP = 1_000_000;
+/**
+ * Prisma sends every `id IN (...)` value as a bind parameter. Postgres rejects
+ * prepared statements above 32767 parameters; keep this safely below that once
+ * accountId and other rule predicates are included.
+ */
+const PRISMA_IN_BIND_SAFE_LIMIT = 25_000;
+/** Keep event-recipient lookups small enough to avoid large PG shared-memory plans. */
+const EVENT_RECIPIENT_LOOKUP_CHUNK = 2_000;
 
 @Injectable()
 export class SegmentService {
@@ -74,11 +82,7 @@ export class SegmentService {
     }
   }
 
-  async update(
-    accountId: string,
-    id: string,
-    input: UpdateSegmentInput,
-  ): Promise<SegmentView> {
+  async update(accountId: string, id: string, input: UpdateSegmentInput): Promise<SegmentView> {
     const existing = await this.prisma.segment.findFirst({ where: { id, accountId } });
     if (!existing) throw new NotFoundException('分群不存在');
 
@@ -136,9 +140,7 @@ export class SegmentService {
     // would silently break in-flight scheduled sends.
     const refCount = await this.prisma.campaignSegment.count({ where: { segmentId: id } });
     if (refCount > 0) {
-      throw new ConflictException(
-        `该分群被 ${refCount} 个活动引用,请先解除引用后再删除。`,
-      );
+      throw new ConflictException(`该分群被 ${refCount} 个活动引用,请先解除引用后再删除。`);
     }
 
     await this.prisma.segment.delete({ where: { id } });
@@ -156,10 +158,7 @@ export class SegmentService {
    *   - refresh (just calls .size, persists cachedCount)
    *   - Campaign send (turns ids into CampaignRecipient rows)
    */
-  async resolveContactIds(
-    accountId: string,
-    def: SegmentDefinition,
-  ): Promise<Set<string>> {
+  async resolveContactIds(accountId: string, def: SegmentDefinition): Promise<Set<string>> {
     const { pgWhere, eventConstraints } = compileSegment(def);
 
     // Apply event constraints first so we can narrow the PG query with `id IN`.
@@ -201,7 +200,7 @@ export class SegmentService {
       // Bound the IN list defensively. With our hard cap above this can't
       // exceed 1M entries, but a single IN of 1M is also bad for PG —
       // see the chunked-scan comment in resolveLarge below.
-      if (candidateIds.length > 50_000) {
+      if (candidateIds.length > PRISMA_IN_BIND_SAFE_LIMIT) {
         return this.resolveLarge(where, candidateIds, notHasIds);
       }
       where.AND = [
@@ -211,7 +210,7 @@ export class SegmentService {
     }
     if (notHasIds.length > 0) {
       const dedup = [...new Set(notHasIds)];
-      if (dedup.length > 50_000) {
+      if (dedup.length > PRISMA_IN_BIND_SAFE_LIMIT) {
         return this.resolveLarge(where, candidateIds ?? null, dedup);
       }
       where.AND = [
@@ -276,10 +275,7 @@ export class SegmentService {
    * Important: account_id is the leading sort key on email_events, so we
    * always filter on it first (perf + tenant isolation defence-in-depth).
    */
-  private async contactIdsFromEvent(
-    accountId: string,
-    ec: EventConstraint,
-  ): Promise<Set<string>> {
+  private async contactIdsFromEvent(accountId: string, ec: EventConstraint): Promise<Set<string>> {
     const params: Record<string, unknown> = {
       acc: accountId,
       et: ec.event,
@@ -330,10 +326,9 @@ export class SegmentService {
     // to 1M ids, and a single `id IN (…)` would exceed PG's 65535 bind-param
     // limit (and bloat memory). 10k per query stays well under the ceiling.
     const contactIds = new Set<string>();
-    const CHUNK = 10_000;
-    for (let i = 0; i < recipientIds.length; i += CHUNK) {
+    for (let i = 0; i < recipientIds.length; i += EVENT_RECIPIENT_LOOKUP_CHUNK) {
       const links = await this.prisma.campaignRecipient.findMany({
-        where: { accountId, id: { in: recipientIds.slice(i, i + CHUNK) } },
+        where: { accountId, id: { in: recipientIds.slice(i, i + EVENT_RECIPIENT_LOOKUP_CHUNK) } },
         select: { contactId: true },
       });
       for (const l of links) contactIds.add(l.contactId);
@@ -349,10 +344,7 @@ export class SegmentService {
    * Lightweight evaluation: count + first 5 contacts. Called as the user
    * builds rules in the editor with debouncing on the FE side.
    */
-  async preview(
-    accountId: string,
-    def: SegmentDefinition,
-  ): Promise<SegmentPreviewResult> {
+  async preview(accountId: string, def: SegmentDefinition): Promise<SegmentPreviewResult> {
     const ids = await this.resolveContactIds(accountId, def);
     if (ids.size === 0) return { count: 0, sample: [] };
 
@@ -410,9 +402,7 @@ export class SegmentService {
         refreshed += 1;
       } catch (err) {
         failed += 1;
-        this.logger.warn(
-          `daily segment refresh failed for ${seg.id}: ${(err as Error).message}`,
-        );
+        this.logger.warn(`daily segment refresh failed for ${seg.id}: ${(err as Error).message}`);
       }
     }
 
