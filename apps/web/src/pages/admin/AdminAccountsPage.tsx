@@ -223,125 +223,121 @@ export function AdminAccountsPage() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[1060px] text-sm">
-            <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">租户</th>
-                <th className="px-4 py-3 font-medium">状态</th>
-                <th className="px-4 py-3 font-medium">角色</th>
-                <th className="px-4 py-3 font-medium">邮件通道</th>
-                <th className="px-4 py-3 font-medium">已添加域名</th>
-                <th className="px-4 py-3 font-medium">剩余发送额度</th>
-                <th className="px-4 py-3 font-medium">注册时间</th>
-                <th className="px-4 py-3 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && <TableSkeletonRows columns={8} />}
-              {!isLoading && accounts && accounts.length === 0 && (
-                <EmptyStateRow colSpan={8} />
-              )}
-              {accounts?.map((a) => (
-                <tr key={a.id} className="border-b last:border-0">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{a.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {a.ownerEmail ?? a.slug}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant={STATUS_VARIANT[a.status]}>{STATUS_LABEL[a.status]}</Badge>
-                    {a.status === 'suspended' && a.suspendedReason ? (
-                      <div
-                        className="mt-1 max-w-[180px] truncate text-xs text-muted-foreground"
-                        title={a.suspendedReason}
-                      >
-                        {a.suspendedReason}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-3">
-                    <RoleBadge role={a.role} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <EmailChannelSummary channels={a.emailChannels} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant={a.senderDomainCount > 0 ? 'default' : 'muted'}>
-                      {a.senderDomainCount}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={
-                        a.sendQuotaRemaining === 0
-                          ? 'font-medium text-destructive'
-                          : a.sendQuotaRemaining < 1000
-                            ? 'font-medium text-amber-600'
-                            : 'font-medium'
-                      }
-                    >
-                      {formatNumber(a.sendQuotaRemaining)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {formatDateTime(a.createdAt)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1.5">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setEditingAccount(a)}
-                        title="修改该租户的邮件通道与剩余发送额度"
-                      >
-                        修改
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleImpersonate(a)}
-                        disabled={impersonatingId === a.id}
-                        title="以管理员身份进入该工作区,可读写其全部数据"
-                      >
-                        {impersonatingId === a.id ? '进入中…' : '代登录'}
-                      </Button>
-                      {a.status === 'pending_activation' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleActivate(a)}
-                          disabled={statusMut.isPending}
-                        >
-                          手动激活
-                        </Button>
-                      )}
-                      {a.status === 'suspended' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleUnsuspend(a)}
-                          disabled={statusMut.isPending}
-                        >
-                          解除封禁
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleSuspend(a)}
-                          disabled={statusMut.isPending}
-                          className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
-                        >
-                          封禁
-                        </Button>
-                      )}
-                    </div>
-                  </td>
+            <table className="w-full min-w-[960px] text-sm">
+              <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 font-medium">租户</th>
+                  <th className="px-4 py-3 font-medium">状态</th>
+                  <th className="px-4 py-3 font-medium">角色</th>
+                  <th className="px-4 py-3 font-medium">已添加域名</th>
+                  <th className="px-4 py-3 font-medium">剩余发送额度</th>
+                  <th className="px-4 py-3 font-medium">注册时间</th>
+                  <th className="px-4 py-3 font-medium">操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {isLoading && <TableSkeletonRows columns={7} />}
+                {!isLoading && accounts && accounts.length === 0 && (
+                  <EmptyStateRow colSpan={7} />
+                )}
+                {accounts?.map((a) => (
+                  <tr key={a.id} className="border-b last:border-0">
+                    <td className="px-4 py-3">
+                      <div className="font-medium">{a.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {a.ownerEmail ?? a.slug}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant={STATUS_VARIANT[a.status]}>{STATUS_LABEL[a.status]}</Badge>
+                      {a.status === 'suspended' && a.suspendedReason ? (
+                        <div
+                          className="mt-1 max-w-[180px] truncate text-xs text-muted-foreground"
+                          title={a.suspendedReason}
+                        >
+                          {a.suspendedReason}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3">
+                      <RoleBadge role={a.role} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant={a.senderDomainCount > 0 ? 'default' : 'muted'}>
+                        {a.senderDomainCount}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={
+                          a.sendQuotaRemaining === 0
+                            ? 'font-medium text-destructive'
+                            : a.sendQuotaRemaining < 1000
+                              ? 'font-medium text-amber-600'
+                              : 'font-medium'
+                        }
+                      >
+                        {formatNumber(a.sendQuotaRemaining)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {formatDateTime(a.createdAt)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEditingAccount(a)}
+                          title="修改该租户的邮件通道与剩余发送额度"
+                        >
+                          修改
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleImpersonate(a)}
+                          disabled={impersonatingId === a.id}
+                          title="以管理员身份进入该工作区,可读写其全部数据"
+                        >
+                          {impersonatingId === a.id ? '进入中…' : '代登录'}
+                        </Button>
+                        {a.status === 'pending_activation' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleActivate(a)}
+                            disabled={statusMut.isPending}
+                          >
+                            手动激活
+                          </Button>
+                        )}
+                        {a.status === 'suspended' ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleUnsuspend(a)}
+                            disabled={statusMut.isPending}
+                          >
+                            解除封禁
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSuspend(a)}
+                            disabled={statusMut.isPending}
+                            className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                          >
+                            封禁
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>
@@ -355,25 +351,6 @@ export function AdminAccountsPage() {
           onSave={handleSaveEdit}
         />
       )}
-    </div>
-  );
-}
-
-/** 邮件通道列:只展示首个(优先主账号),绑定多个时追加省略号,悬浮显示全部。 */
-function EmailChannelSummary({ channels }: { channels: AssignedEmailChannelView[] }) {
-  if (channels.length === 0) return <span className="text-xs text-muted-foreground">未分配</span>;
-  const sorted = [...channels].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
-  const first = sorted[0];
-  const title = sorted
-    .map((c) => `${c.name}${c.isPrimary ? ' · 主' : ''}`)
-    .join('\n');
-  return (
-    <div className="max-w-[220px]" title={title}>
-      <div className="truncate text-sm font-medium">
-        {first.name}
-        {first.isPrimary ? ' · 主' : ''}
-        {channels.length > 1 ? ` +${channels.length - 1}` : ''}
-      </div>
     </div>
   );
 }
