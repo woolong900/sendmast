@@ -90,9 +90,25 @@ export function AdminTrackingDomainsPage() {
       const detail =
         r.status === null ? r.message : `${r.message},耗时 ${formatNumberCompact(r.latencyMs)}ms`;
       toast(`${r.domain} ${r.ok ? '检测通过' : '检测失败'}:${detail}`, r.ok ? 'success' : 'error');
+      qc.invalidateQueries({ queryKey: ['admin', 'tracking-domains'] });
     },
     onError: (e) => toast(apiErrMessage(e), 'error'),
     onSettled: () => setCheckingId(null),
+  });
+
+  const checkAllMut = useMutation({
+    mutationFn: async () =>
+      (await api.post<{ checked: number; failed: number; disabled: number }>(
+        '/api/admin/tracking-domains/check-all',
+      )).data,
+    onSuccess: (r) => {
+      toast(
+        `巡检完成:检测 ${r.checked} 个,失败 ${r.failed} 个,自动禁用 ${r.disabled} 个`,
+        r.failed > 0 ? 'error' : 'success',
+      );
+      qc.invalidateQueries({ queryKey: ['admin', 'tracking-domains'] });
+    },
+    onError: (e) => toast(apiErrMessage(e), 'error'),
   });
 
   async function handleDelete(d: TrackingDomainView) {
@@ -131,10 +147,20 @@ export function AdminTrackingDomainsPage() {
             其他域名依然可用,不会牵连主站。<b>池为空时活动会直接失败</b>,请至少保留一个启用域名。
           </p>
         </div>
-        <Button onClick={() => setShowCreate((v) => !v)} className="w-full sm:w-auto">
-          <Plus className="mr-1 size-4" />
-          添加域名
-        </Button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <Button
+            variant="outline"
+            onClick={() => checkAllMut.mutate()}
+            disabled={checkAllMut.isPending}
+          >
+            <Activity className="mr-1 size-4" />
+            {checkAllMut.isPending ? '巡检中…' : '立即巡检'}
+          </Button>
+          <Button onClick={() => setShowCreate((v) => !v)}>
+            <Plus className="mr-1 size-4" />
+            添加域名
+          </Button>
+        </div>
       </div>
 
       <UsageHint />
@@ -210,20 +236,21 @@ export function AdminTrackingDomainsPage() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] text-sm">
+            <table className="w-full min-w-[900px] text-sm">
               <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 font-medium">域名</th>
                   <th className="px-4 py-3 font-medium">状态</th>
+                  <th className="px-4 py-3 font-medium">健康</th>
                   <th className="px-4 py-3 font-medium">备注</th>
                   <th className="px-4 py-3 font-medium">添加时间</th>
                   <th className="px-4 py-3 font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {isLoading && <TableSkeletonRows columns={5} />}
+                {isLoading && <TableSkeletonRows columns={6} />}
                 {!isLoading && domains.length === 0 && (
-                  <EmptyStateRow colSpan={5} title="暂无追踪域名 — 点右上角「添加域名」开始" />
+                  <EmptyStateRow colSpan={6} title="暂无追踪域名 — 点右上角「添加域名」开始" />
                 )}
                 {domains.map((d) => (
                   <tr key={d.id} className="border-b last:border-0">
@@ -247,6 +274,9 @@ export function AdminTrackingDomainsPage() {
                           <Badge variant="muted">已禁用</Badge>
                         )}
                       </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <HealthCell domain={d} />
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {d.notes ? (
@@ -362,6 +392,46 @@ function UsageHint() {
 
 function formatNumberCompact(n: number): string {
   return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(n);
+}
+
+function HealthCell({ domain }: { domain: TrackingDomainView }) {
+  const badge =
+    domain.healthStatus === 'healthy' ? (
+      <Badge variant="success">健康</Badge>
+    ) : domain.healthStatus === 'failed' ? (
+      <Badge variant="danger">失败 {domain.consecutiveFailures}/3</Badge>
+    ) : (
+      <Badge variant="muted">未检测</Badge>
+    );
+  return (
+    <div className="space-y-1">
+      <div>{badge}</div>
+      <div className="flex flex-wrap gap-1 text-[11px]">
+        <CheckPill label="DNS" ok={domain.dnsOk} />
+        <CheckPill label="TLS" ok={domain.tlsOk} />
+        <CheckPill label="Caddy" ok={domain.caddyOk} />
+      </div>
+      <div className="text-xs text-muted-foreground">
+        {domain.lastCheckedAt ? formatDateTime(domain.lastCheckedAt) : '等待小时巡检'}
+        {domain.httpStatus ? ` · HTTP ${domain.httpStatus}` : ''}
+      </div>
+      {domain.lastError && (
+        <div className="max-w-xs truncate text-xs text-rose-700" title={domain.lastError}>
+          {domain.lastError}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CheckPill({ label, ok }: { label: string; ok: boolean | null }) {
+  const cls =
+    ok === true
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : ok === false
+        ? 'border-rose-200 bg-rose-50 text-rose-700'
+        : 'border-muted bg-muted/40 text-muted-foreground';
+  return <span className={`rounded border px-1.5 py-0.5 ${cls}`}>{label}</span>;
 }
 
 /**

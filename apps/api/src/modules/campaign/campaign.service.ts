@@ -13,6 +13,7 @@ import { ClickHouseService } from '../../common/clickhouse/clickhouse.service';
 import { AuthService } from '../auth/auth.service';
 import { SegmentService } from '../segment/segment.service';
 import { TemplateService } from '../template/template.service';
+import { TrackingDomainService } from '../tracking-domain/tracking-domain.service';
 import { renderMjml } from '../template/mjml-renderer';
 import {
   QUEUE_NAMES,
@@ -310,6 +311,7 @@ export class CampaignService {
     private readonly ch: ClickHouseService,
     private readonly auth: AuthService,
     private readonly segments: SegmentService,
+    private readonly trackingDomains: TrackingDomainService,
   ) {}
 
   async list(accountId: string, query: ListCampaignsQuery) {
@@ -1526,7 +1528,8 @@ export class CampaignService {
       },
     });
     if (!c) throw new NotFoundException();
-    if (!c.html) throw new BadRequestException('活动尚未设置邮件正文');
+    this.assertCampaignHtmlReady(c.html, c.mjml);
+    await this.assertUsableTrackingDomain();
 
     // Resolve the campaign's full sender roster (falls back to the primary for
     // pre-feature campaigns with no campaign_senders rows) and validate every
@@ -1584,6 +1587,14 @@ export class CampaignService {
       if (inserted === 0) {
         throw new BadRequestException('所选列表/分群中没有可发送的联系人');
       }
+      if (account.sendQuotaRemaining < inserted) {
+        await this.prisma.campaignRecipient.deleteMany({
+          where: { campaignId: c.id, accountId, status: 'pending' },
+        });
+        throw new BadRequestException(
+          `发送额度不足:本次预计需要 ${inserted} 封,当前剩余 ${account.sendQuotaRemaining} 封。请先购买额度。`,
+        );
+      }
 
       const swap = await this.prisma.campaign.updateMany({
         where: {
@@ -1604,16 +1615,23 @@ export class CampaignService {
       // lists — gives the user immediate "your audience is empty" feedback
       // without paying for the full scan.
       const listIds = c.lists.map((l) => l.listId);
-      const hasAny = await this.prisma.contact.findFirst({
+      if (listIds.length === 0) {
+        throw new BadRequestException('请至少选择一个联系人列表或动态分群');
+      }
+      const targetCount = await this.prisma.contact.count({
         where: {
           accountId,
           subscriptionStatus: 'subscribed',
           memberships: { some: { listId: { in: listIds } } },
         },
-        select: { id: true },
       });
-      if (!hasAny) {
+      if (targetCount === 0) {
         throw new BadRequestException('所选列表/分群中没有可发送的联系人');
+      }
+      if (account.sendQuotaRemaining < targetCount) {
+        throw new BadRequestException(
+          `发送额度不足:本次预计需要 ${targetCount} 封,当前剩余 ${account.sendQuotaRemaining} 封。请先购买额度。`,
+        );
       }
 
       // Status compare-and-swap. totalRecipients stays at 0 — the worker
@@ -1641,6 +1659,42 @@ export class CampaignService {
     );
 
     return { ok: true };
+  }
+
+  private async assertUsableTrackingDomain(): Promise<void> {
+    const usable = await this.trackingDomains.countUsable();
+    if (usable === 0) {
+      throw new BadRequestException(
+        '没有可用追踪域名。请先在「平台管理 > 追踪域名」启用至少一个健康域名。',
+      );
+    }
+  }
+
+  private assertCampaignHtmlReady(html: string | null, mjml: string | null): void {
+    if (!html || html.trim().length === 0) {
+      throw new BadRequestException('活动尚未设置邮件正文');
+    }
+    if (html.includes('\u0000')) {
+      throw new BadRequestException('模板 HTML 含有非法空字符,无法渲染');
+    }
+    if (mjml?.trim()) {
+      try {
+        renderMjml(mjml);
+      } catch (err) {
+        throw new BadRequestException(
+          `模板 MJML 渲染失败:${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    // worker-sender auto-appends the visible unsubscribe footer when the body
+    // lacks {{unsubscribe_url}}. Mirror that guarantee here so preflight
+    // validates the final sendable body, not just the draft's raw HTML.
+    const sendableHtml = /\{\{unsubscribe_url\}\}/.test(html)
+      ? html
+      : `${html}\n{{unsubscribe_url}}`;
+    if (!/\{\{unsubscribe_url\}\}/.test(sendableHtml)) {
+      throw new BadRequestException('模板缺少退订链接 {{unsubscribe_url}}');
+    }
   }
 
   /**

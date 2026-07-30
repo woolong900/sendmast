@@ -16,6 +16,8 @@ export const QUEUE_NAMES = {
   SEGMENT_REFRESH: 'segment-refresh',
   /** Server-side render of a campaign's HTML into a list thumbnail (WebP). */
   RENDER_THUMBNAIL: 'render-thumbnail',
+  /** Hourly DNS/TLS/Caddy checks for tracking domains. */
+  TRACKING_DOMAIN_HEALTH: 'tracking-domain-health',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

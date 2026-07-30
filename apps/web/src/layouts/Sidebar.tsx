@@ -20,6 +20,7 @@ import {
   Handshake,
   Store,
   Workflow,
+  ListTree,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/BrandLogo';
 import { cn } from '@/lib/utils';
@@ -73,6 +74,7 @@ const ADMIN_NAV: NavGroup = {
     { to: '/admin/system-mail', label: '系统邮件', icon: <Mail className="size-4" /> },
     { to: '/admin/quota-tiers', label: '套餐档位', icon: <Coins className="size-4" /> },
     { to: '/admin/tracking-domains', label: '追踪域名', icon: <Radio className="size-4" /> },
+    { to: '/admin/queues', label: '队列监控', icon: <ListTree className="size-4" /> },
     { to: '/admin/referral', label: '推荐返佣', icon: <Handshake className="size-4" /> },
   ],
 };

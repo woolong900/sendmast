@@ -126,6 +126,11 @@ const AdminTrackingDomainsPage = lazy(() =>
     default: m.AdminTrackingDomainsPage,
   })),
 );
+const AdminQueuesPage = lazy(() =>
+  import('@/pages/admin/AdminQueuesPage').then((m) => ({
+    default: m.AdminQueuesPage,
+  })),
+);
 const AdminReferralPage = lazy(() =>
   import('@/pages/admin/AdminReferralPage').then((m) => ({
     default: m.AdminReferralPage,
@@ -265,6 +270,14 @@ export default function App() {
                 element={
                   <RequirePlatformAdmin>
                     <AdminTrackingDomainsPage />
+                  </RequirePlatformAdmin>
+                }
+              />
+              <Route
+                path="admin/queues"
+                element={
+                  <RequirePlatformAdmin>
+                    <AdminQueuesPage />
                   </RequirePlatformAdmin>
                 }
               />

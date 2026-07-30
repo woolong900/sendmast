@@ -36,6 +36,15 @@ export interface TrackingDomainView {
   id: string;
   domain: string;
   status: TrackingDomainStatus;
+  healthStatus: 'unknown' | 'healthy' | 'failed';
+  dnsOk: boolean | null;
+  tlsOk: boolean | null;
+  caddyOk: boolean | null;
+  httpStatus: number | null;
+  latencyMs: number | null;
+  lastError: string | null;
+  lastCheckedAt: string | null;
+  consecutiveFailures: number;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +55,11 @@ export interface TrackingDomainCheckResult {
   domain: string;
   url: string;
   status: number | null;
+  dnsOk: boolean;
+  tlsOk: boolean;
+  caddyOk: boolean;
+  consecutiveFailures: number;
+  disabled: boolean;
   latencyMs: number;
   checkedAt: string;
   message: string;

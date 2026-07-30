@@ -187,10 +187,10 @@ model FxRate {
 /// to the primary app host because the whole point is to keep the app host
 /// out of email tracking.
 ///
-/// Domain availability is enforced by the operator: each row needs a matching
-/// Caddy site block on the server (see docker/tracking.d/) plus DNS pointing
-/// at the server. We don't probe automatically — the admin marks `active`
-/// only after they've confirmed the config works.
+/// Domain availability is enforced by both the operator and the hourly health
+/// checker: each row needs DNS, TLS and a matching Caddy /t/* route. Three
+/// consecutive failed checks automatically disable the domain so senders stop
+/// embedding broken tracking URLs.
 model TrackingDomain {
   id        String   @id @default(uuid()) @db.Uuid
   /// Bare hostname, no protocol/path. Stored lowercase.
@@ -200,12 +200,25 @@ model TrackingDomain {
   /// Two-state for now; if we add automated DNS/TLS probing later we'll
   /// expand to pending/failed.
   status    String   @default("active") @db.VarChar(16)
+  /// 'unknown' — never checked / reset by admin
+  /// 'healthy' — DNS + TLS + Caddy route reached
+  /// 'failed'  — latest check failed; UI renders this red even before disable.
+  lastCheckStatus  String    @default("unknown") @map("last_check_status") @db.VarChar(16)
+  lastCheckDnsOk   Boolean?  @map("last_check_dns_ok")
+  lastCheckTlsOk   Boolean?  @map("last_check_tls_ok")
+  lastCheckCaddyOk Boolean?  @map("last_check_caddy_ok")
+  lastCheckHttpStatus Int?   @map("last_check_http_status")
+  lastCheckLatencyMs  Int?   @map("last_check_latency_ms")
+  lastCheckError      String? @map("last_check_error") @db.Text
+  lastCheckedAt       DateTime? @map("last_checked_at")
+  consecutiveFailures Int      @default(0) @map("consecutive_failures")
   /// Free-form admin note (e.g. "purchased 2026-05, registrar Namecheap").
   notes     String?  @db.Text
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([status])
+  @@index([lastCheckStatus])
   @@map("tracking_domains")
 }
 

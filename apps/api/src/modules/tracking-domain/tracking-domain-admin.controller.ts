@@ -44,6 +44,11 @@ export class TrackingDomainAdminController {
     return this.svc.check(id);
   }
 
+  @Post('check-all')
+  async checkAll() {
+    return this.svc.checkAllActive();
+  }
+
   @Patch(':id')
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,

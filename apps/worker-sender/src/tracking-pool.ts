@@ -30,7 +30,7 @@ export async function getActiveTrackingDomains(
   const now = Date.now();
   if (cache && now - cache.fetchedAt < TTL_MS) return cache.domains;
   const rows = await prisma.trackingDomain.findMany({
-    where: { status: 'active' },
+    where: { status: 'active', lastCheckStatus: { in: ['unknown', 'healthy'] } },
     select: { domain: true },
     // Stable order so the hash → index mapping is deterministic for a given
     // pool snapshot. Adding/removing a row reshuffles which recipient hits

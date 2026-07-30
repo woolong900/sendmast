@@ -32,6 +32,7 @@ import { FxModule } from './modules/fx/fx.module';
 import { TrackingDomainModule } from './modules/tracking-domain/tracking-domain.module';
 import { ReferralModule } from './modules/referral/referral.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
+import { QueueAdminModule } from './modules/queue-admin/queue-admin.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
     ReferralModule,
     QuotaBillingModule,
     TrackingDomainModule,
+    QueueAdminModule,
     IntegrationsModule,
   ],
   providers: [
