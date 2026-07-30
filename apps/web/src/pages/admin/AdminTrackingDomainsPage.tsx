@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Plus, Trash2 } from 'lucide-react';
+import { Activity, Copy, Plus, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,7 @@ import { api, apiErrMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import type {
   CreateTrackingDomainInput,
+  TrackingDomainCheckResult,
   TrackingDomainView,
 } from '@sendmast/shared';
 
@@ -41,6 +42,7 @@ export function AdminTrackingDomainsPage() {
   const toast = useToast();
   const confirm = useConfirm();
   const [showCreate, setShowCreate] = useState(false);
+  const [checkingId, setCheckingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<CreateTrackingDomainInput>({
     domain: '',
     notes: '',
@@ -76,6 +78,21 @@ export function AdminTrackingDomainsPage() {
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ['admin', 'tracking-domains'] }),
     onError: (e) => toast(apiErrMessage(e), 'error'),
+  });
+
+  const checkMut = useMutation({
+    mutationFn: async (d: TrackingDomainView) => {
+      setCheckingId(d.id);
+      return (await api.get<TrackingDomainCheckResult>(`/api/admin/tracking-domains/${d.id}/check`))
+        .data;
+    },
+    onSuccess: (r) => {
+      const detail =
+        r.status === null ? r.message : `${r.message},耗时 ${formatNumberCompact(r.latencyMs)}ms`;
+      toast(`${r.domain} ${r.ok ? '检测通过' : '检测失败'}:${detail}`, r.ok ? 'success' : 'error');
+    },
+    onError: (e) => toast(apiErrMessage(e), 'error'),
+    onSettled: () => setCheckingId(null),
   });
 
   async function handleDelete(d: TrackingDomainView) {
@@ -248,6 +265,16 @@ export function AdminTrackingDomainsPage() {
                         <Button
                           size="sm"
                           variant="outline"
+                          onClick={() => checkMut.mutate(d)}
+                          disabled={checkMut.isPending}
+                          title="从服务器检测 DNS、TLS 与 Caddy 追踪路由"
+                        >
+                          <Activity className="mr-1 size-3.5" />
+                          {checkingId === d.id ? '检测中…' : '检测'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={() => copyCaddySnippet(d.domain)}
                           title="复制 Caddy 片段"
                         >
@@ -331,6 +358,10 @@ function UsageHint() {
       </ol>
     </div>
   );
+}
+
+function formatNumberCompact(n: number): string {
+  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(n);
 }
 
 /**

@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type {
   CreateTrackingDomainInput,
+  TrackingDomainCheckResult,
   TrackingDomainView,
   UpdateTrackingDomainInput,
 } from '@sendmast/shared';
@@ -56,6 +57,58 @@ export class TrackingDomainService {
         throw new ConflictException(`域名 ${domain} 已存在`);
       }
       throw err;
+    }
+  }
+
+  async check(id: string): Promise<TrackingDomainCheckResult> {
+    const row = await this.prisma.trackingDomain.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException('追踪域名不存在');
+
+    const domain = row.domain;
+    const url = `https://${domain}/t/o/_probe.gif`;
+    const started = Date.now();
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 10_000);
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: ctrl.signal,
+        headers: {
+          'user-agent': 'SendMast tracking-domain-check/1.0',
+          accept: 'image/gif,*/*;q=0.8',
+        },
+      });
+      const latencyMs = Date.now() - started;
+      const ok = res.status < 500;
+      return {
+        ok,
+        domain,
+        url,
+        status: res.status,
+        latencyMs,
+        checkedAt: new Date().toISOString(),
+        message: ok
+          ? `HTTP ${res.status}, TLS/Caddy 路由可达`
+          : `HTTP ${res.status}, Cloudflare 或源站可能异常`,
+      };
+    } catch (err) {
+      const latencyMs = Date.now() - started;
+      const message =
+        err instanceof Error && err.name === 'AbortError'
+          ? '检测超时:10 秒内未收到响应'
+          : `检测失败:${err instanceof Error ? err.message : String(err)}`;
+      return {
+        ok: false,
+        domain,
+        url,
+        status: null,
+        latencyMs,
+        checkedAt: new Date().toISOString(),
+        message,
+      };
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

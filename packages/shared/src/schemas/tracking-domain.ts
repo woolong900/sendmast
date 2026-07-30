@@ -40,3 +40,13 @@ export interface TrackingDomainView {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface TrackingDomainCheckResult {
+  ok: boolean;
+  domain: string;
+  url: string;
+  status: number | null;
+  latencyMs: number;
+  checkedAt: string;
+  message: string;
+}

@@ -39,6 +39,11 @@ export class TrackingDomainAdminController {
     return this.svc.create(r.data);
   }
 
+  @Get(':id/check')
+  async check(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.svc.check(id);
+  }
+
   @Patch(':id')
   async update(
     @Param('id', new ParseUUIDPipe()) id: string,
