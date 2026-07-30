@@ -281,17 +281,17 @@ function UsageHint() {
     <div className="overflow-hidden rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-900">
       <div className="font-medium">添加新域名的步骤</div>
       <ol className="mt-2 list-decimal space-y-1 pl-5 text-blue-800/90">
-        <li>购买域名,DNS 接入 Cloudflare(账号需与现有域同号)。</li>
+        <li>购买域名,在该域名所属的 Cloudflare 账号/Zone 里接入 DNS。</li>
         <li>
           在 Cloudflare 加 A 记录指向 <span className="font-mono">74.208.77.128</span>,
           <b>启用代理(橙云)</b>。
         </li>
         <li>
-          Cloudflare 后台 → SSL/TLS → Origin Server,确认现有 Origin Cert 的 SAN/wildcard
-          已覆盖该域名;未覆盖时新建/重新签发 Origin Cert。
+          该域名所属 Cloudflare 后台 → SSL/TLS → Origin Server,确认服务器当前 Origin Cert
+          的 SAN/wildcard 已覆盖该域名;未覆盖时新建/重新签发 Origin Cert。
         </li>
         <li>
-          如重新签发证书,把 cert/key scp 到服务器
+          如重新签发证书,先确认新 cert/key 仍覆盖所有已在线域名,再 scp 到服务器
           <span className="break-all font-mono"> /var/lib/sendmast/caddy-certs/</span>
           替换 <span className="font-mono">origin-cert.pem</span> 和{' '}
           <span className="font-mono">origin-key.pem</span>。

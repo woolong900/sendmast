@@ -3,9 +3,10 @@
 #
 # Pre-requisites you must already have done in Cloudflare:
 #   1. DNS: A record for <domain> pointing at the server IP, proxied (orange cloud).
-#   2. SSL/TLS → Origin Server: edit hostnames on your existing Origin Cert
-#      to include <domain> (and any wildcard you want, e.g. *.example.com).
-#      Re-download cert + key and replace
+#   2. SSL/TLS → Origin Server in the Cloudflare account/zone that owns
+#      <domain>: make sure the server's Origin Cert covers <domain> (or a
+#      wildcard such as *.example.com). If you re-issue the cert, verify the
+#      new cert/key still cover every already-online hostname, then replace
 #      /var/lib/sendmast/caddy-certs/origin-cert.pem (and origin-key.pem)
 #      on the server. If you don't, the TLS-handshake probe at the end will
 #      fail and tell you exactly that.
