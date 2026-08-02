@@ -437,8 +437,9 @@ function CheckPill({ label, ok }: { label: string; ok: boolean | null }) {
 /**
  * Generate a Caddy site block for a tracking domain. Mirrors the existing
  * app/api site blocks: Cloudflare origin cert (mounted at the same path the
- * other site blocks reference), gzip/zstd, /t/* reverse proxy, everything
- * else 404 (we don't want this hostname leaking the SPA or the API).
+ * other site blocks reference), gzip/zstd, /t/* reverse proxy, public email
+ * assets, everything else 404 (we don't want this hostname leaking the SPA
+ * or the API).
  */
 function buildCaddySnippet(domain: string): string {
   return `# Tracking domain: ${domain}
@@ -450,6 +451,12 @@ ${domain} {
 
 \thandle /t/* {
 \t\treverse_proxy api:4000
+\t}
+
+\t@publicSvg path_regexp publicSvg ^/sendmast-public/.*\\.svg$
+\trespond @publicSvg 404
+\thandle /sendmast-public/* {
+\t\treverse_proxy minio:9000
 \t}
 
 \thandle {

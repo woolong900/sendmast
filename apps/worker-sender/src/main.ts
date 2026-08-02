@@ -95,6 +95,16 @@ function publicAssetBaseUrl(): string | undefined {
   return origin ? `${origin}${raw}` : undefined;
 }
 
+function trackingAssetBaseUrl(trackingBaseUrl: string): string | undefined {
+  if (!PUBLIC_ASSET_BASE_URL) return undefined;
+  try {
+    const source = new URL(PUBLIC_ASSET_BASE_URL);
+    return `${trackingBaseUrl.replace(/\/+$/, '')}${source.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return undefined;
+  }
+}
+
 // ============================================================================
 // EmailChannel cache (rebuilt by tick at most every 30s)
 // ============================================================================
@@ -776,6 +786,7 @@ async function runSend(job: Job<SendJobData>) {
       : undefined,
     trackClicks: c.trackClicks,
     assetBaseUrl: PUBLIC_ASSET_BASE_URL,
+    assetRewriteBaseUrl: trackingAssetBaseUrl(trackingBaseUrl),
     // Hard-attribution id: the store echoes this link's query in the order's
     // landing_page, letting the order webhook attribute the conversion to this
     // exact recipient regardless of click tracking or checkout email.
@@ -1080,6 +1091,7 @@ async function runFlowSend(job: Job<SendJobData>) {
     },
     trackClicks: true,
     assetBaseUrl: PUBLIC_ASSET_BASE_URL,
+    assetRewriteBaseUrl: trackingAssetBaseUrl(trackingBaseUrl),
     // Keep flow sends attributable in the same way as campaign recipients:
     // the store echoes sm_mid from the landing URL back in the order webhook.
     smMid: send.id,

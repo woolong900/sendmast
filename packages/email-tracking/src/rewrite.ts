@@ -30,6 +30,12 @@ export interface RewriteOptions {
    */
   assetBaseUrl?: string;
   /**
+   * Absolute base URL to write into outgoing email asset srcs. This lets the
+   * app store/editor use the app origin while delivered mail uses the selected
+   * tracking domain for public images.
+   */
+  assetRewriteBaseUrl?: string;
+  /**
    * When set, `sm_mid=<id>` is appended to every http(s) link's destination so
    * a downstream conversion can be hard-attributed back to this exact send: the
    * store echoes the link's query string in the order's `landing_page`, which
@@ -99,20 +105,33 @@ function applySmMid(url: string, smMid?: string): string {
   }
 }
 
-function absoluteAssetSrc(src: string, assetBaseUrl?: string): string {
+function absoluteAssetSrc(
+  src: string,
+  assetBaseUrl?: string,
+  assetRewriteBaseUrl?: string,
+): string {
   if (!assetBaseUrl || /^(data|cid):/i.test(src)) return src;
 
   try {
-    const assetBase = new URL(assetBaseUrl);
-    const pathPrefix = assetBase.pathname.replace(/\/+$/, '');
-    const brokenHttpPath = `http:///${pathPrefix.replace(/^\/+/, '')}/`;
-    if (/^https?:\/\//i.test(src) && !src.startsWith(brokenHttpPath)) return src;
-    const normalisedSrc = src.startsWith(brokenHttpPath)
-      ? `${pathPrefix}/${src.slice(brokenHttpPath.length)}`
-      : src;
+    const sourceBase = new URL(assetBaseUrl);
+    const targetBase = new URL(assetRewriteBaseUrl ?? assetBaseUrl);
+    const sourcePrefix = sourceBase.pathname.replace(/\/+$/, '');
+    const targetPrefix = targetBase.pathname.replace(/\/+$/, '');
+    const brokenHttpPath = `http:///${sourcePrefix.replace(/^\/+/, '')}/`;
 
-    if (!normalisedSrc.startsWith(`${pathPrefix}/`)) return src;
-    return `${assetBase.origin}${normalisedSrc}`;
+    let assetPath: string | null = null;
+    if (src.startsWith(brokenHttpPath)) {
+      assetPath = `${sourcePrefix}/${src.slice(brokenHttpPath.length)}`;
+    } else if (/^https?:\/\//i.test(src)) {
+      const parsed = new URL(src);
+      assetPath = parsed.pathname.startsWith(`${sourcePrefix}/`) ? parsed.pathname : null;
+    } else if (src.startsWith(`${sourcePrefix}/`)) {
+      assetPath = src;
+    }
+
+    if (!assetPath) return src;
+    const suffix = assetPath.slice(sourcePrefix.length);
+    return `${targetBase.origin}${targetPrefix}${suffix}`;
   } catch {
     return src;
   }
@@ -127,7 +146,7 @@ export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
 
   const assetSafeHtml = html.replace(SRC_REGEX, (match, q1: string, rawSrc: string) => {
     const src = decodeHtmlAttribute(rawSrc);
-    const absoluteSrc = absoluteAssetSrc(src, opts.assetBaseUrl);
+    const absoluteSrc = absoluteAssetSrc(src, opts.assetBaseUrl, opts.assetRewriteBaseUrl);
     return absoluteSrc === src ? match : `src=${q1}${encodeHtmlAttribute(absoluteSrc)}${q1}`;
   });
 
