@@ -143,17 +143,11 @@ export class EmailChannelService {
       },
     });
     if (!acct) throw new NotFoundException();
-    if (acct._count.senderDomains > 0) {
-      throw new ConflictException(
-        `Cannot delete: ${acct._count.senderDomains} sender domain(s) still bound`,
-      );
-    }
-    if (acct._count.accountLinks > 0) {
-      throw new ConflictException(
-        `无法删除:仍有 ${acct._count.accountLinks} 个租户分配了该邮件通道`,
-      );
-    }
-    await this.prisma.emailChannel.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.senderDomain.deleteMany({ where: { emailChannelId: id } });
+      await tx.accountEmailChannel.deleteMany({ where: { emailChannelId: id } });
+      await tx.emailChannel.delete({ where: { id } });
+    });
   }
 
   /**
