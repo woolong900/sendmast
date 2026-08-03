@@ -236,7 +236,6 @@ function formatMoney(amount: number, currency: string): string {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: currency || 'USD',
-      currencyDisplay: 'narrowSymbol',
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
