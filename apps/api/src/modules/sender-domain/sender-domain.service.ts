@@ -409,9 +409,9 @@ export class SenderDomainService {
         await this.mailgun.deleteDomain(row.emailChannel, row.domain);
       } catch (err) {
         const message = (err as Error).message;
-        if (!message.includes('Mailgun API 404')) throw err;
+        if (!isIgnorableMailgunDeleteError(message)) throw err;
         this.logger.warn(
-          `Mailgun domain ${row.domain} was not found upstream; deleting local row only.`,
+          `Mailgun domain ${row.domain} could not be deleted upstream (${message}); deleting local row only.`,
         );
       }
     } else if (row.emailChannel.provider === 'resend') {
@@ -542,4 +542,14 @@ export class SenderDomainService {
       createdAt: u.createdAt.toISOString(),
     };
   }
+}
+
+function isIgnorableMailgunDeleteError(message: string): boolean {
+  return (
+    message.includes('Mailgun API 404') ||
+    message.includes('Mailgun API 401') ||
+    message.includes('Mailgun API 403') ||
+    message.includes('API Key 未配置') ||
+    message.toLowerCase().includes('api key is disabled')
+  );
 }
