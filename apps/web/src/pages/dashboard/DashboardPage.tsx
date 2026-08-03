@@ -25,7 +25,7 @@ interface DashboardSummary {
   campaigns: { draft: number; scheduled: number; sending: number; sent: number };
   metrics30d: { sent: number; uniqueOpens: number; openRate: number };
   shopConnected: boolean;
-  sales: { revenue: number; orders: number; aov: number };
+  sales: { revenue: number; orders: number; aov: number; currency: string };
 }
 
 export function DashboardPage() {
@@ -160,7 +160,7 @@ export function DashboardPage() {
                 <SalesStat
                   icon={<CircleDollarSign className="size-4" />}
                   label="近 30 日营收"
-                  value={formatUsd(data.sales.revenue)}
+                  value={formatMoney(data.sales.revenue, data.sales.currency)}
                   tone="emerald"
                 />
                 <SalesStat
@@ -172,7 +172,7 @@ export function DashboardPage() {
                 <SalesStat
                   icon={<TrendingUp className="size-4" />}
                   label="客单价"
-                  value={formatUsd(data.sales.aov)}
+                  value={formatMoney(data.sales.aov, data.sales.currency)}
                   tone="amber"
                 />
               </div>
@@ -231,15 +231,16 @@ function StatCard({
   return link ? <Link to={link}>{inner}</Link> : inner;
 }
 
-function formatUsd(amount: number): string {
+function formatMoney(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD',
+      currency: currency || 'USD',
+      currencyDisplay: 'narrowSymbol',
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    return `US$${amount.toFixed(2)}`;
+    return `${currency || 'USD'} ${amount.toFixed(2)}`;
   }
 }
 

@@ -8,7 +8,7 @@ export interface DashboardSummary {
   /** Rolling 30-day metrics — drives the top-row stat cards on the dashboard. */
   metrics30d: { sent: number; uniqueOpens: number; openRate: number };
   shopConnected: boolean;
-  sales: { revenue: number; orders: number; aov: number };
+  sales: { revenue: number; orders: number; aov: number; currency: string };
 }
 
 @Injectable()
@@ -93,24 +93,47 @@ export class DashboardService {
   private async querySales30d(
     accountId: string,
     since: Date,
-  ): Promise<{ revenue: number; orders: number; aov: number }> {
+  ): Promise<{ revenue: number; orders: number; aov: number; currency: string }> {
     try {
-      const agg = await this.prisma.shopOrder.aggregate({
-        where: {
-          accountId,
-          orderTime: { gte: since },
-          OR: [{ attributedCampaignId: { not: null } }, { attributedAutomationId: { not: null } }],
-        },
+      const where = {
+        accountId,
+        orderTime: { gte: since },
+        OR: [{ attributedCampaignId: { not: null } }, { attributedAutomationId: { not: null } }],
+      };
+      const rows = await this.prisma.shopOrder.groupBy({
+        by: ['currency'],
+        where,
         _count: { _all: true },
         _sum: { value: true },
       });
-      const orders = agg._count._all;
-      const revenue = Number(agg._sum.value ?? 0);
-      return { orders, revenue, aov: orders > 0 ? revenue / orders : 0 };
+      const top = rows
+        .map((row) => ({
+          currency: row.currency || 'USD',
+          orders: row._count._all,
+          revenue: Number(row._sum.value ?? 0),
+        }))
+        .sort((a, b) => b.revenue - a.revenue)[0];
+      if (top) {
+        return {
+          ...top,
+          aov: top.orders > 0 ? top.revenue / top.orders : 0,
+        };
+      }
+      const currency = await this.queryLatestShopCurrency(accountId);
+      return { revenue: 0, orders: 0, aov: 0, currency };
     } catch (err) {
       console.warn('Dashboard 30d sales query failed:', err);
-      return { revenue: 0, orders: 0, aov: 0 };
+      return { revenue: 0, orders: 0, aov: 0, currency: 'USD' };
     }
+  }
+
+  private async queryLatestShopCurrency(accountId: string): Promise<string> {
+    const latest = await this.prisma.shopOrder.findFirst({
+      where: { accountId },
+      orderBy: { orderTime: 'desc' },
+      select: { currency: true },
+    });
+    return latest?.currency || 'USD';
   }
 
   /**
