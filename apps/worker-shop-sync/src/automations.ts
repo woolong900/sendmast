@@ -379,6 +379,19 @@ export function renderCouponHtml(
 function withCouponBlockSlot(html: string): string {
   if (html.includes('{{coupon_block}}')) return html;
   const slot = '<div style="margin:24px 0;">{{coupon_block}}</div>';
+
+  const visitButton = html.search(/Visit our store/i);
+  if (visitButton >= 0) {
+    const buttonTableStart = html.lastIndexOf('<table', visitButton);
+    if (buttonTableStart >= 0) {
+      return html.slice(0, buttonTableStart) + slot + html.slice(buttonTableStart);
+    }
+    const buttonLinkStart = html.lastIndexOf('<a', visitButton);
+    if (buttonLinkStart >= 0) {
+      return html.slice(0, buttonLinkStart) + slot + html.slice(buttonLinkStart);
+    }
+  }
+
   const bodyEnd = html.match(/<\/body>/i);
   if (bodyEnd?.index != null) {
     return html.slice(0, bodyEnd.index) + slot + html.slice(bodyEnd.index);
