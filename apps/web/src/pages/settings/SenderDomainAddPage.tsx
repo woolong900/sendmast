@@ -124,7 +124,8 @@ export function SenderDomainAddPage() {
             <div className="mt-6 space-y-4">
               <h2 className="text-lg font-semibold">第一步：输入您的域名</h2>
               <p className="text-sm text-muted-foreground">
-                请输入您拥有的域名（不要包含 https:// 或路径）。系统会为您注册该域名,并返回需要在您的 DNS 处添加的记录。
+                请输入您拥有的域名（不要包含 https://
+                或路径）。系统会为您注册该域名,并返回需要在您的 DNS 处添加的记录。
               </p>
               <div className="space-y-1.5">
                 <Label htmlFor="domain">域名</Label>
@@ -204,13 +205,14 @@ export function SenderDomainAddPage() {
                 </Badge>
               </h2>
               <p className="text-sm text-muted-foreground">
-                请在您的 DNS 服务商处（Cloudflare / 阿里云 / 腾讯云 等）添加以下{' '}
-                <b>全部</b> 记录（含 DMARC，均为必填）。DNS 生效通常需要几分钟到几小时。
+                请在您的 DNS 服务商处（Cloudflare / 阿里云 / 腾讯云 等）添加以下 <b>全部</b>{' '}
+                记录（含 DMARC，均为必填）。DNS 生效通常需要几分钟到几小时。
               </p>
 
               {view.records.map((rec) => (
                 <DnsRow
                   key={`${rec.kind}-${rec.type}-${rec.name}`}
+                  domain={view.domain}
                   record={rec}
                   state={view.states[rec.kind]?.status}
                 />
@@ -243,10 +245,7 @@ export function SenderDomainAddPage() {
           )}
 
           {step === 3 && view && (
-            <SenderUsernamesStepCard
-              view={view}
-              onContinue={() => setStep(4)}
-            />
+            <SenderUsernamesStepCard view={view} onContinue={() => setStep(4)} />
           )}
 
           {step === 4 && view && (
@@ -257,8 +256,8 @@ export function SenderDomainAddPage() {
                   <Check className="mr-1 size-3" />
                   已验证
                 </Badge>{' '}
-                <span className="ml-2 font-medium">{view.domain}</span> 已配置
-                {' '}{view.senderUsernames.length}{' '}个发件人,现在可以创建邮件活动并使用以下地址发件:
+                <span className="ml-2 font-medium">{view.domain}</span> 已配置{' '}
+                {view.senderUsernames.length} 个发件人,现在可以创建邮件活动并使用以下地址发件:
               </p>
               <ul className="space-y-1 rounded-md border bg-muted/30 p-3 font-mono text-sm">
                 {view.senderUsernames.map((u) => (
@@ -327,7 +326,8 @@ function SenderUsernamesStepCard({
       </h2>
       <p className="text-sm text-muted-foreground">
         发件地址形如 <span className="font-mono">username@{view.domain}</span>。可以添加多个,例如{' '}
-        <span className="font-mono">donotreply</span>、<span className="font-mono">marketing</span>、<span className="font-mono">support</span>。显示名是收件人邮箱客户端里看到的"From"名称。
+        <span className="font-mono">donotreply</span>、<span className="font-mono">marketing</span>
+        、<span className="font-mono">support</span>。显示名是收件人邮箱客户端里看到的"From"名称。
       </p>
 
       <div className="rounded-md border p-4">
@@ -352,10 +352,7 @@ function SenderUsernamesStepCard({
               placeholder="SendMast"
             />
           </div>
-          <Button
-            onClick={() => addMut.mutate()}
-            disabled={!username.trim() || addMut.isPending}
-          >
+          <Button onClick={() => addMut.mutate()} disabled={!username.trim() || addMut.isPending}>
             {addMut.isPending ? (
               <>
                 <Loader2 className="mr-1 size-4 animate-spin" />
@@ -397,7 +394,8 @@ function SenderUsernamesStepCard({
                           title: '删除发件人',
                           description: (
                             <>
-                              确定删除发件人 <span className="font-mono">{u.fullAddress}</span> 吗?该操作不可撤销。
+                              确定删除发件人 <span className="font-mono">{u.fullAddress}</span>{' '}
+                              吗?该操作不可撤销。
                             </>
                           ),
                           confirmLabel: '删除',
@@ -437,10 +435,7 @@ function ProvisioningCard({ domain }: { domain: string }) {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     const t0 = Date.now();
-    const timer = window.setInterval(
-      () => setSeconds(Math.floor((Date.now() - t0) / 1000)),
-      500,
-    );
+    const timer = window.setInterval(() => setSeconds(Math.floor((Date.now() - t0) / 1000)), 500);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -507,8 +502,8 @@ function Stepper({ step }: { step: number }) {
                 (done
                   ? 'bg-primary text-primary-foreground'
                   : active
-                  ? 'bg-primary/15 text-primary border border-primary'
-                  : 'bg-muted text-muted-foreground')
+                    ? 'bg-primary/15 text-primary border border-primary'
+                    : 'bg-muted text-muted-foreground')
               }
             >
               {done ? <Check className="size-3.5" /> : idx}
@@ -522,15 +517,17 @@ function Stepper({ step }: { step: number }) {
   );
 }
 
-const STATE_VARIANT: Record<SenderDomainVerificationStatus, 'success' | 'warning' | 'danger' | 'muted'> =
-  {
-    Verified: 'success',
-    VerificationRequested: 'warning',
-    NotStarted: 'muted',
-    VerificationFailed: 'danger',
-    CancellationRequested: 'muted',
-    Unknown: 'muted',
-  };
+const STATE_VARIANT: Record<
+  SenderDomainVerificationStatus,
+  'success' | 'warning' | 'danger' | 'muted'
+> = {
+  Verified: 'success',
+  VerificationRequested: 'warning',
+  NotStarted: 'muted',
+  VerificationFailed: 'danger',
+  CancellationRequested: 'muted',
+  Unknown: 'muted',
+};
 
 const STATE_LABEL: Record<SenderDomainVerificationStatus, string> = {
   Verified: '已生效',
@@ -542,20 +539,23 @@ const STATE_LABEL: Record<SenderDomainVerificationStatus, string> = {
 };
 
 function DnsRow({
+  domain,
   record,
   state,
 }: {
+  domain: string;
   record: SenderDomainDnsRecord;
   state: SenderDomainVerificationStatus | undefined;
 }) {
   const [copied, setCopied] = useState<'name' | 'value' | null>(null);
+  const displayName = formatDnsHostName(record.name, domain);
   const verified = state === 'Verified';
   const failed = state === 'VerificationFailed';
   const borderClass = verified
     ? 'border border-emerald-300 bg-emerald-50/40'
     : failed
-    ? 'border border-red-300 bg-red-50/40'
-    : 'border';
+      ? 'border border-red-300 bg-red-50/40'
+      : 'border';
 
   const copy = (text: string, field: 'name' | 'value') => {
     navigator.clipboard.writeText(text);
@@ -583,8 +583,8 @@ function DnsRow({
         <div className="min-w-0">
           <div className="text-muted-foreground">主机</div>
           <div className="mt-1 break-all font-mono">
-            {record.name}
-            <CopyIconButton copied={copied === 'name'} onClick={() => copy(record.name, 'name')} />
+            {displayName}
+            <CopyIconButton copied={copied === 'name'} onClick={() => copy(displayName, 'name')} />
           </div>
         </div>
         <div className="min-w-0">
@@ -592,12 +592,19 @@ function DnsRow({
           <div className="mt-1 break-all font-mono">
             {record.value}
             {record.priority !== undefined ? ` (priority ${record.priority})` : ''}
-            <CopyIconButton copied={copied === 'value'} onClick={() => copy(record.value, 'value')} />
+            <CopyIconButton
+              copied={copied === 'value'}
+              onClick={() => copy(record.value, 'value')}
+            />
           </div>
         </div>
       </div>
     </div>
   );
+}
+
+function formatDnsHostName(name: string, domain: string): string {
+  return name.trim().toLowerCase() === domain.trim().toLowerCase() ? '@' : name;
 }
 
 function CopyIconButton({ copied, onClick }: { copied: boolean; onClick: () => void }) {
@@ -612,11 +619,7 @@ function CopyIconButton({ copied, onClick }: { copied: boolean; onClick: () => v
       // strings as they wrap, instead of being pushed to the row's right edge.
       className="ml-1 inline-flex items-center rounded p-0.5 align-middle text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
     >
-      {copied ? (
-        <Check className="size-3.5 text-emerald-600" />
-      ) : (
-        <Copy className="size-3.5" />
-      )}
+      {copied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
     </button>
   );
 }
