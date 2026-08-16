@@ -82,6 +82,9 @@ function cacheKey(acct: EmailChannel): string {
     acct.mailgunApiKey?.slice(0, 8) ?? '',
     acct.resendApiBaseUrl ?? '',
     acct.resendApiKey?.slice(0, 8) ?? '',
+    acct.cloudflareAccountId ?? '',
+    acct.cloudflareApiBaseUrl ?? '',
+    acct.cloudflareApiToken?.slice(0, 8) ?? '',
   ].join('|');
 }
 
@@ -104,6 +107,7 @@ export function getTransportForAccount(acct: EmailChannel): Promise<MailTranspor
 async function buildTransport(acct: EmailChannel): Promise<MailTransport> {
   if (acct.provider === 'mailgun') return buildMailgunTransport(acct);
   if (acct.provider === 'resend') return buildResendTransport(acct);
+  if (acct.provider === 'cloudflare') return buildCloudflareTransport(acct);
   return buildEmailChannelTransport(acct);
 }
 
@@ -178,7 +182,8 @@ async function buildEmailChannelTransport(acct: EmailChannel): Promise<MailTrans
         const statusCode = (err as { statusCode?: number })?.statusCode;
         const code = (err as { code?: string })?.code;
         const message =
-          (err as { message?: string })?.message ?? (err instanceof Error ? err.message : String(err));
+          (err as { message?: string })?.message ??
+          (err instanceof Error ? err.message : String(err));
         return {
           ok: false,
           messageId: '',
@@ -260,7 +265,7 @@ function buildMailgunTransport(acct: EmailChannel): MailTransport {
           messageId:
             typeof payload === 'object' && payload && 'id' in payload
               ? String((payload as { id?: unknown }).id ?? msg.operationId ?? '')
-              : msg.operationId ?? '',
+              : (msg.operationId ?? ''),
           providerStatus: 'Accepted',
           latencyMs,
           providerResponse: payload,
@@ -332,10 +337,83 @@ function buildResendTransport(acct: EmailChannel): MailTransport {
           messageId:
             typeof payload === 'object' && payload && 'id' in payload
               ? String((payload as { id?: unknown }).id ?? msg.operationId ?? '')
-              : msg.operationId ?? '',
+              : (msg.operationId ?? ''),
           providerStatus: 'Accepted',
           latencyMs,
           providerResponse: payload,
+        };
+      } catch (err) {
+        const latencyMs = Date.now() - startedAt;
+        return {
+          ok: false,
+          messageId: '',
+          providerStatus: 'Error',
+          latencyMs,
+          errorCode: (err as { code?: string })?.code,
+          errorMessage: err instanceof Error ? err.message : String(err),
+          providerResponse: serialiseError(err),
+        };
+      }
+    },
+  };
+}
+
+function buildCloudflareTransport(acct: EmailChannel): MailTransport {
+  if (!acct.cloudflareAccountId) {
+    throw new Error(`Cloudflare channel ${acct.name}: Account ID is not configured`);
+  }
+  if (!acct.cloudflareApiToken) {
+    throw new Error(`Cloudflare channel ${acct.name}: API Token is not configured`);
+  }
+  const base = (acct.cloudflareApiBaseUrl || 'https://api.cloudflare.com/client/v4').replace(
+    /\/+$/,
+    '',
+  );
+
+  return {
+    async send(msg) {
+      const startedAt = Date.now();
+      try {
+        const res = await withTimeout(
+          fetch(
+            `${base}/accounts/${encodeURIComponent(acct.cloudflareAccountId!)}/email/sending/send`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${acct.cloudflareApiToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                to: msg.to,
+                from: msg.from.address,
+                subject: msg.subject,
+                html: msg.html,
+                text: htmlToText(msg.html),
+              }),
+            },
+          ),
+          SEND_TIMEOUT_MS,
+          'Cloudflare send',
+        );
+        const text = await res.text();
+        const payload = parseJson(text);
+        const latencyMs = Date.now() - startedAt;
+        if (!res.ok || cloudflareAccepted(payload) === false) {
+          return {
+            ok: false,
+            messageId: '',
+            providerStatus: `Http${res.status}`,
+            latencyMs,
+            errorMessage: cloudflareMessage(payload, text),
+            providerResponse: payload,
+          };
+        }
+        return {
+          ok: true,
+          messageId: cloudflareMessageId(payload) || msg.operationId || '',
+          providerStatus: 'Accepted',
+          latencyMs,
+          providerResponse: { operationId: msg.operationId, response: payload },
         };
       } catch (err) {
         const latencyMs = Date.now() - startedAt;
@@ -364,7 +442,8 @@ function mailgunVariables(
     out.sendmast_recipient_id = headers['X-SendMast-FlowSend'];
     out.sendmast_source = 'a';
   }
-  if (headers['X-SendMast-Automation']) out.sendmast_automation_id = headers['X-SendMast-Automation'];
+  if (headers['X-SendMast-Automation'])
+    out.sendmast_automation_id = headers['X-SendMast-Automation'];
   if (operationId) out.sendmast_operation_id = operationId;
   return out;
 }
@@ -391,6 +470,24 @@ function formatFrom(name: string, address: string): string {
   return `"${trimmed.replace(/"/g, '\\"')}" <${address}>`;
 }
 
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|table|h[1-6]|li)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .trim();
+}
+
 function parseJson(text: string): unknown {
   if (!text) return {};
   try {
@@ -408,6 +505,52 @@ function providerMessage(payload: unknown, fallback: string): string {
     return String((payload as { name?: unknown }).name ?? fallback);
   }
   return fallback;
+}
+
+function cloudflareAccepted(payload: unknown): boolean | null {
+  if (payload && typeof payload === 'object' && 'success' in payload) {
+    return Boolean((payload as { success?: unknown }).success);
+  }
+  if (payload && typeof payload === 'object' && 'accepted' in payload) {
+    return Boolean((payload as { accepted?: unknown }).accepted);
+  }
+  return null;
+}
+
+function cloudflareMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === 'object') {
+    const errors = (payload as { errors?: unknown }).errors;
+    if (Array.isArray(errors) && errors.length > 0) {
+      return errors
+        .map((err) => {
+          if (!err || typeof err !== 'object') return String(err);
+          const code = (err as { code?: unknown }).code;
+          const message = (err as { message?: unknown }).message;
+          return [code, message].filter(Boolean).join(': ');
+        })
+        .join('; ');
+    }
+  }
+  return providerMessage(payload, fallback);
+}
+
+function cloudflareMessageId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const result = (payload as { result?: unknown }).result;
+  if (result && typeof result === 'object') {
+    const id = (result as { id?: unknown; message_id?: unknown; messageId?: unknown }).id;
+    const messageId = (result as { id?: unknown; message_id?: unknown; messageId?: unknown })
+      .message_id;
+    const camelMessageId = (result as { id?: unknown; message_id?: unknown; messageId?: unknown })
+      .messageId;
+    return id || messageId || camelMessageId ? String(id ?? messageId ?? camelMessageId) : null;
+  }
+  const id = (payload as { id?: unknown; message_id?: unknown; messageId?: unknown }).id;
+  const messageId = (payload as { id?: unknown; message_id?: unknown; messageId?: unknown })
+    .message_id;
+  const camelMessageId = (payload as { id?: unknown; message_id?: unknown; messageId?: unknown })
+    .messageId;
+  return id || messageId || camelMessageId ? String(id ?? messageId ?? camelMessageId) : null;
 }
 
 /**

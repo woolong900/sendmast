@@ -44,12 +44,16 @@ const EMPTY: FormState = {
   resendApiKey: '',
   resendApiBaseUrl: 'https://api.resend.com',
   resendWebhookSigningKey: '',
+  cloudflareAccountId: '',
+  cloudflareApiToken: '',
+  cloudflareApiBaseUrl: 'https://api.cloudflare.com/client/v4',
 };
 
 const PROVIDER_OPTIONS: Array<{ value: EmailChannelProviderValue; label: string }> = [
   { value: 'acs', label: 'Azure ACS' },
   { value: 'mailgun', label: 'Mailgun API' },
   { value: 'resend', label: 'Resend API' },
+  { value: 'cloudflare', label: 'Cloudflare Email Sending' },
 ];
 
 const STATUS_LABELS: Record<EmailChannelStatusValue, string> = {
@@ -95,7 +99,8 @@ export function EmailChannelListPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-semibold">邮件通道</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            管理 Azure ACS / Mailgun / Resend 发送通道:发送配额 + 域名管理凭证。可将其中一个标记为默认,新注册的租户会自动绑定到默认通道。
+            管理 Azure ACS / Mailgun / Resend / Cloudflare 发送通道:发送配额 +
+            域名管理凭证。可将其中一个标记为默认,新注册的租户会自动绑定到默认通道。
           </p>
         </div>
         <Button className="w-full sm:w-auto" onClick={() => setEditing({ ...EMPTY })}>
@@ -107,171 +112,201 @@ export function EmailChannelListPage() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-sm">
-            <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">名称</th>
-                <th className="px-4 py-3 font-medium">通道</th>
-                <th className="px-4 py-3 font-medium">配额：秒/分/时/日</th>
-                <th className="px-4 py-3 font-medium">状态</th>
-                <th className="px-4 py-3 font-medium">绑定域名</th>
-                <th className="px-4 py-3 font-medium">创建时间</th>
-                <th className="px-4 py-3 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && <TableSkeletonRows columns={7} />}
-              {!isLoading && data && data.length === 0 && <EmptyStateRow colSpan={7} />}
-              {data?.map((a) => (
-                <tr key={a.id} className="border-b last:border-0">
-                  <td className="px-4 py-3 font-medium">
-                    <div className="flex items-center gap-2">
-                      <span>{a.name}</span>
-                      {a.isDefault && (
-                        <Badge variant="default" className="gap-1">
-                          <Star className="size-3 fill-current" />
-                          默认
-                        </Badge>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant={a.provider === 'mailgun' ? 'success' : a.provider === 'resend' ? 'warning' : 'muted'}>
-                      {providerLabel(a.provider)}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <QuotaPill label="秒" value={a.rpsLimit} className="bg-sky-50 text-sky-700" />
-                      <QuotaPill label="分" value={a.rpmLimit} className="bg-emerald-50 text-emerald-700" />
-                      <QuotaPill label="时" value={a.rphLimit} className="bg-amber-50 text-amber-700" />
-                      <QuotaPill label="日" value={a.rpdLimit} className="bg-violet-50 text-violet-700" />
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        checked={a.status === 'active'}
-                        disabled={toggleStatusMut.isPending}
-                        title="启用 / 禁用"
-                        onCheckedChange={(next) =>
-                          toggleStatusMut.mutate({
-                            id: a.id,
-                            status: next ? 'active' : 'suspended',
-                          })
-                        }
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        {a.status === 'active' ? '启用' : a.status === 'retired' ? '退役' : '禁用'}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={cn(
-                        'inline-flex min-w-[2rem] justify-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums',
-                        a.senderDomainCount > 0
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'bg-muted text-muted-foreground',
-                      )}
-                    >
-                      {a.senderDomainCount}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {formatDateTime(a.createdAt)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-1">
-                      {!a.isDefault && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={setDefaultMut.isPending || a.status !== 'active'}
-                          title={
-                            a.status !== 'active'
-                              ? '仅 active 账号可设为默认'
-                              : '设为新租户的默认邮件通道'
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 font-medium">名称</th>
+                  <th className="px-4 py-3 font-medium">通道</th>
+                  <th className="px-4 py-3 font-medium">配额：秒/分/时/日</th>
+                  <th className="px-4 py-3 font-medium">状态</th>
+                  <th className="px-4 py-3 font-medium">绑定域名</th>
+                  <th className="px-4 py-3 font-medium">创建时间</th>
+                  <th className="px-4 py-3 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading && <TableSkeletonRows columns={7} />}
+                {!isLoading && data && data.length === 0 && <EmptyStateRow colSpan={7} />}
+                {data?.map((a) => (
+                  <tr key={a.id} className="border-b last:border-0">
+                    <td className="px-4 py-3 font-medium">
+                      <div className="flex items-center gap-2">
+                        <span>{a.name}</span>
+                        {a.isDefault && (
+                          <Badge variant="default" className="gap-1">
+                            <Star className="size-3 fill-current" />
+                            默认
+                          </Badge>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant={providerBadgeVariant(a.provider)}>
+                        {providerLabel(a.provider)}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <QuotaPill
+                          label="秒"
+                          value={a.rpsLimit}
+                          className="bg-sky-50 text-sky-700"
+                        />
+                        <QuotaPill
+                          label="分"
+                          value={a.rpmLimit}
+                          className="bg-emerald-50 text-emerald-700"
+                        />
+                        <QuotaPill
+                          label="时"
+                          value={a.rphLimit}
+                          className="bg-amber-50 text-amber-700"
+                        />
+                        <QuotaPill
+                          label="日"
+                          value={a.rpdLimit}
+                          className="bg-violet-50 text-violet-700"
+                        />
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={a.status === 'active'}
+                          disabled={toggleStatusMut.isPending}
+                          title="启用 / 禁用"
+                          onCheckedChange={(next) =>
+                            toggleStatusMut.mutate({
+                              id: a.id,
+                              status: next ? 'active' : 'suspended',
+                            })
                           }
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {a.status === 'active'
+                            ? '启用'
+                            : a.status === 'retired'
+                              ? '退役'
+                              : '禁用'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={cn(
+                          'inline-flex min-w-[2rem] justify-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums',
+                          a.senderDomainCount > 0
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'bg-muted text-muted-foreground',
+                        )}
+                      >
+                        {a.senderDomainCount}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {formatDateTime(a.createdAt)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-1">
+                        {!a.isDefault && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={setDefaultMut.isPending || a.status !== 'active'}
+                            title={
+                              a.status !== 'active'
+                                ? '仅 active 账号可设为默认'
+                                : '设为新租户的默认邮件通道'
+                            }
+                            onClick={async () => {
+                              const ok = await confirm({
+                                title: '设为默认邮件通道',
+                                description: (
+                                  <>
+                                    设置后,新注册的租户会自动绑定{' '}
+                                    <span className="font-medium">{a.name}</span>
+                                    。原默认通道(如有)将自动取消默认。
+                                  </>
+                                ),
+                                confirmLabel: '设为默认',
+                              });
+                              if (ok) setDefaultMut.mutate(a.id);
+                            }}
+                          >
+                            <Star className="mr-1 size-3" />
+                            设为默认
+                          </Button>
+                        )}
+                        <button
+                          type="button"
+                          title="编辑"
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
                           onClick={async () => {
-                            const ok = await confirm({
-                              title: '设为默认邮件通道',
-                              description: (
-                                <>
-                                  设置后,新注册的租户会自动绑定 <span className="font-medium">{a.name}</span>。原默认通道(如有)将自动取消默认。
-                                </>
-                              ),
-                              confirmLabel: '设为默认',
+                            const full = (
+                              await api.get<EmailChannelView>(`/api/admin/email-channels/${a.id}`)
+                            ).data;
+                            setEditing({
+                              id: full.id,
+                              provider: full.provider,
+                              name: full.name,
+                              rpsLimit: full.rpsLimit,
+                              rpmLimit: full.rpmLimit,
+                              rphLimit: full.rphLimit,
+                              rpdLimit: full.rpdLimit,
+                              status: full.status,
+                              azureTenantId: full.azureTenantId,
+                              azureClientId: full.azureClientId,
+                              azureClientSecret: full.azureClientSecret,
+                              azureSubscriptionId: full.azureSubscriptionId,
+                              azureResourceGroup: full.azureResourceGroup,
+                              azureEmailServiceName: full.azureEmailServiceName,
+                              azureCommunicationServiceName:
+                                full.azureCommunicationServiceName ?? '',
+                              mailgunApiKey: full.mailgunApiKey ?? '',
+                              mailgunApiBaseUrl:
+                                full.mailgunApiBaseUrl ?? 'https://api.mailgun.net',
+                              mailgunWebhookSigningKey: full.mailgunWebhookSigningKey ?? '',
+                              resendApiKey: full.resendApiKey ?? '',
+                              resendApiBaseUrl: full.resendApiBaseUrl ?? 'https://api.resend.com',
+                              resendWebhookSigningKey: full.resendWebhookSigningKey ?? '',
+                              cloudflareAccountId: full.cloudflareAccountId ?? '',
+                              cloudflareApiToken: full.cloudflareApiToken ?? '',
+                              cloudflareApiBaseUrl:
+                                full.cloudflareApiBaseUrl ?? 'https://api.cloudflare.com/client/v4',
                             });
-                            if (ok) setDefaultMut.mutate(a.id);
                           }}
                         >
-                          <Star className="mr-1 size-3" />
-                          设为默认
-                        </Button>
-                      )}
-                      <button
-                        type="button"
-                        title="编辑"
-                        className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-                        onClick={async () => {
-                          const full = (
-                            await api.get<EmailChannelView>(`/api/admin/email-channels/${a.id}`)
-                          ).data;
-                          setEditing({
-                            id: full.id,
-                            provider: full.provider,
-                            name: full.name,
-                            rpsLimit: full.rpsLimit,
-                            rpmLimit: full.rpmLimit,
-                            rphLimit: full.rphLimit,
-                            rpdLimit: full.rpdLimit,
-                            status: full.status,
-                            azureTenantId: full.azureTenantId,
-                            azureClientId: full.azureClientId,
-                            azureClientSecret: full.azureClientSecret,
-                            azureSubscriptionId: full.azureSubscriptionId,
-                            azureResourceGroup: full.azureResourceGroup,
-                            azureEmailServiceName: full.azureEmailServiceName,
-                            azureCommunicationServiceName: full.azureCommunicationServiceName ?? '',
-                            mailgunApiKey: full.mailgunApiKey ?? '',
-                            mailgunApiBaseUrl: full.mailgunApiBaseUrl ?? 'https://api.mailgun.net',
-                            mailgunWebhookSigningKey: full.mailgunWebhookSigningKey ?? '',
-                            resendApiKey: full.resendApiKey ?? '',
-                            resendApiBaseUrl: full.resendApiBaseUrl ?? 'https://api.resend.com',
-                            resendWebhookSigningKey: full.resendWebhookSigningKey ?? '',
-                          });
-                        }}
-                      >
-                        <Pencil className="size-4" />
-                      </button>
-                      <button
-                        type="button"
-                        title="删除"
-                        className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
-                        disabled={deleteMut.isPending}
-                        onClick={async () => {
-                          const ok = await confirm({
-                            title: '删除邮件通道',
-                            description: (
-                              <>
-                                确定删除 <span className="font-medium">{a.name}</span> 吗?该通道当前绑定 {a.senderDomainCount} 个域名,删除后这些域名将无法继续发送邮件。
-                              </>
-                            ),
-                            confirmLabel: '删除',
-                            variant: 'danger',
-                          });
-                          if (ok) deleteMut.mutate(a.id);
-                        }}
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                          <Pencil className="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          title="删除"
+                          className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
+                          disabled={deleteMut.isPending}
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: '删除邮件通道',
+                              description: (
+                                <>
+                                  确定删除 <span className="font-medium">{a.name}</span>{' '}
+                                  吗?该通道当前绑定 {a.senderDomainCount}{' '}
+                                  个域名,删除后这些域名将无法继续发送邮件。
+                                </>
+                              ),
+                              confirmLabel: '删除',
+                              variant: 'danger',
+                            });
+                            if (ok) deleteMut.mutate(a.id);
+                          }}
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>
@@ -351,6 +386,9 @@ function AccountEditor({
         resendApiKey: form.resendApiKey?.trim() || null,
         resendApiBaseUrl: form.resendApiBaseUrl?.trim() || null,
         resendWebhookSigningKey: form.resendWebhookSigningKey?.trim() || null,
+        cloudflareAccountId: form.cloudflareAccountId?.trim() || null,
+        cloudflareApiToken: form.cloudflareApiToken?.trim() || null,
+        cloudflareApiBaseUrl: form.cloudflareApiBaseUrl?.trim() || null,
       };
       return isEdit
         ? api.patch(`/api/admin/email-channels/${state.id}`, body)
@@ -369,7 +407,10 @@ function AccountEditor({
           </button>
         </div>
         <div className="space-y-5 p-5">
-          <Section title="基本" gridClassName="sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_auto] sm:items-end">
+          <Section
+            title="基本"
+            gridClassName="sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_auto] sm:items-end"
+          >
             <div>
               <Label className="mb-1.5 block">通道类型</Label>
               <FilterSelect
@@ -440,33 +481,65 @@ function AccountEditor({
             <Section title="Azure ARM 凭证(用于域名管理)">
               <div>
                 <Label className="mb-1.5 block">Tenant ID</Label>
-                <Input value={form.azureTenantId} onChange={(e) => setForm({ ...form, azureTenantId: e.target.value })} placeholder="00000000-0000-0000-0000-000000000000" />
+                <Input
+                  value={form.azureTenantId}
+                  onChange={(e) => setForm({ ...form, azureTenantId: e.target.value })}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                />
               </div>
               <div>
                 <Label className="mb-1.5 block">Subscription ID</Label>
-                <Input value={form.azureSubscriptionId} onChange={(e) => setForm({ ...form, azureSubscriptionId: e.target.value })} placeholder="00000000-0000-0000-0000-000000000000" />
+                <Input
+                  value={form.azureSubscriptionId}
+                  onChange={(e) => setForm({ ...form, azureSubscriptionId: e.target.value })}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                />
               </div>
               <div>
                 <Label className="mb-1.5 block">Client ID (Service Principal)</Label>
-                <Input value={form.azureClientId} onChange={(e) => setForm({ ...form, azureClientId: e.target.value })} placeholder="00000000-0000-0000-0000-000000000000" />
+                <Input
+                  value={form.azureClientId}
+                  onChange={(e) => setForm({ ...form, azureClientId: e.target.value })}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                />
               </div>
               <div>
                 <Label className="mb-1.5 block">Client Secret</Label>
-                <Input type="password" value={form.azureClientSecret} onChange={(e) => setForm({ ...form, azureClientSecret: e.target.value })} placeholder="编辑时若不修改请保留默认值" />
+                <Input
+                  type="password"
+                  value={form.azureClientSecret}
+                  onChange={(e) => setForm({ ...form, azureClientSecret: e.target.value })}
+                  placeholder="编辑时若不修改请保留默认值"
+                />
               </div>
               <div>
                 <Label className="mb-1.5 block">Resource Group</Label>
-                <Input value={form.azureResourceGroup} onChange={(e) => setForm({ ...form, azureResourceGroup: e.target.value })} placeholder="rg-sendmast-prod" />
+                <Input
+                  value={form.azureResourceGroup}
+                  onChange={(e) => setForm({ ...form, azureResourceGroup: e.target.value })}
+                  placeholder="rg-sendmast-prod"
+                />
               </div>
               <div>
                 <Label className="mb-1.5 block">Email Service Name</Label>
-                <Input value={form.azureEmailServiceName} onChange={(e) => setForm({ ...form, azureEmailServiceName: e.target.value })} placeholder="ecs-sendmast-prod" />
+                <Input
+                  value={form.azureEmailServiceName}
+                  onChange={(e) => setForm({ ...form, azureEmailServiceName: e.target.value })}
+                  placeholder="ecs-sendmast-prod"
+                />
               </div>
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">Communication Service Name</Label>
-                <Input value={form.azureCommunicationServiceName ?? ''} onChange={(e) => setForm({ ...form, azureCommunicationServiceName: e.target.value })} placeholder="acs-sendmast-prod" />
+                <Input
+                  value={form.azureCommunicationServiceName ?? ''}
+                  onChange={(e) =>
+                    setForm({ ...form, azureCommunicationServiceName: e.target.value })
+                  }
+                  placeholder="acs-sendmast-prod"
+                />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Microsoft.Communication/communicationServices 资源名。域名验证通过后会自动 link 到这个 Communication Service。
+                  Microsoft.Communication/communicationServices 资源名。域名验证通过后会自动 link
+                  到这个 Communication Service。
                 </p>
               </div>
             </Section>
@@ -474,39 +547,95 @@ function AccountEditor({
             <Section title="Mailgun API">
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">API Key</Label>
-                <Input type="password" value={form.mailgunApiKey ?? ''} onChange={(e) => setForm({ ...form, mailgunApiKey: e.target.value })} placeholder="key-..." />
+                <Input
+                  type="password"
+                  value={form.mailgunApiKey ?? ''}
+                  onChange={(e) => setForm({ ...form, mailgunApiKey: e.target.value })}
+                  placeholder="key-..."
+                />
               </div>
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">API Base URL</Label>
-                <Input value={form.mailgunApiBaseUrl ?? ''} onChange={(e) => setForm({ ...form, mailgunApiBaseUrl: e.target.value })} placeholder="https://api.mailgun.net" />
+                <Input
+                  value={form.mailgunApiBaseUrl ?? ''}
+                  onChange={(e) => setForm({ ...form, mailgunApiBaseUrl: e.target.value })}
+                  placeholder="https://api.mailgun.net"
+                />
                 <p className="mt-1 text-xs text-muted-foreground">
                   EU 区账号可填写 https://api.eu.mailgun.net。
                 </p>
               </div>
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">Webhook Signing Key</Label>
-                <Input type="password" value={form.mailgunWebhookSigningKey ?? ''} onChange={(e) => setForm({ ...form, mailgunWebhookSigningKey: e.target.value })} placeholder="Mailgun Webhooks signing key" />
+                <Input
+                  type="password"
+                  value={form.mailgunWebhookSigningKey ?? ''}
+                  onChange={(e) => setForm({ ...form, mailgunWebhookSigningKey: e.target.value })}
+                  placeholder="Mailgun Webhooks signing key"
+                />
                 <p className="mt-1 text-xs text-muted-foreground">
                   用于校验 Mailgun 推送到 /api/webhooks/mailgun 的事件签名。
                 </p>
               </div>
             </Section>
-          ) : (
+          ) : form.provider === 'resend' ? (
             <Section title="Resend API">
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">API Key</Label>
-                <Input type="password" value={form.resendApiKey ?? ''} onChange={(e) => setForm({ ...form, resendApiKey: e.target.value })} placeholder="re_..." />
+                <Input
+                  type="password"
+                  value={form.resendApiKey ?? ''}
+                  onChange={(e) => setForm({ ...form, resendApiKey: e.target.value })}
+                  placeholder="re_..."
+                />
               </div>
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">API Base URL</Label>
-                <Input value={form.resendApiBaseUrl ?? ''} onChange={(e) => setForm({ ...form, resendApiBaseUrl: e.target.value })} placeholder="https://api.resend.com" />
+                <Input
+                  value={form.resendApiBaseUrl ?? ''}
+                  onChange={(e) => setForm({ ...form, resendApiBaseUrl: e.target.value })}
+                  placeholder="https://api.resend.com"
+                />
               </div>
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">Webhook Signing Secret</Label>
-                <Input type="password" value={form.resendWebhookSigningKey ?? ''} onChange={(e) => setForm({ ...form, resendWebhookSigningKey: e.target.value })} placeholder="whsec_..." />
+                <Input
+                  type="password"
+                  value={form.resendWebhookSigningKey ?? ''}
+                  onChange={(e) => setForm({ ...form, resendWebhookSigningKey: e.target.value })}
+                  placeholder="whsec_..."
+                />
                 <p className="mt-1 text-xs text-muted-foreground">
                   用于校验 Resend 推送到 /api/webhooks/resend 的 Svix 签名。
                 </p>
+              </div>
+            </Section>
+          ) : (
+            <Section title="Cloudflare Email Sending">
+              <div className="sm:col-span-2">
+                <Label className="mb-1.5 block">Account ID</Label>
+                <Input
+                  value={form.cloudflareAccountId ?? ''}
+                  onChange={(e) => setForm({ ...form, cloudflareAccountId: e.target.value })}
+                  placeholder="Cloudflare account id"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label className="mb-1.5 block">API Token</Label>
+                <Input
+                  type="password"
+                  value={form.cloudflareApiToken ?? ''}
+                  onChange={(e) => setForm({ ...form, cloudflareApiToken: e.target.value })}
+                  placeholder="cfut_..."
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label className="mb-1.5 block">API Base URL</Label>
+                <Input
+                  value={form.cloudflareApiBaseUrl ?? ''}
+                  onChange={(e) => setForm({ ...form, cloudflareApiBaseUrl: e.target.value })}
+                  placeholder="https://api.cloudflare.com/client/v4"
+                />
               </div>
             </Section>
           )}
@@ -533,7 +662,15 @@ function AccountEditor({
 function providerLabel(provider: EmailChannelProviderValue): string {
   if (provider === 'mailgun') return 'Mailgun';
   if (provider === 'resend') return 'Resend';
+  if (provider === 'cloudflare') return 'Cloudflare';
   return 'Azure ACS';
+}
+
+function providerBadgeVariant(provider: EmailChannelProviderValue) {
+  if (provider === 'mailgun') return 'success';
+  if (provider === 'resend') return 'warning';
+  if (provider === 'cloudflare') return 'default';
+  return 'muted';
 }
 
 function Section({

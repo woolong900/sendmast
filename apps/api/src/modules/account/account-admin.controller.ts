@@ -44,7 +44,9 @@ export class AccountAdminController {
       orderBy: { createdAt: 'desc' },
       include: {
         emailChannels: {
-          include: { emailChannel: { select: { id: true, name: true, provider: true, status: true } } },
+          include: {
+            emailChannel: { select: { id: true, name: true, provider: true, status: true } },
+          },
           orderBy: { createdAt: 'asc' },
         },
         // Owner email = first member with role=owner. There can be more in
@@ -67,7 +69,7 @@ export class AccountAdminController {
         (l): AssignedEmailChannelView => ({
           id: l.emailChannel.id,
           name: l.emailChannel.name,
-          provider: l.emailChannel.provider as 'acs' | 'mailgun' | 'resend',
+          provider: l.emailChannel.provider as AssignedEmailChannelView['provider'],
           status: l.emailChannel.status as 'active' | 'suspended' | 'retired',
           isPrimary: l.isPrimary,
           allowMarketing: l.allowMarketing,
@@ -195,12 +197,7 @@ export class AccountAdminController {
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ) {
-    return this.auth.impersonate(
-      user.userId,
-      id,
-      req.headers['user-agent'],
-      requestIp(req),
-    );
+    return this.auth.impersonate(user.userId, id, req.headers['user-agent'], requestIp(req));
   }
 
   @Get(':id/email-channels')
@@ -215,7 +212,7 @@ export class AccountAdminController {
     return links.map((l) => ({
       id: l.emailChannel.id,
       name: l.emailChannel.name,
-      provider: l.emailChannel.provider as 'acs' | 'mailgun' | 'resend',
+      provider: l.emailChannel.provider as AssignedEmailChannelView['provider'],
       status: l.emailChannel.status as 'active' | 'suspended' | 'retired',
       isPrimary: l.isPrimary,
       allowMarketing: l.allowMarketing,
@@ -230,10 +227,7 @@ export class AccountAdminController {
    * sender domains bound to it (those domains' sends would break).
    */
   @Put(':id/email-channels')
-  async assignEmailChannels(
-    @Param('id', new ParseUUIDPipe()) id: string,
-    @Body() body: unknown,
-  ) {
+  async assignEmailChannels(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
     const r = AssignEmailChannelsSchema.safeParse(body);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
     const { primaryEmailChannelId } = r.data;
@@ -275,7 +269,9 @@ export class AccountAdminController {
         (a) => a.status !== 'active' && !existingEmailChannelIds.has(a.id),
       );
       if (inactive) {
-        throw new BadRequestException(`邮件通道 ${inactive.id} 当前状态为 ${inactive.status}，无法分配`);
+        throw new BadRequestException(
+          `邮件通道 ${inactive.id} 当前状态为 ${inactive.status}，无法分配`,
+        );
       }
     }
 
@@ -289,9 +285,7 @@ export class AccountAdminController {
     const boundEmailChannelIds = new Set(boundDomains.map((d) => d.emailChannelId));
     const removed = [...boundEmailChannelIds].filter((channelId) => !ids.includes(channelId));
     if (removed.length > 0) {
-      throw new BadRequestException(
-        '无法移除仍有发件域名绑定的邮件通道，请先删除相关域名',
-      );
+      throw new BadRequestException('无法移除仍有发件域名绑定的邮件通道，请先删除相关域名');
     }
 
     await this.prisma.$transaction(async (tx) => {

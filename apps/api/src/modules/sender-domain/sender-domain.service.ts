@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { Prisma, type EmailChannel } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AzureAcsService } from './azure-acs.service';
@@ -71,7 +66,10 @@ export class SenderDomainService {
       where: { accountId_emailChannelId: { accountId, emailChannelId: row.emailChannelId } },
       select: { emailChannelId: true, allowMarketing: true, allowTransactional: true },
     });
-    return this.toView(this.withUsage(row, new Map(link ? [[link.emailChannelId, link]] : [])), row.senderUsernames);
+    return this.toView(
+      this.withUsage(row, new Map(link ? [[link.emailChannelId, link]] : [])),
+      row.senderUsernames,
+    );
   }
 
   /**
@@ -87,7 +85,7 @@ export class SenderDomainService {
     return links.map((l) => ({
       id: l.emailChannel.id,
       name: l.emailChannel.name,
-      provider: l.emailChannel.provider as 'acs' | 'mailgun' | 'resend',
+      provider: l.emailChannel.provider as TenantEmailChannelView['provider'],
       isPrimary: l.isPrimary,
       allowMarketing: l.allowMarketing,
       allowTransactional: l.allowTransactional,
@@ -123,9 +121,7 @@ export class SenderDomainService {
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     });
     if (links.length === 0) {
-      throw new BadRequestException(
-        '当前租户尚未分配可用的邮件通道，请联系平台管理员。',
-      );
+      throw new BadRequestException('当前租户尚未分配可用的邮件通道，请联系平台管理员。');
     }
 
     let chosen;
@@ -140,6 +136,33 @@ export class SenderDomainService {
       throw new BadRequestException('当前租户分配了多个邮件通道，请选择要使用的邮件通道');
     }
     const emailChannel = chosen;
+
+    if (emailChannel.provider === 'cloudflare') {
+      const row = await this.prisma.senderDomain.create({
+        data: {
+          accountId,
+          emailChannelId: emailChannel.id,
+          domain: cleaned,
+          verificationRecords: [] as unknown as Prisma.InputJsonValue,
+          verificationStates: {} as unknown as Prisma.InputJsonValue,
+          status: 'verified',
+          verifiedAt: new Date(),
+          linkedAt: new Date(),
+        },
+      });
+      return this.toView({
+        ...row,
+        emailChannel: {
+          id: emailChannel.id,
+          name: emailChannel.name,
+          provider: emailChannel.provider as 'cloudflare',
+          allowMarketing:
+            links.find((l) => l.emailChannelId === emailChannel.id)?.allowMarketing ?? true,
+          allowTransactional:
+            links.find((l) => l.emailChannelId === emailChannel.id)?.allowTransactional ?? true,
+        },
+      });
+    }
 
     const row = await this.prisma.senderDomain.create({
       data: {
@@ -158,8 +181,9 @@ export class SenderDomainService {
       emailChannel: {
         id: emailChannel.id,
         name: emailChannel.name,
-        provider: emailChannel.provider as 'acs' | 'mailgun' | 'resend',
-        allowMarketing: links.find((l) => l.emailChannelId === emailChannel.id)?.allowMarketing ?? true,
+        provider: emailChannel.provider as TenantEmailChannelView['provider'],
+        allowMarketing:
+          links.find((l) => l.emailChannelId === emailChannel.id)?.allowMarketing ?? true,
         allowTransactional:
           links.find((l) => l.emailChannelId === emailChannel.id)?.allowTransactional ?? true,
       },
@@ -189,9 +213,7 @@ export class SenderDomainService {
         data: {
           verificationRecords: records as unknown as Prisma.InputJsonValue,
           resendDomainId:
-            'providerDomainId' in created
-              ? (created.providerDomainId as string | null)
-              : undefined,
+            'providerDomainId' in created ? (created.providerDomainId as string | null) : undefined,
           provisioningError: null,
           status: 'pending',
         },
@@ -230,6 +252,20 @@ export class SenderDomainService {
     }
     if (row.status === 'failed') {
       throw new BadRequestException('域名配置失败，请删除后重新添加。');
+    }
+    if (row.emailChannel.provider === 'cloudflare') {
+      const updated = await this.prisma.senderDomain.update({
+        where: { id: row.id },
+        data: {
+          verificationStates: {} as unknown as Prisma.InputJsonValue,
+          lastCheckedAt: new Date(),
+          status: 'verified',
+          verifiedAt: row.verifiedAt ?? new Date(),
+          linkedAt: row.linkedAt ?? new Date(),
+        },
+        include: { senderUsernames: { orderBy: { createdAt: 'asc' } } },
+      });
+      return this.toView(updated, updated.senderUsernames);
     }
 
     // Always include platform-mandatory DMARC even when Azure didn't return it.
@@ -297,9 +333,7 @@ export class SenderDomainService {
         await this.azure.linkDomain(row.emailChannel, row.domain);
         linkedAt = new Date();
       } catch (err) {
-        this.logger.warn(
-          `Auto-link failed for ${row.domain}: ${(err as Error).message}`,
-        );
+        this.logger.warn(`Auto-link failed for ${row.domain}: ${(err as Error).message}`);
       }
     }
 
@@ -309,7 +343,7 @@ export class SenderDomainService {
         verificationStates: refreshed as unknown as Prisma.InputJsonValue,
         lastCheckedAt: new Date(),
         status: allVerified ? 'verified' : 'pending',
-        verifiedAt: allVerified ? row.verifiedAt ?? new Date() : row.verifiedAt,
+        verifiedAt: allVerified ? (row.verifiedAt ?? new Date()) : row.verifiedAt,
         linkedAt,
       },
       include: { senderUsernames: { orderBy: { createdAt: 'asc' } } },
@@ -404,7 +438,10 @@ export class SenderDomainService {
     });
     if (!row) return;
 
-    if (row.emailChannel.provider === 'mailgun') {
+    if (row.emailChannel.provider === 'cloudflare') {
+      // Cloudflare Email Sending domains are managed in Cloudflare. SendMast
+      // only removes the local binding.
+    } else if (row.emailChannel.provider === 'mailgun') {
       try {
         await this.mailgun.deleteDomain(row.emailChannel, row.domain);
       } catch (err) {
@@ -468,14 +505,20 @@ export class SenderDomainService {
     },
     senderUsernames: SenderUsernameRow[] = [],
   ): SenderDomainView {
-    const records = ensureDmarcRecord(
-      (row.verificationRecords as unknown as SenderDomainDnsRecord[]) ?? [],
-    );
+    const storedRecords = (row.verificationRecords as unknown as SenderDomainDnsRecord[]) ?? [];
+    const records =
+      row.emailChannel?.provider === 'cloudflare'
+        ? storedRecords
+        : ensureDmarcRecord(storedRecords);
     const states = (row.verificationStates as unknown as SenderDomainVerificationStates) ?? {};
     // A domain marked verified before we enforced DMARC must re-verify DMARC
     // before the UI treats it as fully ready (step 3+ in the add-domain wizard).
     let status = row.status;
-    if (status === 'verified' && states.DMARC?.status !== 'Verified') {
+    if (
+      status === 'verified' &&
+      records.some((record) => record.kind === 'DMARC') &&
+      states.DMARC?.status !== 'Verified'
+    ) {
       status = 'pending';
     }
     return {
@@ -486,7 +529,12 @@ export class SenderDomainService {
         ? {
             id: row.emailChannel.id,
             name: row.emailChannel.name,
-            provider: row.emailChannel.provider as 'acs' | 'mailgun' | 'resend' | undefined,
+            provider: row.emailChannel.provider as
+              | 'acs'
+              | 'mailgun'
+              | 'resend'
+              | 'cloudflare'
+              | undefined,
             allowMarketing: row.emailChannel.allowMarketing,
             allowTransactional: row.emailChannel.allowTransactional,
           }

@@ -14,7 +14,12 @@ interface AdminSenderDomain {
   verifiedAt: string | null;
   createdAt: string;
   account: { id: string; name: string; slug: string };
-  emailChannel: { id: string; name: string; provider: 'acs' | 'mailgun' | 'resend'; status: string } | null;
+  emailChannel: {
+    id: string;
+    name: string;
+    provider: 'acs' | 'mailgun' | 'resend' | 'cloudflare';
+    status: string;
+  } | null;
 }
 
 export function SenderDomainAdminPage() {
@@ -35,62 +40,64 @@ export function SenderDomainAdminPage() {
       <Card>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">租户</th>
-                <th className="px-4 py-3 font-medium">域名</th>
-                <th className="px-4 py-3 font-medium">域名状态</th>
-                <th className="px-4 py-3 font-medium">绑定的邮件通道</th>
-                <th className="px-4 py-3 font-medium">验证时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && <TableSkeletonRows columns={5} />}
-              {!isLoading && domains && domains.length === 0 && <EmptyStateRow colSpan={5} />}
-              {domains?.map((d) => (
-                <tr key={d.id} className="border-b last:border-0">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{d.account.name}</div>
-                    <div className="text-xs text-muted-foreground">{d.account.slug}</div>
-                  </td>
-                  <td className="px-4 py-3 font-mono">{d.domain}</td>
-                  <td className="px-4 py-3">
-                    {d.status === 'verified' ? (
-                      <Badge variant="success">已验证</Badge>
-                    ) : d.status === 'provisioning' ? (
-                      <Badge variant="muted">注册中</Badge>
-                    ) : d.status === 'failed' ? (
-                      <Badge variant="danger" title={d.provisioningError ?? undefined}>
-                        注册失败
-                      </Badge>
-                    ) : (
-                      <Badge variant="warning">待验证</Badge>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm">
-                    {d.emailChannel ? (
-                      <div className="flex items-center gap-2">
-                        <span>{d.emailChannel.name}</span>
-                        <Badge variant="muted">
-                          {d.emailChannel.provider === 'mailgun'
-                            ? 'Mailgun'
-                            : d.emailChannel.provider === 'resend'
-                              ? 'Resend'
-                              : 'Azure'}
-                        </Badge>
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {formatDateTime(d.verifiedAt)}
-                  </td>
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 font-medium">租户</th>
+                  <th className="px-4 py-3 font-medium">域名</th>
+                  <th className="px-4 py-3 font-medium">域名状态</th>
+                  <th className="px-4 py-3 font-medium">绑定的邮件通道</th>
+                  <th className="px-4 py-3 font-medium">验证时间</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {isLoading && <TableSkeletonRows columns={5} />}
+                {!isLoading && domains && domains.length === 0 && <EmptyStateRow colSpan={5} />}
+                {domains?.map((d) => (
+                  <tr key={d.id} className="border-b last:border-0">
+                    <td className="px-4 py-3">
+                      <div className="font-medium">{d.account.name}</div>
+                      <div className="text-xs text-muted-foreground">{d.account.slug}</div>
+                    </td>
+                    <td className="px-4 py-3 font-mono">{d.domain}</td>
+                    <td className="px-4 py-3">
+                      {d.status === 'verified' ? (
+                        <Badge variant="success">已验证</Badge>
+                      ) : d.status === 'provisioning' ? (
+                        <Badge variant="muted">注册中</Badge>
+                      ) : d.status === 'failed' ? (
+                        <Badge variant="danger" title={d.provisioningError ?? undefined}>
+                          注册失败
+                        </Badge>
+                      ) : (
+                        <Badge variant="warning">待验证</Badge>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {d.emailChannel ? (
+                        <div className="flex items-center gap-2">
+                          <span>{d.emailChannel.name}</span>
+                          <Badge variant="muted">
+                            {d.emailChannel.provider === 'mailgun'
+                              ? 'Mailgun'
+                              : d.emailChannel.provider === 'resend'
+                                ? 'Resend'
+                                : d.emailChannel.provider === 'cloudflare'
+                                  ? 'Cloudflare'
+                                  : 'Azure'}
+                          </Badge>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {formatDateTime(d.verifiedAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>

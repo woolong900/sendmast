@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const EmailChannelStatusSchema = z.enum(['active', 'suspended', 'retired']);
 export type EmailChannelStatusValue = z.infer<typeof EmailChannelStatusSchema>;
-export const EmailChannelProviderSchema = z.enum(['acs', 'mailgun', 'resend']);
+export const EmailChannelProviderSchema = z.enum(['acs', 'mailgun', 'resend', 'cloudflare']);
 export type EmailChannelProviderValue = z.infer<typeof EmailChannelProviderSchema>;
 
 const EmailChannelBaseSchema = z.object({
@@ -29,12 +29,12 @@ const EmailChannelBaseSchema = z.object({
   resendApiKey: z.string().max(2000).optional().nullable(),
   resendApiBaseUrl: z.string().url().max(200).optional().nullable(),
   resendWebhookSigningKey: z.string().max(2000).optional().nullable(),
+  cloudflareAccountId: z.string().max(120).optional().nullable(),
+  cloudflareApiToken: z.string().max(2000).optional().nullable(),
+  cloudflareApiBaseUrl: z.string().url().max(200).optional().nullable(),
 });
 
-function validateProviderConfig(
-  v: z.infer<typeof EmailChannelBaseSchema>,
-  ctx: z.RefinementCtx,
-) {
+function validateProviderConfig(v: z.infer<typeof EmailChannelBaseSchema>, ctx: z.RefinementCtx) {
   if (v.provider === 'acs') {
     for (const key of [
       'azureTenantId',
@@ -54,10 +54,34 @@ function validateProviderConfig(
     }
   }
   if (v.provider === 'mailgun' && !v.mailgunApiKey?.trim()) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['mailgunApiKey'], message: 'Required for Mailgun' });
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['mailgunApiKey'],
+      message: 'Required for Mailgun',
+    });
   }
   if (v.provider === 'resend' && !v.resendApiKey?.trim()) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['resendApiKey'], message: 'Required for Resend' });
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['resendApiKey'],
+      message: 'Required for Resend',
+    });
+  }
+  if (v.provider === 'cloudflare') {
+    if (!v.cloudflareAccountId?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cloudflareAccountId'],
+        message: 'Required for Cloudflare',
+      });
+    }
+    if (!v.cloudflareApiToken?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cloudflareApiToken'],
+        message: 'Required for Cloudflare',
+      });
+    }
   }
 }
 
@@ -90,6 +114,9 @@ export interface EmailChannelView {
   resendApiKey: string | null;
   resendApiBaseUrl: string | null;
   resendWebhookSigningKey: string | null;
+  cloudflareAccountId: string | null;
+  cloudflareApiToken: string | null;
+  cloudflareApiBaseUrl: string | null;
   /** Whether this account is the platform-wide default for new signups. */
   isDefault: boolean;
   senderDomainCount: number;

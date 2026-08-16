@@ -192,30 +192,30 @@ model FxRate {
 /// consecutive failed checks automatically disable the domain so senders stop
 /// embedding broken tracking URLs.
 model TrackingDomain {
-  id        String   @id @default(uuid()) @db.Uuid
+  id                  String    @id @default(uuid()) @db.Uuid
   /// Bare hostname, no protocol/path. Stored lowercase.
-  domain    String   @unique @db.VarChar(253)
+  domain              String    @unique @db.VarChar(253)
   /// 'active'   — in rotation
   /// 'disabled' — taken out by an admin (e.g. blacklisted)
   /// Two-state for now; if we add automated DNS/TLS probing later we'll
   /// expand to pending/failed.
-  status    String   @default("active") @db.VarChar(16)
+  status              String    @default("active") @db.VarChar(16)
   /// 'unknown' — never checked / reset by admin
   /// 'healthy' — DNS + TLS + Caddy route reached
   /// 'failed'  — latest check failed; UI renders this red even before disable.
-  lastCheckStatus  String    @default("unknown") @map("last_check_status") @db.VarChar(16)
-  lastCheckDnsOk   Boolean?  @map("last_check_dns_ok")
-  lastCheckTlsOk   Boolean?  @map("last_check_tls_ok")
-  lastCheckCaddyOk Boolean?  @map("last_check_caddy_ok")
-  lastCheckHttpStatus Int?   @map("last_check_http_status")
-  lastCheckLatencyMs  Int?   @map("last_check_latency_ms")
-  lastCheckError      String? @map("last_check_error") @db.Text
+  lastCheckStatus     String    @default("unknown") @map("last_check_status") @db.VarChar(16)
+  lastCheckDnsOk      Boolean?  @map("last_check_dns_ok")
+  lastCheckTlsOk      Boolean?  @map("last_check_tls_ok")
+  lastCheckCaddyOk    Boolean?  @map("last_check_caddy_ok")
+  lastCheckHttpStatus Int?      @map("last_check_http_status")
+  lastCheckLatencyMs  Int?      @map("last_check_latency_ms")
+  lastCheckError      String?   @map("last_check_error") @db.Text
   lastCheckedAt       DateTime? @map("last_checked_at")
-  consecutiveFailures Int      @default(0) @map("consecutive_failures")
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
   /// Free-form admin note (e.g. "purchased 2026-05, registrar Namecheap").
-  notes     String?  @db.Text
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  notes               String?   @db.Text
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   @@index([status])
   @@index([lastCheckStatus])
@@ -340,12 +340,12 @@ model Account {
 /// a partial unique index in migration SQL) and is used as the default when
 /// adding a sender domain.
 model AccountEmailChannel {
-  accountId            String   @map("account_id") @db.Uuid
-  emailChannelId       String   @map("email_channel_id") @db.Uuid
-  isPrimary            Boolean  @default(false) @map("is_primary")
-  allowMarketing       Boolean  @default(true) @map("allow_marketing")
-  allowTransactional   Boolean  @default(true) @map("allow_transactional")
-  createdAt            DateTime @default(now()) @map("created_at")
+  accountId          String   @map("account_id") @db.Uuid
+  emailChannelId     String   @map("email_channel_id") @db.Uuid
+  isPrimary          Boolean  @default(false) @map("is_primary")
+  allowMarketing     Boolean  @default(true) @map("allow_marketing")
+  allowTransactional Boolean  @default(true) @map("allow_transactional")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   account      Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
   emailChannel EmailChannel @relation(fields: [emailChannelId], references: [id], onDelete: Restrict)
@@ -425,6 +425,10 @@ model EmailChannel {
   resendApiKey                  String?            @map("resend_api_key") @db.Text
   resendApiBaseUrl              String?            @map("resend_api_base_url")
   resendWebhookSigningKey       String?            @map("resend_webhook_signing_key") @db.Text
+  /// Cloudflare Email Sending settings.
+  cloudflareAccountId           String?            @map("cloudflare_account_id")
+  cloudflareApiToken            String?            @map("cloudflare_api_token") @db.Text
+  cloudflareApiBaseUrl          String?            @map("cloudflare_api_base_url")
   /// Platform-wide default. New tenant signups get a primary
   /// AccountEmailChannel link to this channel. At most one row may be true at a
   /// time — enforced by a partial unique index defined in migration SQL
@@ -1103,11 +1107,11 @@ model ReferralSetting {
 
 /// Singleton settings for provider send logs.
 model SendLogSetting {
-  id                              String   @id @default("singleton")
-  automationFinalHtmlLogEnabled   Boolean  @default(false) @map("automation_final_html_log_enabled")
-  updatedBy                       String?  @map("updated_by") @db.Uuid
-  updatedAt                       DateTime @updatedAt @map("updated_at")
-  createdAt                       DateTime @default(now()) @map("created_at")
+  id                            String   @id @default("singleton")
+  automationFinalHtmlLogEnabled Boolean  @default(false) @map("automation_final_html_log_enabled")
+  updatedBy                     String?  @map("updated_by") @db.Uuid
+  updatedAt                     DateTime @updatedAt @map("updated_at")
+  createdAt                     DateTime @default(now()) @map("created_at")
 
   @@map("send_log_settings")
 }

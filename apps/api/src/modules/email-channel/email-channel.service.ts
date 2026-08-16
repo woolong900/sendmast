@@ -35,6 +35,9 @@ interface EmailChannelRow {
   resendApiKey: string | null;
   resendApiBaseUrl: string | null;
   resendWebhookSigningKey: string | null;
+  cloudflareAccountId: string | null;
+  cloudflareApiToken: string | null;
+  cloudflareApiBaseUrl: string | null;
   isDefault: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -84,6 +87,9 @@ export class EmailChannelService {
         resendApiKey: input.resendApiKey?.trim() || null,
         resendApiBaseUrl: input.resendApiBaseUrl?.trim() || null,
         resendWebhookSigningKey: input.resendWebhookSigningKey?.trim() || null,
+        cloudflareAccountId: input.cloudflareAccountId?.trim() || null,
+        cloudflareApiToken: input.cloudflareApiToken?.trim() || null,
+        cloudflareApiBaseUrl: input.cloudflareApiBaseUrl?.trim() || null,
       },
     });
     return this.toView(row, 0, false);
@@ -101,24 +107,29 @@ export class EmailChannelService {
     if (input.azureTenantId !== undefined) data.azureTenantId = input.azureTenantId;
     if (input.azureClientId !== undefined) data.azureClientId = input.azureClientId;
     if (input.azureClientSecret !== undefined) data.azureClientSecret = input.azureClientSecret;
-    if (input.azureSubscriptionId !== undefined) data.azureSubscriptionId = input.azureSubscriptionId;
+    if (input.azureSubscriptionId !== undefined)
+      data.azureSubscriptionId = input.azureSubscriptionId;
     if (input.azureResourceGroup !== undefined) data.azureResourceGroup = input.azureResourceGroup;
     if (input.azureEmailServiceName !== undefined)
       data.azureEmailServiceName = input.azureEmailServiceName;
     if (input.azureCommunicationServiceName !== undefined)
       data.azureCommunicationServiceName = input.azureCommunicationServiceName ?? null;
-    if (input.mailgunApiKey !== undefined)
-      data.mailgunApiKey = input.mailgunApiKey?.trim() || null;
+    if (input.mailgunApiKey !== undefined) data.mailgunApiKey = input.mailgunApiKey?.trim() || null;
     if (input.mailgunApiBaseUrl !== undefined)
       data.mailgunApiBaseUrl = input.mailgunApiBaseUrl?.trim() || null;
     if (input.mailgunWebhookSigningKey !== undefined)
       data.mailgunWebhookSigningKey = input.mailgunWebhookSigningKey?.trim() || null;
-    if (input.resendApiKey !== undefined)
-      data.resendApiKey = input.resendApiKey?.trim() || null;
+    if (input.resendApiKey !== undefined) data.resendApiKey = input.resendApiKey?.trim() || null;
     if (input.resendApiBaseUrl !== undefined)
       data.resendApiBaseUrl = input.resendApiBaseUrl?.trim() || null;
     if (input.resendWebhookSigningKey !== undefined)
       data.resendWebhookSigningKey = input.resendWebhookSigningKey?.trim() || null;
+    if (input.cloudflareAccountId !== undefined)
+      data.cloudflareAccountId = input.cloudflareAccountId?.trim() || null;
+    if (input.cloudflareApiToken !== undefined)
+      data.cloudflareApiToken = input.cloudflareApiToken?.trim() || null;
+    if (input.cloudflareApiBaseUrl !== undefined)
+      data.cloudflareApiBaseUrl = input.cloudflareApiBaseUrl?.trim() || null;
 
     try {
       const row = await this.prisma.emailChannel.update({
@@ -180,7 +191,11 @@ export class EmailChannelService {
     return this.toView(updated, updated._count.senderDomains, true);
   }
 
-  private toView(row: EmailChannelRow, senderDomainCount: number, redactSecrets: boolean): EmailChannelView {
+  private toView(
+    row: EmailChannelRow,
+    senderDomainCount: number,
+    redactSecrets: boolean,
+  ): EmailChannelView {
     return {
       id: row.id,
       provider: row.provider as EmailChannelView['provider'],
@@ -219,6 +234,13 @@ export class EmailChannelService {
           ? redact(row.resendWebhookSigningKey)
           : row.resendWebhookSigningKey
         : null,
+      cloudflareAccountId: row.cloudflareAccountId,
+      cloudflareApiToken: row.cloudflareApiToken
+        ? redactSecrets
+          ? redact(row.cloudflareApiToken)
+          : row.cloudflareApiToken
+        : null,
+      cloudflareApiBaseUrl: row.cloudflareApiBaseUrl,
       isDefault: row.isDefault,
       senderDomainCount,
       createdAt: row.createdAt.toISOString(),

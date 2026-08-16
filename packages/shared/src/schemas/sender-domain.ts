@@ -1,7 +1,10 @@
 import { z } from 'zod';
 
 export function normalizeSenderDomain(domain: string): string {
-  return domain.trim().toLowerCase().replace(/^www\./, '');
+  return domain
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, '');
 }
 
 const DomainName = z
@@ -31,7 +34,7 @@ export type CreateSenderDomainInput = z.infer<typeof CreateSenderDomainSchema>;
 export interface TenantEmailChannelView {
   id: string;
   name: string;
-  provider: 'acs' | 'mailgun' | 'resend';
+  provider: 'acs' | 'mailgun' | 'resend' | 'cloudflare';
   isPrimary: boolean;
   allowMarketing: boolean;
   allowTransactional: boolean;
@@ -64,7 +67,10 @@ export type SenderDomainVerificationStatus =
   | 'Unknown';
 
 export type SenderDomainVerificationStates = Partial<
-  Record<SenderDomainRecordKind, { status: SenderDomainVerificationStatus; lastDetectedAt?: string | null }>
+  Record<
+    SenderDomainRecordKind,
+    { status: SenderDomainVerificationStatus; lastDetectedAt?: string | null }
+  >
 >;
 
 export type SenderDomainStatus = 'provisioning' | 'pending' | 'verified' | 'failed';
@@ -100,7 +106,7 @@ export interface SenderDomainView {
   emailChannel: {
     id: string;
     name: string;
-    provider?: 'acs' | 'mailgun' | 'resend';
+    provider?: 'acs' | 'mailgun' | 'resend' | 'cloudflare';
     allowMarketing?: boolean;
     allowTransactional?: boolean;
   } | null;

@@ -32,6 +32,7 @@ const RECORD_LABELS: Record<SenderDomainRecordKind, string> = {
 function providerLabel(provider: TenantEmailChannelView['provider']): string {
   if (provider === 'mailgun') return 'Mailgun';
   if (provider === 'resend') return 'Resend';
+  if (provider === 'cloudflare') return 'Cloudflare';
   return 'Azure';
 }
 

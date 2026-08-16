@@ -26,10 +26,7 @@ const STATUS_LABEL: Record<AdminAccountView['status'], string> = {
   active: '已激活',
   suspended: '已封禁',
 };
-const STATUS_VARIANT: Record<
-  AdminAccountView['status'],
-  'success' | 'warning' | 'danger'
-> = {
+const STATUS_VARIANT: Record<AdminAccountView['status'], 'success' | 'warning' | 'danger'> = {
   pending_activation: 'warning',
   active: 'success',
   suspended: 'danger',
@@ -121,9 +118,7 @@ export function AdminAccountsPage() {
     const ok = await confirm({
       title: '确认封禁?',
       description: (
-        <span>
-          封禁后该租户的所有写操作(创建/修改/删除/发送)都会被拦截,只能查看现有数据。
-        </span>
+        <span>封禁后该租户的所有写操作(创建/修改/删除/发送)都会被拦截,只能查看现有数据。</span>
       ),
       confirmLabel: '封禁',
       variant: 'danger',
@@ -155,7 +150,8 @@ export function AdminAccountsPage() {
       title: `代登录 ${a.name}?`,
       description: (
         <span>
-          将以管理员身份进入工作区 <b>{a.name}</b>,可对其营销活动、联系人、分群、模板、发件域名、订单、自定义标签等执行任意读写操作。顶栏会一直显示«代登录中»提示,可随时退出。
+          将以管理员身份进入工作区 <b>{a.name}</b>
+          ,可对其营销活动、联系人、分群、模板、发件域名、订单、自定义标签等执行任意读写操作。顶栏会一直显示«代登录中»提示,可随时退出。
         </span>
       ),
       confirmLabel: '代登录',
@@ -216,7 +212,8 @@ export function AdminAccountsPage() {
       <div>
         <h1 className="text-xl font-semibold">租户管理</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          管理租户状态、分配邮件通道(可多选,标记一个为主并设置营销/事务用途)、设置剩余发送额度。封禁后该租户所有写操作会被拦截;额度 0 时活动会立即停止发送。
+          管理租户状态、分配邮件通道(可多选,标记一个为主并设置营销/事务用途)、设置剩余发送额度。封禁后该租户所有写操作会被拦截;额度
+          0 时活动会立即停止发送。
         </p>
       </div>
 
@@ -237,16 +234,12 @@ export function AdminAccountsPage() {
               </thead>
               <tbody>
                 {isLoading && <TableSkeletonRows columns={7} />}
-                {!isLoading && accounts && accounts.length === 0 && (
-                  <EmptyStateRow colSpan={7} />
-                )}
+                {!isLoading && accounts && accounts.length === 0 && <EmptyStateRow colSpan={7} />}
                 {accounts?.map((a) => (
                   <tr key={a.id} className="border-b last:border-0">
                     <td className="px-4 py-3">
                       <div className="font-medium">{a.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {a.ownerEmail ?? a.slug}
-                      </div>
+                      <div className="text-xs text-muted-foreground">{a.ownerEmail ?? a.slug}</div>
                     </td>
                     <td className="px-4 py-3">
                       <Badge variant={STATUS_VARIANT[a.status]}>{STATUS_LABEL[a.status]}</Badge>
@@ -438,12 +431,13 @@ function AccountEditModal({
   const quotaNum = Number(quota);
   const quotaValid = Number.isInteger(quotaNum) && quotaNum >= 0;
   const valid = channelValid && quotaValid;
-  const assignments: Array<Pick<AssignedEmailChannelView, 'id' | 'allowMarketing' | 'allowTransactional'>> =
-    ids.map((id) => ({
-      id,
-      allowMarketing: usage[id]?.allowMarketing ?? true,
-      allowTransactional: usage[id]?.allowTransactional ?? true,
-    }));
+  const assignments: Array<
+    Pick<AssignedEmailChannelView, 'id' | 'allowMarketing' | 'allowTransactional'>
+  > = ids.map((id) => ({
+    id,
+    allowMarketing: usage[id]?.allowMarketing ?? true,
+    allowTransactional: usage[id]?.allowTransactional ?? true,
+  }));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -483,7 +477,9 @@ function AccountEditModal({
                           ? 'Mailgun'
                           : channel.provider === 'resend'
                             ? 'Resend'
-                            : 'Azure'}
+                            : channel.provider === 'cloudflare'
+                              ? 'Cloudflare'
+                              : 'Azure'}
                       </span>
                       {inactive && (
                         <span className="text-xs text-muted-foreground">({channel.status})</span>
@@ -541,9 +537,7 @@ function AccountEditModal({
               onChange={(e) => setQuota(e.target.value)}
               disabled={pending}
             />
-            {!quotaValid && (
-              <p className="mt-1 text-xs text-destructive">请输入非负整数</p>
-            )}
+            {!quotaValid && <p className="mt-1 text-xs text-destructive">请输入非负整数</p>}
           </div>
 
           <div>

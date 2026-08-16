@@ -45,6 +45,9 @@ const FIELD_LABELS: Record<string, string> = {
   azureSubscriptionId: 'Subscription ID',
   azureResourceGroup: 'Resource Group',
   azureEmailServiceName: 'Email Service Name',
+  cloudflareAccountId: 'Cloudflare Account ID',
+  cloudflareApiToken: 'Cloudflare API Token',
+  cloudflareApiBaseUrl: 'Cloudflare API Base URL',
 
   // sender domain
   domain: '域名',
