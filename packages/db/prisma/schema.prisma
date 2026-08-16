@@ -458,27 +458,29 @@ enum SenderDomainStatus {
 }
 
 model SenderDomain {
-  id                  String             @id @default(uuid()) @db.Uuid
-  accountId           String             @map("account_id") @db.Uuid
-  emailChannelId      String             @map("email_channel_id") @db.Uuid
-  domain              String
+  id                    String             @id @default(uuid()) @db.Uuid
+  accountId             String             @map("account_id") @db.Uuid
+  emailChannelId        String             @map("email_channel_id") @db.Uuid
+  domain                String
   // The five DNS records Azure asks for (Domain, SPF, DKIM, DKIM2, DMARC).
   // Stored as JSON because the record types are mixed (TXT + CNAME) and the
   // exact selectors vary per Azure region.
-  verificationRecords Json               @map("verification_records")
+  verificationRecords   Json               @map("verification_records")
   // Latest verificationStates per record from the provider, refreshed on `verify`.
-  verificationStates  Json?              @map("verification_states")
-  resendDomainId      String?            @map("resend_domain_id")
-  provisioningError   String?            @map("provisioning_error") @db.Text
-  status              SenderDomainStatus @default(pending)
-  lastCheckedAt       DateTime?          @map("last_checked_at")
-  verifiedAt          DateTime?          @map("verified_at")
+  verificationStates    Json?              @map("verification_states")
+  resendDomainId        String?            @map("resend_domain_id")
+  cloudflareZoneId      String?            @map("cloudflare_zone_id")
+  cloudflareSubdomainId String?            @map("cloudflare_subdomain_id")
+  provisioningError     String?            @map("provisioning_error") @db.Text
+  status                SenderDomainStatus @default(pending)
+  lastCheckedAt         DateTime?          @map("last_checked_at")
+  verifiedAt            DateTime?          @map("verified_at")
   // Set after an ACS domain has been added to the Communication Service's
   // CommunicationService.linkedDomains array. Without this, sending from
   // the domain returns 401 from ACS Email even if DNS is verified.
-  linkedAt            DateTime?          @map("linked_at")
-  createdAt           DateTime           @default(now()) @map("created_at")
-  updatedAt           DateTime           @updatedAt @map("updated_at")
+  linkedAt              DateTime?          @map("linked_at")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
 
   account         Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
   emailChannel    EmailChannel     @relation(fields: [emailChannelId], references: [id], onDelete: Restrict)

@@ -4,13 +4,26 @@ import { SenderDomainController } from './sender-domain.controller';
 import { SenderDomainAdminController } from './sender-domain-admin.controller';
 import { SenderDomainService } from './sender-domain.service';
 import { AzureAcsService } from './azure-acs.service';
+import { CloudflareEmailService } from './cloudflare-email.service';
 import { MailgunService } from './mailgun.service';
 import { ResendService } from './resend.service';
 
 @Module({
   imports: [AuthModule],
   controllers: [SenderDomainController, SenderDomainAdminController],
-  providers: [SenderDomainService, AzureAcsService, MailgunService, ResendService],
-  exports: [SenderDomainService, AzureAcsService, MailgunService, ResendService],
+  providers: [
+    SenderDomainService,
+    AzureAcsService,
+    CloudflareEmailService,
+    MailgunService,
+    ResendService,
+  ],
+  exports: [
+    SenderDomainService,
+    AzureAcsService,
+    CloudflareEmailService,
+    MailgunService,
+    ResendService,
+  ],
 })
 export class SenderDomainModule {}

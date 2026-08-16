@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { Prisma, type EmailChannel } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AzureAcsService } from './azure-acs.service';
+import { CloudflareEmailService } from './cloudflare-email.service';
 import { MailgunService } from './mailgun.service';
 import { ResendService } from './resend.service';
 import { ensureDmarcRecord, applyDmarcDnsVerification } from './dmarc-record';
@@ -30,6 +31,7 @@ export class SenderDomainService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly azure: AzureAcsService,
+    private readonly cloudflare: CloudflareEmailService,
     private readonly mailgun: MailgunService,
     private readonly resend: ResendService,
   ) {}
@@ -137,33 +139,6 @@ export class SenderDomainService {
     }
     const emailChannel = chosen;
 
-    if (emailChannel.provider === 'cloudflare') {
-      const row = await this.prisma.senderDomain.create({
-        data: {
-          accountId,
-          emailChannelId: emailChannel.id,
-          domain: cleaned,
-          verificationRecords: [] as unknown as Prisma.InputJsonValue,
-          verificationStates: {} as unknown as Prisma.InputJsonValue,
-          status: 'verified',
-          verifiedAt: new Date(),
-          linkedAt: new Date(),
-        },
-      });
-      return this.toView({
-        ...row,
-        emailChannel: {
-          id: emailChannel.id,
-          name: emailChannel.name,
-          provider: emailChannel.provider as 'cloudflare',
-          allowMarketing:
-            links.find((l) => l.emailChannelId === emailChannel.id)?.allowMarketing ?? true,
-          allowTransactional:
-            links.find((l) => l.emailChannelId === emailChannel.id)?.allowTransactional ?? true,
-        },
-      });
-    }
-
     const row = await this.prisma.senderDomain.create({
       data: {
         accountId,
@@ -205,17 +180,35 @@ export class SenderDomainService {
           ? await this.mailgun.createDomain(emailChannel, domain)
           : emailChannel.provider === 'resend'
             ? await this.resend.createDomain(emailChannel, domain)
-            : await this.azure.createDomain(emailChannel, domain);
+            : emailChannel.provider === 'cloudflare'
+              ? await this.cloudflare.createDomain(emailChannel, domain)
+              : await this.azure.createDomain(emailChannel, domain);
       const { records: providerRecords } = created;
-      const records = ensureDmarcRecord(providerRecords);
+      const records =
+        emailChannel.provider === 'cloudflare'
+          ? providerRecords
+          : ensureDmarcRecord(providerRecords);
+      const states =
+        'states' in created
+          ? (created.states as SenderDomainVerificationStates)
+          : ({} as SenderDomainVerificationStates);
+      const allVerified =
+        records.length > 0 && records.every((record) => states[record.kind]?.status === 'Verified');
       await this.prisma.senderDomain.update({
         where: { id: rowId },
         data: {
           verificationRecords: records as unknown as Prisma.InputJsonValue,
+          verificationStates: states as unknown as Prisma.InputJsonValue,
           resendDomainId:
             'providerDomainId' in created ? (created.providerDomainId as string | null) : undefined,
+          cloudflareZoneId:
+            'cloudflareZoneId' in created ? (created.cloudflareZoneId as string | null) : undefined,
+          cloudflareSubdomainId:
+            'providerDomainId' in created ? (created.providerDomainId as string | null) : undefined,
           provisioningError: null,
-          status: 'pending',
+          status: allVerified ? 'verified' : 'pending',
+          verifiedAt: allVerified ? new Date() : undefined,
+          linkedAt: allVerified ? new Date() : undefined,
         },
       });
     } catch (err) {
@@ -254,14 +247,35 @@ export class SenderDomainService {
       throw new BadRequestException('域名配置失败，请删除后重新添加。');
     }
     if (row.emailChannel.provider === 'cloudflare') {
+      const refreshed =
+        row.cloudflareZoneId && row.cloudflareSubdomainId
+          ? await this.cloudflare.verifyDomain(
+              row.emailChannel,
+              row.cloudflareZoneId,
+              row.cloudflareSubdomainId,
+            )
+          : await this.cloudflare.createDomain(row.emailChannel, row.domain);
+      const records = refreshed.records;
+      const states = refreshed.states ?? {};
+      const allVerified =
+        records.length > 0 && records.every((record) => states[record.kind]?.status === 'Verified');
       const updated = await this.prisma.senderDomain.update({
         where: { id: row.id },
         data: {
-          verificationStates: {} as unknown as Prisma.InputJsonValue,
+          verificationRecords: records as unknown as Prisma.InputJsonValue,
+          verificationStates: states as unknown as Prisma.InputJsonValue,
+          cloudflareZoneId:
+            'cloudflareZoneId' in refreshed
+              ? (refreshed.cloudflareZoneId as string | null)
+              : row.cloudflareZoneId,
+          cloudflareSubdomainId:
+            'providerDomainId' in refreshed
+              ? (refreshed.providerDomainId as string | null)
+              : row.cloudflareSubdomainId,
           lastCheckedAt: new Date(),
-          status: 'verified',
-          verifiedAt: row.verifiedAt ?? new Date(),
-          linkedAt: row.linkedAt ?? new Date(),
+          status: allVerified ? 'verified' : 'pending',
+          verifiedAt: allVerified ? (row.verifiedAt ?? new Date()) : row.verifiedAt,
+          linkedAt: allVerified ? (row.linkedAt ?? new Date()) : row.linkedAt,
         },
         include: { senderUsernames: { orderBy: { createdAt: 'asc' } } },
       });
@@ -439,8 +453,21 @@ export class SenderDomainService {
     if (!row) return;
 
     if (row.emailChannel.provider === 'cloudflare') {
-      // Cloudflare Email Sending domains are managed in Cloudflare. SendMast
-      // only removes the local binding.
+      if (row.cloudflareZoneId && row.cloudflareSubdomainId) {
+        try {
+          await this.cloudflare.deleteDomain(
+            row.emailChannel,
+            row.cloudflareZoneId,
+            row.cloudflareSubdomainId,
+          );
+        } catch (err) {
+          const message = (err as Error).message;
+          if (!message.includes('Cloudflare API 404')) throw err;
+          this.logger.warn(
+            `Cloudflare domain ${row.domain} was not found upstream; deleting local row only.`,
+          );
+        }
+      }
     } else if (row.emailChannel.provider === 'mailgun') {
       try {
         await this.mailgun.deleteDomain(row.emailChannel, row.domain);
