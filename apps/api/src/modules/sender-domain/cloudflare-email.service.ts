@@ -97,7 +97,22 @@ export class CloudflareEmailService {
       const exact = zones.find((z) => z.name === candidate && z.id);
       if (exact) return exact;
     }
+    if (labels.length === 2) return this.createZone(acct, domain);
     throw new Error(`Cloudflare channel ${acct.name}: 未找到 ${domain} 对应的 Cloudflare Zone`);
+  }
+
+  private async createZone(acct: EmailChannel, domain: string): Promise<CloudflareZone> {
+    if (!acct.cloudflareAccountId) {
+      throw new Error(`Cloudflare channel ${acct.name}: Account ID 未配置`);
+    }
+    return this.request<CloudflareZone>(acct, '/zones', {
+      method: 'POST',
+      body: JSON.stringify({
+        account: { id: acct.cloudflareAccountId },
+        name: domain,
+        type: 'full',
+      }),
+    });
   }
 
   private async createSubdomain(
