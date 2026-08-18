@@ -4,7 +4,7 @@ import {
   UnauthorizedException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, createVerify, timingSafeEqual } from 'node:crypto';
 import { QueueService } from '../../common/queue/queue.service';
 import { QUEUE_NAMES } from '@sendmast/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -12,6 +12,7 @@ import { classifyBounce, classifyMailgunBounce } from './bounce-classifier';
 
 const MAILGUN_SIGNATURE_MAX_AGE_MS = 15 * 60 * 1000;
 const RESEND_SIGNATURE_MAX_AGE_MS = 5 * 60 * 1000;
+const SENDGRID_SIGNATURE_MAX_AGE_MS = 5 * 60 * 1000;
 
 /** Azure Event Grid event envelope (subset). */
 export interface EventGridEvent {
@@ -174,6 +175,50 @@ export class WebhookService {
     return { accepted: 1 };
   }
 
+  async handleSendGrid(
+    rawBody: string,
+    headers: SendGridSignatureHeaders,
+  ): Promise<{ accepted: number }> {
+    if (!rawBody || !headers.timestamp || !headers.signature) {
+      throw new UnauthorizedException('invalid SendGrid webhook payload');
+    }
+
+    await this.assertSendGridSignature(rawBody, headers);
+
+    const events = parseJsonArray(rawBody) as SendGridWebhookEvent[];
+    let accepted = 0;
+    for (const event of events) {
+      const mapped = mapSendGridEvent(event);
+      if (!mapped) {
+        this.logger.warn(`Unknown SendGrid event: ${String(event.event ?? '')}`);
+        continue;
+      }
+
+      const vars = normaliseVariables(event);
+      const messageId =
+        vars.sendmast_operation_id ??
+        stringValue(event.sg_message_id) ??
+        stringValue(event['smtp-id']);
+
+      await this.queue.add(QUEUE_NAMES.EVENTS_INGEST, 'event', {
+        kind: mapped.kind,
+        recipientId: vars.sendmast_recipient_id,
+        source: vars.sendmast_source === 'a' ? 'a' : undefined,
+        externalRecipient: stringValue(event.email),
+        messageId,
+        linkUrl: mapped.kind === 'c' ? stringValue(event.url) : undefined,
+        ip: stringValue(event.ip),
+        userAgent: stringValue(event.useragent),
+        receivedAt: sendGridTimestampMs(event.timestamp),
+        rawMeta: event as Record<string, unknown>,
+        bounceKind: mapped.bounceKind,
+      });
+      accepted += 1;
+    }
+
+    return { accepted };
+  }
+
   private async assertMailgunSignature(signature: MailgunSignature): Promise<void> {
     const timestampMs = Number(signature.timestamp) * 1000;
     if (
@@ -240,6 +285,45 @@ export class WebhookService {
     });
     if (!ok) throw new UnauthorizedException('invalid Resend webhook signature');
   }
+
+  private async assertSendGridSignature(
+    rawBody: string,
+    headers: SendGridSignatureHeaders,
+  ): Promise<void> {
+    const timestampMs = Number(headers.timestamp) * 1000;
+    if (
+      !Number.isFinite(timestampMs) ||
+      Math.abs(Date.now() - timestampMs) > SENDGRID_SIGNATURE_MAX_AGE_MS
+    ) {
+      throw new UnauthorizedException('stale SendGrid webhook signature');
+    }
+
+    const keys = await this.prisma.emailChannel.findMany({
+      where: {
+        provider: 'sendgrid',
+        sendgridWebhookVerificationKey: { not: null },
+      },
+      select: { sendgridWebhookVerificationKey: true },
+    });
+    if (keys.length === 0) {
+      throw new ServiceUnavailableException('SendGrid webhook verification key is not configured');
+    }
+
+    const signature = Buffer.from(headers.signature ?? '', 'base64');
+    const ok = keys.some((row) => {
+      const key = row.sendgridWebhookVerificationKey;
+      if (!key) return false;
+      try {
+        const verifier = createVerify('sha256');
+        verifier.update(`${headers.timestamp}${rawBody}`, 'utf8');
+        verifier.end();
+        return verifier.verify(toPemPublicKey(key), signature);
+      } catch {
+        return false;
+      }
+    });
+    if (!ok) throw new UnauthorizedException('invalid SendGrid webhook signature');
+  }
 }
 
 interface MailgunSignature {
@@ -255,6 +339,11 @@ interface MailgunWebhookPayload {
 
 interface ResendSignatureHeaders {
   id?: string;
+  timestamp?: string;
+  signature?: string;
+}
+
+interface SendGridSignatureHeaders {
   timestamp?: string;
   signature?: string;
 }
@@ -300,6 +389,23 @@ interface MailgunEventData {
   'client-info'?: Record<string, unknown>;
 }
 
+interface SendGridWebhookEvent {
+  event?: unknown;
+  email?: unknown;
+  timestamp?: unknown;
+  sg_message_id?: unknown;
+  'smtp-id'?: unknown;
+  url?: unknown;
+  ip?: unknown;
+  useragent?: unknown;
+  type?: unknown;
+  reason?: unknown;
+  status?: unknown;
+  response?: unknown;
+  bounce_classification?: unknown;
+  [key: string]: unknown;
+}
+
 function mapMailgunEvent(data: MailgunEventData): {
   kind: 'delivered' | 'bounce' | 'complaint' | 'o' | 'c' | 'u' | 'failed';
   bounceKind?: 'hard' | 'soft' | '';
@@ -340,9 +446,47 @@ function mapResendEvent(payload: ResendWebhookPayload): {
   return null;
 }
 
+function mapSendGridEvent(event: SendGridWebhookEvent): {
+  kind: 'delivered' | 'bounce' | 'complaint' | 'o' | 'c' | 'u' | 'failed';
+  bounceKind?: 'hard' | 'soft' | '';
+} | null {
+  const type = String(event.event ?? '').toLowerCase();
+  if (type === 'delivered') return { kind: 'delivered' };
+  if (type === 'open') return { kind: 'o' };
+  if (type === 'click') return { kind: 'c' };
+  if (type === 'spamreport') return { kind: 'complaint' };
+  if (type === 'unsubscribe' || type === 'group_unsubscribe') return { kind: 'u' };
+  if (type === 'bounce') return { kind: 'bounce', bounceKind: sendGridBounceKind(event) };
+  if (type === 'dropped') return { kind: 'failed' };
+  if (type === 'deferred') return { kind: 'bounce', bounceKind: 'soft' };
+  return null;
+}
+
 function resendBounceKind(bounce: ResendWebhookData['bounce']): 'hard' | 'soft' {
   const type = String(bounce?.type ?? '').toLowerCase();
   if (type.includes('transient') || type.includes('temporary')) return 'soft';
+  return 'hard';
+}
+
+function sendGridBounceKind(event: SendGridWebhookEvent): 'hard' | 'soft' {
+  const type = [
+    event.type,
+    event.reason,
+    event.status,
+    event.response,
+    event.bounce_classification,
+  ]
+    .map((v) => String(v ?? '').toLowerCase())
+    .join(' ');
+  if (
+    type.includes('soft') ||
+    type.includes('defer') ||
+    type.includes('temporary') ||
+    type.includes('transient') ||
+    type.includes('4.')
+  ) {
+    return 'soft';
+  }
   return 'hard';
 }
 
@@ -378,6 +522,27 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   } catch {
     throw new UnauthorizedException('invalid Resend webhook JSON');
   }
+}
+
+function parseJsonArray(raw: string): unknown[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    throw new UnauthorizedException('invalid SendGrid webhook JSON');
+  }
+}
+
+function sendGridTimestampMs(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n * 1000 : Date.now();
+}
+
+function toPemPublicKey(key: string): string {
+  const trimmed = key.trim();
+  if (trimmed.includes('BEGIN PUBLIC KEY')) return trimmed;
+  const body = trimmed.replace(/\s+/g, '').match(/.{1,64}/g)?.join('\n') ?? trimmed;
+  return `-----BEGIN PUBLIC KEY-----\n${body}\n-----END PUBLIC KEY-----`;
 }
 
 function parseSvixSignatures(header: string): Buffer[] {

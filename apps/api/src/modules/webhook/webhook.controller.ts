@@ -68,6 +68,20 @@ export class WebhookController {
     });
   }
 
+  /** SendGrid Event Webhook endpoint. Configure this URL in SendGrid as /api/webhooks/sendgrid. */
+  @Post('sendgrid')
+  @HttpCode(200)
+  async sendgrid(
+    @Req() req: Request & { rawBody?: Buffer },
+    @Headers('x-twilio-email-event-webhook-timestamp') timestamp: string | undefined,
+    @Headers('x-twilio-email-event-webhook-signature') signature: string | undefined,
+  ) {
+    return this.svc.handleSendGrid(req.rawBody?.toString('utf8') ?? '', {
+      timestamp,
+      signature,
+    });
+  }
+
   /**
    * Reject the request unless the shared key matches EVENTGRID_WEBHOOK_KEY.
    * The Authorization header is used because Caddy redacts it from access logs.
