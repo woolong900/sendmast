@@ -7,6 +7,7 @@ import { AzureAcsService } from './azure-acs.service';
 import { CloudflareEmailService } from './cloudflare-email.service';
 import { MailgunService } from './mailgun.service';
 import { ResendService } from './resend.service';
+import { SendGridService } from './sendgrid.service';
 
 @Module({
   imports: [AuthModule],
@@ -17,6 +18,7 @@ import { ResendService } from './resend.service';
     CloudflareEmailService,
     MailgunService,
     ResendService,
+    SendGridService,
   ],
   exports: [
     SenderDomainService,
@@ -24,6 +26,7 @@ import { ResendService } from './resend.service';
     CloudflareEmailService,
     MailgunService,
     ResendService,
+    SendGridService,
   ],
 })
 export class SenderDomainModule {}

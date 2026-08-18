@@ -479,6 +479,8 @@ function AccountEditModal({
                             ? 'Resend'
                             : channel.provider === 'cloudflare'
                               ? 'Cloudflare'
+                              : channel.provider === 'sendgrid'
+                                ? 'SendGrid'
                               : 'Azure'}
                       </span>
                       {inactive && (

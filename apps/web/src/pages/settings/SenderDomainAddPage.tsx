@@ -33,6 +33,7 @@ function providerLabel(provider: TenantEmailChannelView['provider']): string {
   if (provider === 'mailgun') return 'Mailgun';
   if (provider === 'resend') return 'Resend';
   if (provider === 'cloudflare') return 'Cloudflare';
+  if (provider === 'sendgrid') return 'SendGrid';
   return 'Azure';
 }
 

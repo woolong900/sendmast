@@ -48,6 +48,9 @@ const FIELD_LABELS: Record<string, string> = {
   cloudflareAccountId: 'Cloudflare Account ID',
   cloudflareApiToken: 'Cloudflare API Token',
   cloudflareApiBaseUrl: 'Cloudflare API Base URL',
+  sendgridApiKey: 'SendGrid API Key',
+  sendgridApiBaseUrl: 'SendGrid API Base URL',
+  sendgridWebhookVerificationKey: 'SendGrid Webhook Verification Key',
 
   // sender domain
   domain: '域名',

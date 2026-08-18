@@ -5,6 +5,7 @@ import { AzureAcsService } from './azure-acs.service';
 import { CloudflareEmailService } from './cloudflare-email.service';
 import { MailgunService } from './mailgun.service';
 import { ResendService } from './resend.service';
+import { SendGridService } from './sendgrid.service';
 import { ensureDmarcRecord, applyDmarcDnsVerification } from './dmarc-record';
 import { normalizeSenderDomain } from '@sendmast/shared';
 import type {
@@ -34,6 +35,7 @@ export class SenderDomainService {
     private readonly cloudflare: CloudflareEmailService,
     private readonly mailgun: MailgunService,
     private readonly resend: ResendService,
+    private readonly sendgrid: SendGridService,
   ) {}
 
   async list(accountId: string): Promise<SenderDomainView[]> {
@@ -180,9 +182,11 @@ export class SenderDomainService {
           ? await this.mailgun.createDomain(emailChannel, domain)
           : emailChannel.provider === 'resend'
             ? await this.resend.createDomain(emailChannel, domain)
-            : emailChannel.provider === 'cloudflare'
-              ? await this.cloudflare.createDomain(emailChannel, domain)
-              : await this.azure.createDomain(emailChannel, domain);
+            : emailChannel.provider === 'sendgrid'
+              ? await this.sendgrid.createDomain(emailChannel, domain)
+              : emailChannel.provider === 'cloudflare'
+                ? await this.cloudflare.createDomain(emailChannel, domain)
+                : await this.azure.createDomain(emailChannel, domain);
       const { records: providerRecords } = created;
       const records =
         emailChannel.provider === 'cloudflare'
@@ -200,11 +204,19 @@ export class SenderDomainService {
           verificationRecords: records as unknown as Prisma.InputJsonValue,
           verificationStates: states as unknown as Prisma.InputJsonValue,
           resendDomainId:
-            'providerDomainId' in created ? (created.providerDomainId as string | null) : undefined,
+            emailChannel.provider === 'resend' && 'providerDomainId' in created
+              ? (created.providerDomainId as string | null)
+              : undefined,
+          sendgridDomainId:
+            emailChannel.provider === 'sendgrid' && 'providerDomainId' in created
+              ? (created.providerDomainId as string | null)
+              : undefined,
           cloudflareZoneId:
             'cloudflareZoneId' in created ? (created.cloudflareZoneId as string | null) : undefined,
           cloudflareSubdomainId:
-            'providerDomainId' in created ? (created.providerDomainId as string | null) : undefined,
+            emailChannel.provider === 'cloudflare' && 'providerDomainId' in created
+              ? (created.providerDomainId as string | null)
+              : undefined,
           provisioningError: null,
           status: allVerified ? 'verified' : 'pending',
           verifiedAt: allVerified ? new Date() : undefined,
@@ -300,7 +312,9 @@ export class SenderDomainService {
         ? await this.mailgun.verifyDomain(row.emailChannel, row.domain)
         : row.emailChannel.provider === 'resend'
           ? await this.verifyResendDomain(row.emailChannel, row.resendDomainId)
-          : await this.azure.getStates(row.emailChannel, row.domain);
+          : row.emailChannel.provider === 'sendgrid'
+            ? await this.verifySendGridDomain(row.emailChannel, row.sendgridDomainId)
+            : await this.azure.getStates(row.emailChannel, row.domain);
 
     // Kick off Azure verification for Domain/SPF/DKIM/DKIM2 only. DMARC is
     // customer-managed in public DNS — Azure's API never flips it to
@@ -490,6 +504,18 @@ export class SenderDomainService {
           );
         }
       }
+    } else if (row.emailChannel.provider === 'sendgrid') {
+      if (row.sendgridDomainId) {
+        try {
+          await this.sendgrid.deleteDomain(row.emailChannel, row.sendgridDomainId);
+        } catch (err) {
+          const message = (err as Error).message;
+          if (!message.includes('SendGrid API 404')) throw err;
+          this.logger.warn(
+            `SendGrid domain ${row.domain} was not found upstream; deleting local row only.`,
+          );
+        }
+      }
     } else {
       // Unlink first so the domain isn't referenced by the CommunicationService
       // when Azure runs the delete LRO. Best-effort — failures are logged and
@@ -561,6 +587,7 @@ export class SenderDomainService {
               | 'mailgun'
               | 'resend'
               | 'cloudflare'
+              | 'sendgrid'
               | undefined,
             allowMarketing: row.emailChannel.allowMarketing,
             allowTransactional: row.emailChannel.allowTransactional,
@@ -585,6 +612,16 @@ export class SenderDomainService {
       throw new BadRequestException('Resend 域名 ID 缺失，请删除后重新添加。');
     }
     return this.resend.verifyDomain(emailChannel, resendDomainId);
+  }
+
+  private async verifySendGridDomain(
+    emailChannel: EmailChannel,
+    sendgridDomainId: string | null,
+  ): Promise<SenderDomainVerificationStates> {
+    if (!sendgridDomainId) {
+      throw new BadRequestException('SendGrid 域名 ID 缺失，请删除后重新添加。');
+    }
+    return this.sendgrid.verifyDomain(emailChannel, sendgridDomainId);
   }
 
   private withUsage<

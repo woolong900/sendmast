@@ -34,7 +34,7 @@ export type CreateSenderDomainInput = z.infer<typeof CreateSenderDomainSchema>;
 export interface TenantEmailChannelView {
   id: string;
   name: string;
-  provider: 'acs' | 'mailgun' | 'resend' | 'cloudflare';
+  provider: 'acs' | 'mailgun' | 'resend' | 'cloudflare' | 'sendgrid';
   isPrimary: boolean;
   allowMarketing: boolean;
   allowTransactional: boolean;
@@ -106,7 +106,7 @@ export interface SenderDomainView {
   emailChannel: {
     id: string;
     name: string;
-    provider?: 'acs' | 'mailgun' | 'resend' | 'cloudflare';
+    provider?: 'acs' | 'mailgun' | 'resend' | 'cloudflare' | 'sendgrid';
     allowMarketing?: boolean;
     allowTransactional?: boolean;
   } | null;

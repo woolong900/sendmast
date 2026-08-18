@@ -17,7 +17,7 @@ interface AdminSenderDomain {
   emailChannel: {
     id: string;
     name: string;
-    provider: 'acs' | 'mailgun' | 'resend' | 'cloudflare';
+    provider: 'acs' | 'mailgun' | 'resend' | 'cloudflare' | 'sendgrid';
     status: string;
   } | null;
 }
@@ -84,7 +84,9 @@ export function SenderDomainAdminPage() {
                                 ? 'Resend'
                                 : d.emailChannel.provider === 'cloudflare'
                                   ? 'Cloudflare'
-                                  : 'Azure'}
+                                  : d.emailChannel.provider === 'sendgrid'
+                                    ? 'SendGrid'
+                                    : 'Azure'}
                           </Badge>
                         </div>
                       ) : (

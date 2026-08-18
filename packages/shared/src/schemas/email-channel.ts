@@ -2,7 +2,13 @@ import { z } from 'zod';
 
 export const EmailChannelStatusSchema = z.enum(['active', 'suspended', 'retired']);
 export type EmailChannelStatusValue = z.infer<typeof EmailChannelStatusSchema>;
-export const EmailChannelProviderSchema = z.enum(['acs', 'mailgun', 'resend', 'cloudflare']);
+export const EmailChannelProviderSchema = z.enum([
+  'acs',
+  'mailgun',
+  'resend',
+  'cloudflare',
+  'sendgrid',
+]);
 export type EmailChannelProviderValue = z.infer<typeof EmailChannelProviderSchema>;
 
 const EmailChannelBaseSchema = z.object({
@@ -32,6 +38,9 @@ const EmailChannelBaseSchema = z.object({
   cloudflareAccountId: z.string().max(120).optional().nullable(),
   cloudflareApiToken: z.string().max(2000).optional().nullable(),
   cloudflareApiBaseUrl: z.string().url().max(200).optional().nullable(),
+  sendgridApiKey: z.string().max(2000).optional().nullable(),
+  sendgridApiBaseUrl: z.string().url().max(200).optional().nullable(),
+  sendgridWebhookVerificationKey: z.string().max(2000).optional().nullable(),
 });
 
 function validateProviderConfig(v: z.infer<typeof EmailChannelBaseSchema>, ctx: z.RefinementCtx) {
@@ -83,6 +92,13 @@ function validateProviderConfig(v: z.infer<typeof EmailChannelBaseSchema>, ctx: 
       });
     }
   }
+  if (v.provider === 'sendgrid' && !v.sendgridApiKey?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['sendgridApiKey'],
+      message: 'Required for SendGrid',
+    });
+  }
 }
 
 export const CreateEmailChannelSchema = EmailChannelBaseSchema.superRefine(validateProviderConfig);
@@ -117,6 +133,9 @@ export interface EmailChannelView {
   cloudflareAccountId: string | null;
   cloudflareApiToken: string | null;
   cloudflareApiBaseUrl: string | null;
+  sendgridApiKey: string | null;
+  sendgridApiBaseUrl: string | null;
+  sendgridWebhookVerificationKey: string | null;
   /** Whether this account is the platform-wide default for new signups. */
   isDefault: boolean;
   senderDomainCount: number;

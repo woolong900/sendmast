@@ -390,52 +390,57 @@ enum EmailChannelStatus {
 }
 
 model EmailChannel {
-  id                            String             @id @default(uuid()) @db.Uuid
+  id                             String             @id @default(uuid()) @db.Uuid
   /// Sending channel provider.
-  provider                      String             @default("acs") @db.VarChar(16)
-  name                          String
-  rpsLimit                      Int                @map("rps_limit")
-  rpmLimit                      Int                @map("rpm_limit")
-  rphLimit                      Int                @map("rph_limit")
-  rpdLimit                      Int                @map("rpd_limit")
-  status                        EmailChannelStatus @default(active)
+  provider                       String             @default("acs") @db.VarChar(16)
+  name                           String
+  rpsLimit                       Int                @map("rps_limit")
+  rpmLimit                       Int                @map("rpm_limit")
+  rphLimit                       Int                @map("rph_limit")
+  rpdLimit                       Int                @map("rpd_limit")
+  status                         EmailChannelStatus @default(active)
   // Azure Resource Manager handles for managing domains under this account.
   // All required to drive the Azure ARM SDK; secret is stored verbatim for
   // the MVP — production should encrypt at rest.
-  azureTenantId                 String             @map("azure_tenant_id")
-  azureClientId                 String             @map("azure_client_id")
-  azureClientSecret             String             @map("azure_client_secret") @db.Text
-  azureSubscriptionId           String             @map("azure_subscription_id")
-  azureResourceGroup            String             @map("azure_resource_group")
-  azureEmailServiceName         String             @map("azure_email_service_name")
+  azureTenantId                  String             @map("azure_tenant_id")
+  azureClientId                  String             @map("azure_client_id")
+  azureClientSecret              String             @map("azure_client_secret") @db.Text
+  azureSubscriptionId            String             @map("azure_subscription_id")
+  azureResourceGroup             String             @map("azure_resource_group")
+  azureEmailServiceName          String             @map("azure_email_service_name")
   // Communication Service resource that verified domains get linked to
   // (Microsoft.Communication/communicationServices). Different resource type
   // than EmailService — same RG, but separate name. Required to actually
   // send mail through the domain. Nullable so existing channels (created
   // before this column existed) keep working — they'll be rejected at the
   // link step until an admin edits and fills it in.
-  azureCommunicationServiceName String?            @map("azure_communication_service_name")
+  azureCommunicationServiceName  String?            @map("azure_communication_service_name")
   /// Mailgun API settings. `mailgunApiBaseUrl` supports EU accounts
   /// (https://api.eu.mailgun.net) while defaulting to the US endpoint.
-  mailgunApiKey                 String?            @map("mailgun_api_key") @db.Text
-  mailgunApiBaseUrl             String?            @map("mailgun_api_base_url")
-  mailgunWebhookSigningKey      String?            @map("mailgun_webhook_signing_key") @db.Text
+  mailgunApiKey                  String?            @map("mailgun_api_key") @db.Text
+  mailgunApiBaseUrl              String?            @map("mailgun_api_base_url")
+  mailgunWebhookSigningKey       String?            @map("mailgun_webhook_signing_key") @db.Text
   /// Resend API settings. `resendApiBaseUrl` defaults to
   /// https://api.resend.com and exists mainly for tests/proxies.
-  resendApiKey                  String?            @map("resend_api_key") @db.Text
-  resendApiBaseUrl              String?            @map("resend_api_base_url")
-  resendWebhookSigningKey       String?            @map("resend_webhook_signing_key") @db.Text
+  resendApiKey                   String?            @map("resend_api_key") @db.Text
+  resendApiBaseUrl               String?            @map("resend_api_base_url")
+  resendWebhookSigningKey        String?            @map("resend_webhook_signing_key") @db.Text
   /// Cloudflare Email Sending settings.
-  cloudflareAccountId           String?            @map("cloudflare_account_id")
-  cloudflareApiToken            String?            @map("cloudflare_api_token") @db.Text
-  cloudflareApiBaseUrl          String?            @map("cloudflare_api_base_url")
+  cloudflareAccountId            String?            @map("cloudflare_account_id")
+  cloudflareApiToken             String?            @map("cloudflare_api_token") @db.Text
+  cloudflareApiBaseUrl           String?            @map("cloudflare_api_base_url")
+  /// SendGrid API settings. `sendgridApiBaseUrl` defaults to
+  /// https://api.sendgrid.com and exists mainly for tests/proxies.
+  sendgridApiKey                 String?            @map("sendgrid_api_key") @db.Text
+  sendgridApiBaseUrl             String?            @map("sendgrid_api_base_url")
+  sendgridWebhookVerificationKey String?            @map("sendgrid_webhook_verification_key") @db.Text
   /// Platform-wide default. New tenant signups get a primary
   /// AccountEmailChannel link to this channel. At most one row may be true at a
   /// time — enforced by a partial unique index defined in migration SQL
   /// (Prisma 5 doesn't support partial unique constraints declaratively).
-  isDefault                     Boolean            @default(false) @map("is_default")
-  createdAt                     DateTime           @default(now()) @map("created_at")
-  updatedAt                     DateTime           @updatedAt @map("updated_at")
+  isDefault                      Boolean            @default(false) @map("is_default")
+  createdAt                      DateTime           @default(now()) @map("created_at")
+  updatedAt                      DateTime           @updatedAt @map("updated_at")
 
   senderDomains SenderDomain[]
   accountLinks  AccountEmailChannel[]
@@ -469,6 +474,7 @@ model SenderDomain {
   // Latest verificationStates per record from the provider, refreshed on `verify`.
   verificationStates    Json?              @map("verification_states")
   resendDomainId        String?            @map("resend_domain_id")
+  sendgridDomainId      String?            @map("sendgrid_domain_id")
   cloudflareZoneId      String?            @map("cloudflare_zone_id")
   cloudflareSubdomainId String?            @map("cloudflare_subdomain_id")
   provisioningError     String?            @map("provisioning_error") @db.Text
@@ -489,6 +495,7 @@ model SenderDomain {
   @@unique([accountId, domain])
   @@index([accountId])
   @@index([emailChannelId])
+  @@index([sendgridDomainId])
   @@map("sender_domains")
 }
 

@@ -38,6 +38,9 @@ interface EmailChannelRow {
   cloudflareAccountId: string | null;
   cloudflareApiToken: string | null;
   cloudflareApiBaseUrl: string | null;
+  sendgridApiKey: string | null;
+  sendgridApiBaseUrl: string | null;
+  sendgridWebhookVerificationKey: string | null;
   isDefault: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -90,6 +93,9 @@ export class EmailChannelService {
         cloudflareAccountId: input.cloudflareAccountId?.trim() || null,
         cloudflareApiToken: input.cloudflareApiToken?.trim() || null,
         cloudflareApiBaseUrl: input.cloudflareApiBaseUrl?.trim() || null,
+        sendgridApiKey: input.sendgridApiKey?.trim() || null,
+        sendgridApiBaseUrl: input.sendgridApiBaseUrl?.trim() || null,
+        sendgridWebhookVerificationKey: input.sendgridWebhookVerificationKey?.trim() || null,
       },
     });
     return this.toView(row, 0, false);
@@ -130,6 +136,13 @@ export class EmailChannelService {
       data.cloudflareApiToken = input.cloudflareApiToken?.trim() || null;
     if (input.cloudflareApiBaseUrl !== undefined)
       data.cloudflareApiBaseUrl = input.cloudflareApiBaseUrl?.trim() || null;
+    if (input.sendgridApiKey !== undefined)
+      data.sendgridApiKey = input.sendgridApiKey?.trim() || null;
+    if (input.sendgridApiBaseUrl !== undefined)
+      data.sendgridApiBaseUrl = input.sendgridApiBaseUrl?.trim() || null;
+    if (input.sendgridWebhookVerificationKey !== undefined)
+      data.sendgridWebhookVerificationKey =
+        input.sendgridWebhookVerificationKey?.trim() || null;
 
     try {
       const row = await this.prisma.emailChannel.update({
@@ -241,6 +254,17 @@ export class EmailChannelService {
           : row.cloudflareApiToken
         : null,
       cloudflareApiBaseUrl: row.cloudflareApiBaseUrl,
+      sendgridApiKey: row.sendgridApiKey
+        ? redactSecrets
+          ? redact(row.sendgridApiKey)
+          : row.sendgridApiKey
+        : null,
+      sendgridApiBaseUrl: row.sendgridApiBaseUrl,
+      sendgridWebhookVerificationKey: row.sendgridWebhookVerificationKey
+        ? redactSecrets
+          ? redact(row.sendgridWebhookVerificationKey)
+          : row.sendgridWebhookVerificationKey
+        : null,
       isDefault: row.isDefault,
       senderDomainCount,
       createdAt: row.createdAt.toISOString(),

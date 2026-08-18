@@ -85,6 +85,8 @@ function cacheKey(acct: EmailChannel): string {
     acct.cloudflareAccountId ?? '',
     acct.cloudflareApiBaseUrl ?? '',
     acct.cloudflareApiToken?.slice(0, 8) ?? '',
+    acct.sendgridApiBaseUrl ?? '',
+    acct.sendgridApiKey?.slice(0, 8) ?? '',
   ].join('|');
 }
 
@@ -108,6 +110,7 @@ async function buildTransport(acct: EmailChannel): Promise<MailTransport> {
   if (acct.provider === 'mailgun') return buildMailgunTransport(acct);
   if (acct.provider === 'resend') return buildResendTransport(acct);
   if (acct.provider === 'cloudflare') return buildCloudflareTransport(acct);
+  if (acct.provider === 'sendgrid') return buildSendGridTransport(acct);
   return buildEmailChannelTransport(acct);
 }
 
@@ -431,6 +434,86 @@ function buildCloudflareTransport(acct: EmailChannel): MailTransport {
   };
 }
 
+function buildSendGridTransport(acct: EmailChannel): MailTransport {
+  if (!acct.sendgridApiKey) {
+    throw new Error(`SendGrid channel ${acct.name}: API Key is not configured`);
+  }
+  const base = (acct.sendgridApiBaseUrl || 'https://api.sendgrid.com').replace(/\/+$/, '');
+
+  return {
+    async send(msg) {
+      const startedAt = Date.now();
+      try {
+        const res = await withTimeout(
+          fetch(`${base}/v3/mail/send`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${acct.sendgridApiKey}`,
+              'Content-Type': 'application/json',
+              'User-Agent': 'sendmast/1.0',
+            },
+            body: JSON.stringify({
+              personalizations: [
+                {
+                  to: [{ email: msg.to }],
+                  custom_args: sendgridCustomArgs(msg.headers ?? {}, msg.operationId),
+                  headers: msg.operationId
+                    ? { 'X-SendMast-Operation-Id': msg.operationId }
+                    : undefined,
+                },
+              ],
+              from: { email: msg.from.address, name: msg.from.name || undefined },
+              subject: msg.subject,
+              content: [
+                { type: 'text/plain', value: htmlToText(msg.html) },
+                { type: 'text/html', value: msg.html },
+              ],
+              mail_settings: { sandbox_mode: { enable: false } },
+            }),
+          }),
+          SEND_TIMEOUT_MS,
+          'SendGrid send',
+        );
+        const text = await res.text();
+        const payload = parseJson(text);
+        const latencyMs = Date.now() - startedAt;
+        if (!res.ok) {
+          return {
+            ok: false,
+            messageId: '',
+            providerStatus: `Http${res.status}`,
+            latencyMs,
+            errorMessage: sendgridMessage(payload, text),
+            providerResponse: payload,
+          };
+        }
+        return {
+          ok: true,
+          messageId: res.headers.get('x-message-id') ?? msg.operationId ?? '',
+          providerStatus: 'Accepted',
+          latencyMs,
+          providerResponse: {
+            operationId: msg.operationId,
+            messageId: res.headers.get('x-message-id'),
+            response: payload,
+          },
+        };
+      } catch (err) {
+        const latencyMs = Date.now() - startedAt;
+        return {
+          ok: false,
+          messageId: '',
+          providerStatus: 'Error',
+          latencyMs,
+          errorCode: (err as { code?: string })?.code,
+          errorMessage: err instanceof Error ? err.message : String(err),
+          providerResponse: serialiseError(err),
+        };
+      }
+    },
+  };
+}
+
 function mailgunVariables(
   headers: Record<string, string>,
   operationId?: string,
@@ -458,6 +541,18 @@ function resendTags(
       value: sanitiseResendTagPart(value),
     }))
     .filter((tag) => tag.name && tag.value);
+}
+
+function sendgridCustomArgs(
+  headers: Record<string, string>,
+  operationId?: string,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(mailgunVariables(headers, operationId)).map(([key, value]) => [
+      sanitiseResendTagPart(key),
+      value.slice(0, 500),
+    ]),
+  );
 }
 
 function sanitiseResendTagPart(value: string): string {
@@ -527,6 +622,21 @@ function cloudflareMessage(payload: unknown, fallback: string): string {
           const code = (err as { code?: unknown }).code;
           const message = (err as { message?: unknown }).message;
           return [code, message].filter(Boolean).join(': ');
+        })
+        .join('; ');
+    }
+  }
+  return providerMessage(payload, fallback);
+}
+
+function sendgridMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === 'object') {
+    const errors = (payload as { errors?: unknown }).errors;
+    if (Array.isArray(errors) && errors.length > 0) {
+      return errors
+        .map((err) => {
+          if (!err || typeof err !== 'object') return String(err);
+          return String((err as { message?: unknown }).message ?? JSON.stringify(err));
         })
         .join('; ');
     }
