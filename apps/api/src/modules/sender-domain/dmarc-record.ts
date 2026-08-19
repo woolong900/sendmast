@@ -1,8 +1,5 @@
-import { resolveTxt } from 'node:dns/promises';
-import type {
-  SenderDomainDnsRecord,
-  SenderDomainVerificationStates,
-} from '@sendmast/shared';
+import { Resolver, resolveTxt } from 'node:dns/promises';
+import type { SenderDomainDnsRecord, SenderDomainVerificationStates } from '@sendmast/shared';
 
 /** Platform default — monitor-only, no rua (user opted out). */
 export const DEFAULT_DMARC_TXT_VALUE = 'v=DMARC1; p=none';
@@ -37,14 +34,36 @@ export function ensureDmarcRecord(records: SenderDomainDnsRecord[]): SenderDomai
  */
 export async function detectDmarcPublished(domain: string): Promise<boolean> {
   const host = `_dmarc.${domain.toLowerCase().trim()}`;
-  try {
-    const rows = await resolveTxt(host);
-    return rows.some((chunks) => /^v=DMARC1/i.test(chunks.join('').trim()));
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENODATA' || code === 'ENOTFOUND') return false;
-    throw err;
+  const resolvers = [
+    { resolveTxt },
+    publicResolver(['1.1.1.1', '1.0.0.1']),
+    publicResolver(['8.8.8.8', '8.8.4.4']),
+  ];
+  let lastError: unknown = null;
+  let sawNotFound = false;
+
+  for (const resolver of resolvers) {
+    try {
+      const rows = await resolver.resolveTxt(host);
+      if (rows.some((chunks) => /^v=DMARC1/i.test(chunks.join('').trim()))) return true;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENODATA' || code === 'ENOTFOUND') {
+        sawNotFound = true;
+        continue;
+      }
+      lastError = err;
+    }
   }
+
+  if (lastError && !sawNotFound) throw lastError;
+  return false;
+}
+
+function publicResolver(servers: string[]): Pick<Resolver, 'resolveTxt'> {
+  const resolver = new Resolver();
+  resolver.setServers(servers);
+  return resolver;
 }
 
 export async function applyDmarcDnsVerification(
