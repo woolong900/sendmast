@@ -25,6 +25,7 @@ const RECORD_LABELS: Record<SenderDomainRecordKind, string> = {
   SPF: 'SPF',
   DKIM: 'DKIM',
   DKIM2: 'DKIM (备用)',
+  DKIM3: 'DKIM (备用 2)',
   DMARC: 'DMARC',
   Tracking: 'Tracking',
 };
@@ -34,6 +35,7 @@ function providerLabel(provider: TenantEmailChannelView['provider']): string {
   if (provider === 'resend') return 'Resend';
   if (provider === 'cloudflare') return 'Cloudflare';
   if (provider === 'sendgrid') return 'SendGrid';
+  if (provider === 'ses') return 'Amazon SES';
   return 'Azure';
 }
 

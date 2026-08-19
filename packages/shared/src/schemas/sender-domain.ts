@@ -34,7 +34,7 @@ export type CreateSenderDomainInput = z.infer<typeof CreateSenderDomainSchema>;
 export interface TenantEmailChannelView {
   id: string;
   name: string;
-  provider: 'acs' | 'mailgun' | 'resend' | 'cloudflare' | 'sendgrid';
+  provider: 'acs' | 'mailgun' | 'resend' | 'cloudflare' | 'sendgrid' | 'ses';
   isPrimary: boolean;
   allowMarketing: boolean;
   allowTransactional: boolean;
@@ -46,7 +46,14 @@ export interface TenantEmailChannelView {
  * DKIM2). DMARC is always included — injected by the API with a platform
  * default (`v=DMARC1; p=none`) when Azure omits it.
  */
-export type SenderDomainRecordKind = 'Domain' | 'SPF' | 'DKIM' | 'DKIM2' | 'DMARC' | 'Tracking';
+export type SenderDomainRecordKind =
+  | 'Domain'
+  | 'SPF'
+  | 'DKIM'
+  | 'DKIM2'
+  | 'DKIM3'
+  | 'DMARC'
+  | 'Tracking';
 
 export interface SenderDomainDnsRecord {
   kind: SenderDomainRecordKind;
@@ -106,7 +113,7 @@ export interface SenderDomainView {
   emailChannel: {
     id: string;
     name: string;
-    provider?: 'acs' | 'mailgun' | 'resend' | 'cloudflare' | 'sendgrid';
+    provider?: 'acs' | 'mailgun' | 'resend' | 'cloudflare' | 'sendgrid' | 'ses';
     allowMarketing?: boolean;
     allowTransactional?: boolean;
   } | null;

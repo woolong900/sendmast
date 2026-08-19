@@ -41,6 +41,9 @@ interface EmailChannelRow {
   sendgridApiKey: string | null;
   sendgridApiBaseUrl: string | null;
   sendgridWebhookVerificationKey: string | null;
+  sesAccessKeyId: string | null;
+  sesSecretAccessKey: string | null;
+  sesRegion: string | null;
   isDefault: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -96,6 +99,9 @@ export class EmailChannelService {
         sendgridApiKey: input.sendgridApiKey?.trim() || null,
         sendgridApiBaseUrl: input.sendgridApiBaseUrl?.trim() || null,
         sendgridWebhookVerificationKey: input.sendgridWebhookVerificationKey?.trim() || null,
+        sesAccessKeyId: input.sesAccessKeyId?.trim() || null,
+        sesSecretAccessKey: input.sesSecretAccessKey?.trim() || null,
+        sesRegion: input.sesRegion?.trim() || null,
       },
     });
     return this.toView(row, 0, false);
@@ -143,6 +149,11 @@ export class EmailChannelService {
     if (input.sendgridWebhookVerificationKey !== undefined)
       data.sendgridWebhookVerificationKey =
         input.sendgridWebhookVerificationKey?.trim() || null;
+    if (input.sesAccessKeyId !== undefined)
+      data.sesAccessKeyId = input.sesAccessKeyId?.trim() || null;
+    if (input.sesSecretAccessKey !== undefined)
+      data.sesSecretAccessKey = input.sesSecretAccessKey?.trim() || null;
+    if (input.sesRegion !== undefined) data.sesRegion = input.sesRegion?.trim() || null;
 
     try {
       const row = await this.prisma.emailChannel.update({
@@ -265,6 +276,17 @@ export class EmailChannelService {
           ? redact(row.sendgridWebhookVerificationKey)
           : row.sendgridWebhookVerificationKey
         : null,
+      sesAccessKeyId: row.sesAccessKeyId
+        ? redactSecrets
+          ? redact(row.sesAccessKeyId)
+          : row.sesAccessKeyId
+        : null,
+      sesSecretAccessKey: row.sesSecretAccessKey
+        ? redactSecrets
+          ? redact(row.sesSecretAccessKey)
+          : row.sesSecretAccessKey
+        : null,
+      sesRegion: row.sesRegion,
       isDefault: row.isDefault,
       senderDomainCount,
       createdAt: row.createdAt.toISOString(),

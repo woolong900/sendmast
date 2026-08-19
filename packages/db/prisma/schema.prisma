@@ -434,6 +434,10 @@ model EmailChannel {
   sendgridApiKey                 String?            @map("sendgrid_api_key") @db.Text
   sendgridApiBaseUrl             String?            @map("sendgrid_api_base_url")
   sendgridWebhookVerificationKey String?            @map("sendgrid_webhook_verification_key") @db.Text
+  /// AWS SES API settings.
+  sesAccessKeyId                 String?            @map("ses_access_key_id")
+  sesSecretAccessKey             String?            @map("ses_secret_access_key") @db.Text
+  sesRegion                      String?            @map("ses_region")
   /// Platform-wide default. New tenant signups get a primary
   /// AccountEmailChannel link to this channel. At most one row may be true at a
   /// time — enforced by a partial unique index defined in migration SQL

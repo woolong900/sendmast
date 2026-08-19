@@ -8,6 +8,7 @@ export const EmailChannelProviderSchema = z.enum([
   'resend',
   'cloudflare',
   'sendgrid',
+  'ses',
 ]);
 export type EmailChannelProviderValue = z.infer<typeof EmailChannelProviderSchema>;
 
@@ -41,6 +42,9 @@ const EmailChannelBaseSchema = z.object({
   sendgridApiKey: z.string().max(2000).optional().nullable(),
   sendgridApiBaseUrl: z.string().url().max(200).optional().nullable(),
   sendgridWebhookVerificationKey: z.string().max(2000).optional().nullable(),
+  sesAccessKeyId: z.string().max(200).optional().nullable(),
+  sesSecretAccessKey: z.string().max(2000).optional().nullable(),
+  sesRegion: z.string().max(80).optional().nullable(),
 });
 
 function validateProviderConfig(v: z.infer<typeof EmailChannelBaseSchema>, ctx: z.RefinementCtx) {
@@ -99,6 +103,29 @@ function validateProviderConfig(v: z.infer<typeof EmailChannelBaseSchema>, ctx: 
       message: 'Required for SendGrid',
     });
   }
+  if (v.provider === 'ses') {
+    if (!v.sesAccessKeyId?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sesAccessKeyId'],
+        message: 'Required for SES',
+      });
+    }
+    if (!v.sesSecretAccessKey?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sesSecretAccessKey'],
+        message: 'Required for SES',
+      });
+    }
+    if (!v.sesRegion?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sesRegion'],
+        message: 'Required for SES',
+      });
+    }
+  }
 }
 
 export const CreateEmailChannelSchema = EmailChannelBaseSchema.superRefine(validateProviderConfig);
@@ -136,6 +163,9 @@ export interface EmailChannelView {
   sendgridApiKey: string | null;
   sendgridApiBaseUrl: string | null;
   sendgridWebhookVerificationKey: string | null;
+  sesAccessKeyId: string | null;
+  sesSecretAccessKey: string | null;
+  sesRegion: string | null;
   /** Whether this account is the platform-wide default for new signups. */
   isDefault: boolean;
   senderDomainCount: number;

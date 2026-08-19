@@ -6,6 +6,7 @@ import { CloudflareEmailService } from './cloudflare-email.service';
 import { MailgunService } from './mailgun.service';
 import { ResendService } from './resend.service';
 import { SendGridService } from './sendgrid.service';
+import { SesService } from './ses.service';
 import { ensureDmarcRecord, applyDmarcDnsVerification } from './dmarc-record';
 import { normalizeSenderDomain } from '@sendmast/shared';
 import type {
@@ -36,6 +37,7 @@ export class SenderDomainService {
     private readonly mailgun: MailgunService,
     private readonly resend: ResendService,
     private readonly sendgrid: SendGridService,
+    private readonly ses: SesService,
   ) {}
 
   async list(accountId: string): Promise<SenderDomainView[]> {
@@ -184,9 +186,11 @@ export class SenderDomainService {
             ? await this.resend.createDomain(emailChannel, domain)
             : emailChannel.provider === 'sendgrid'
               ? await this.sendgrid.createDomain(emailChannel, domain)
-              : emailChannel.provider === 'cloudflare'
-                ? await this.cloudflare.createDomain(emailChannel, domain)
-                : await this.azure.createDomain(emailChannel, domain);
+              : emailChannel.provider === 'ses'
+                ? await this.ses.createDomain(emailChannel, domain)
+                : emailChannel.provider === 'cloudflare'
+                  ? await this.cloudflare.createDomain(emailChannel, domain)
+                  : await this.azure.createDomain(emailChannel, domain);
       const { records: providerRecords } = created;
       const records =
         emailChannel.provider === 'cloudflare'
@@ -314,7 +318,9 @@ export class SenderDomainService {
           ? await this.verifyResendDomain(row.emailChannel, row.resendDomainId)
           : row.emailChannel.provider === 'sendgrid'
             ? await this.verifySendGridDomain(row.emailChannel, row.sendgridDomainId)
-            : await this.azure.getStates(row.emailChannel, row.domain);
+            : row.emailChannel.provider === 'ses'
+              ? await this.ses.verifyDomain(row.emailChannel, row.domain)
+              : await this.azure.getStates(row.emailChannel, row.domain);
 
     // Kick off Azure verification for Domain/SPF/DKIM/DKIM2 only. DMARC is
     // customer-managed in public DNS — Azure's API never flips it to
@@ -516,6 +522,16 @@ export class SenderDomainService {
           );
         }
       }
+    } else if (row.emailChannel.provider === 'ses') {
+      try {
+        await this.ses.deleteDomain(row.emailChannel, row.domain);
+      } catch (err) {
+        const message = (err as Error).message;
+        if (!message.includes('SES API 404')) throw err;
+        this.logger.warn(
+          `SES identity ${row.domain} was not found upstream; deleting local row only.`,
+        );
+      }
     } else {
       // Unlink first so the domain isn't referenced by the CommunicationService
       // when Azure runs the delete LRO. Best-effort — failures are logged and
@@ -588,6 +604,7 @@ export class SenderDomainService {
               | 'resend'
               | 'cloudflare'
               | 'sendgrid'
+              | 'ses'
               | undefined,
             allowMarketing: row.emailChannel.allowMarketing,
             allowTransactional: row.emailChannel.allowTransactional,

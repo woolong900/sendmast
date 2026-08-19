@@ -2,6 +2,7 @@ import { ClientSecretCredential } from '@azure/identity';
 import { CommunicationServiceManagementClient } from '@azure/arm-communication';
 import { EmailClient } from '@azure/communication-email';
 import type { EmailChannel } from '@prisma/client';
+import { createHash, createHmac } from 'node:crypto';
 
 export interface MailMessage {
   from: { name: string; address: string };
@@ -87,6 +88,9 @@ function cacheKey(acct: EmailChannel): string {
     acct.cloudflareApiToken?.slice(0, 8) ?? '',
     acct.sendgridApiBaseUrl ?? '',
     acct.sendgridApiKey?.slice(0, 8) ?? '',
+    acct.sesAccessKeyId ?? '',
+    acct.sesSecretAccessKey?.slice(0, 8) ?? '',
+    acct.sesRegion ?? '',
   ].join('|');
 }
 
@@ -111,6 +115,7 @@ async function buildTransport(acct: EmailChannel): Promise<MailTransport> {
   if (acct.provider === 'resend') return buildResendTransport(acct);
   if (acct.provider === 'cloudflare') return buildCloudflareTransport(acct);
   if (acct.provider === 'sendgrid') return buildSendGridTransport(acct);
+  if (acct.provider === 'ses') return buildSesTransport(acct);
   return buildEmailChannelTransport(acct);
 }
 
@@ -514,6 +519,87 @@ function buildSendGridTransport(acct: EmailChannel): MailTransport {
   };
 }
 
+function buildSesTransport(acct: EmailChannel): MailTransport {
+  if (!acct.sesAccessKeyId) {
+    throw new Error(`SES channel ${acct.name}: Access Key ID is not configured`);
+  }
+  if (!acct.sesSecretAccessKey) {
+    throw new Error(`SES channel ${acct.name}: Secret Access Key is not configured`);
+  }
+  const region = acct.sesRegion || 'us-east-1';
+  const endpoint = `https://email.${region}.amazonaws.com/v2/email/outbound-emails`;
+
+  return {
+    async send(msg) {
+      const startedAt = Date.now();
+      try {
+        const body = JSON.stringify({
+          FromEmailAddress: formatFrom(msg.from.name, msg.from.address),
+          Destination: { ToAddresses: [msg.to] },
+          Content: {
+            Simple: {
+              Subject: { Data: msg.subject, Charset: 'UTF-8' },
+              Body: {
+                Text: { Data: htmlToText(msg.html), Charset: 'UTF-8' },
+                Html: { Data: msg.html, Charset: 'UTF-8' },
+              },
+            },
+          },
+          EmailTags: sesTags(msg.headers ?? {}, msg.operationId),
+        });
+        const headers = signAwsRequest({
+          accessKeyId: acct.sesAccessKeyId!,
+          secretAccessKey: acct.sesSecretAccessKey!,
+          region,
+          service: 'ses',
+          method: 'POST',
+          url: endpoint,
+          body,
+          headers: {
+            'content-type': 'application/json',
+          },
+        });
+        const res = await withTimeout(
+          fetch(endpoint, { method: 'POST', headers, body }),
+          SEND_TIMEOUT_MS,
+          'SES send',
+        );
+        const text = await res.text();
+        const payload = parseJson(text);
+        const latencyMs = Date.now() - startedAt;
+        if (!res.ok) {
+          return {
+            ok: false,
+            messageId: '',
+            providerStatus: `Http${res.status}`,
+            latencyMs,
+            errorMessage: sesMessage(payload, text),
+            providerResponse: payload,
+          };
+        }
+        return {
+          ok: true,
+          messageId: sesMessageId(payload) || msg.operationId || '',
+          providerStatus: 'Accepted',
+          latencyMs,
+          providerResponse: { operationId: msg.operationId, response: payload },
+        };
+      } catch (err) {
+        const latencyMs = Date.now() - startedAt;
+        return {
+          ok: false,
+          messageId: '',
+          providerStatus: 'Error',
+          latencyMs,
+          errorCode: (err as { code?: string })?.code,
+          errorMessage: err instanceof Error ? err.message : String(err),
+          providerResponse: serialiseError(err),
+        };
+      }
+    },
+  };
+}
+
 function mailgunVariables(
   headers: Record<string, string>,
   operationId?: string,
@@ -555,7 +641,23 @@ function sendgridCustomArgs(
   );
 }
 
+function sesTags(
+  headers: Record<string, string>,
+  operationId?: string,
+): Array<{ Name: string; Value: string }> {
+  return Object.entries(mailgunVariables(headers, operationId))
+    .map(([name, value]) => ({
+      Name: sanitiseSesTagPart(name),
+      Value: sanitiseSesTagPart(value),
+    }))
+    .filter((tag) => tag.Name && tag.Value);
+}
+
 function sanitiseResendTagPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 256);
+}
+
+function sanitiseSesTagPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 256);
 }
 
@@ -644,6 +746,24 @@ function sendgridMessage(payload: unknown, fallback: string): string {
   return providerMessage(payload, fallback);
 }
 
+function sesMessage(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === 'object') {
+    const message = (payload as { message?: unknown; Message?: unknown }).message;
+    const upperMessage = (payload as { message?: unknown; Message?: unknown }).Message;
+    const type = (payload as { __type?: unknown; Type?: unknown }).__type;
+    const upperType = (payload as { __type?: unknown; Type?: unknown }).Type;
+    return [type ?? upperType, message ?? upperMessage].filter(Boolean).join(': ') || fallback;
+  }
+  return fallback;
+}
+
+function sesMessageId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const id = (payload as { MessageId?: unknown; messageId?: unknown }).MessageId;
+  const messageId = (payload as { MessageId?: unknown; messageId?: unknown }).messageId;
+  return id || messageId ? String(id ?? messageId) : null;
+}
+
 function cloudflareMessageId(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') return null;
   const result = (payload as { result?: unknown }).result;
@@ -661,6 +781,80 @@ function cloudflareMessageId(payload: unknown): string | null {
   const camelMessageId = (payload as { id?: unknown; message_id?: unknown; messageId?: unknown })
     .messageId;
   return id || messageId || camelMessageId ? String(id ?? messageId ?? camelMessageId) : null;
+}
+
+function signAwsRequest(params: {
+  accessKeyId: string;
+  secretAccessKey: string;
+  region: string;
+  service: string;
+  method: string;
+  url: string;
+  body: string;
+  headers: Record<string, string>;
+}): Record<string, string> {
+  const now = new Date();
+  const amzDate = toAmzDate(now);
+  const dateStamp = amzDate.slice(0, 8);
+  const url = new URL(params.url);
+  const payloadHash = sha256Hex(params.body);
+  const headers: Record<string, string> = {
+    ...Object.fromEntries(Object.entries(params.headers).map(([k, v]) => [k.toLowerCase(), v])),
+    host: url.host,
+    'x-amz-date': amzDate,
+    'x-amz-content-sha256': payloadHash,
+  };
+  const sortedHeaderNames = Object.keys(headers).sort();
+  const canonicalHeaders = sortedHeaderNames
+    .map((name) => `${name}:${headers[name].trim().replace(/\s+/g, ' ')}`)
+    .join('\n');
+  const signedHeaders = sortedHeaderNames.join(';');
+  const canonicalRequest = [
+    params.method.toUpperCase(),
+    url.pathname || '/',
+    url.searchParams.toString(),
+    canonicalHeaders + '\n',
+    signedHeaders,
+    payloadHash,
+  ].join('\n');
+  const credentialScope = `${dateStamp}/${params.region}/${params.service}/aws4_request`;
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    sha256Hex(canonicalRequest),
+  ].join('\n');
+  const signingKey = awsSigningKey(params.secretAccessKey, dateStamp, params.region, params.service);
+  const signature = hmacHex(signingKey, stringToSign);
+  return {
+    ...headers,
+    authorization:
+      `AWS4-HMAC-SHA256 Credential=${params.accessKeyId}/${credentialScope}, ` +
+      `SignedHeaders=${signedHeaders}, Signature=${signature}`,
+  };
+}
+
+function toAmzDate(date: Date): string {
+  return date.toISOString().replace(/[:-]|\.\d{3}/g, '');
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function hmac(key: Buffer | string, value: string): Buffer {
+  return createHmac('sha256', key).update(value, 'utf8').digest();
+}
+
+function hmacHex(key: Buffer | string, value: string): string {
+  return createHmac('sha256', key).update(value, 'utf8').digest('hex');
+}
+
+function awsSigningKey(secretAccessKey: string, dateStamp: string, region: string, service: string) {
+  const kDate = hmac(`AWS4${secretAccessKey}`, dateStamp);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, service);
+  return hmac(kService, 'aws4_request');
 }
 
 /**

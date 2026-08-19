@@ -481,7 +481,9 @@ function AccountEditModal({
                               ? 'Cloudflare'
                               : channel.provider === 'sendgrid'
                                 ? 'SendGrid'
-                              : 'Azure'}
+                                : channel.provider === 'ses'
+                                  ? 'Amazon SES'
+                                  : 'Azure'}
                       </span>
                       {inactive && (
                         <span className="text-xs text-muted-foreground">({channel.status})</span>

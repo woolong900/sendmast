@@ -50,6 +50,9 @@ const EMPTY: FormState = {
   sendgridApiKey: '',
   sendgridApiBaseUrl: 'https://api.sendgrid.com',
   sendgridWebhookVerificationKey: '',
+  sesAccessKeyId: '',
+  sesSecretAccessKey: '',
+  sesRegion: 'us-east-1',
 };
 
 const PROVIDER_OPTIONS: Array<{ value: EmailChannelProviderValue; label: string }> = [
@@ -58,6 +61,7 @@ const PROVIDER_OPTIONS: Array<{ value: EmailChannelProviderValue; label: string 
   { value: 'resend', label: 'Resend API' },
   { value: 'cloudflare', label: 'Cloudflare Email Sending' },
   { value: 'sendgrid', label: 'SendGrid API' },
+  { value: 'ses', label: 'Amazon SES API' },
 ];
 
 const STATUS_LABELS: Record<EmailChannelStatusValue, string> = {
@@ -282,6 +286,9 @@ export function EmailChannelListPage() {
                                 full.sendgridApiBaseUrl ?? 'https://api.sendgrid.com',
                               sendgridWebhookVerificationKey:
                                 full.sendgridWebhookVerificationKey ?? '',
+                              sesAccessKeyId: full.sesAccessKeyId ?? '',
+                              sesSecretAccessKey: full.sesSecretAccessKey ?? '',
+                              sesRegion: full.sesRegion ?? 'us-east-1',
                             });
                           }}
                         >
@@ -401,6 +408,9 @@ function AccountEditor({
         sendgridApiKey: form.sendgridApiKey?.trim() || null,
         sendgridApiBaseUrl: form.sendgridApiBaseUrl?.trim() || null,
         sendgridWebhookVerificationKey: form.sendgridWebhookVerificationKey?.trim() || null,
+        sesAccessKeyId: form.sesAccessKeyId?.trim() || null,
+        sesSecretAccessKey: form.sesSecretAccessKey?.trim() || null,
+        sesRegion: form.sesRegion?.trim() || null,
       };
       return isEdit
         ? api.patch(`/api/admin/email-channels/${state.id}`, body)
@@ -650,7 +660,7 @@ function AccountEditor({
                 />
               </div>
             </Section>
-          ) : (
+          ) : form.provider === 'sendgrid' ? (
             <Section title="SendGrid API">
               <div className="sm:col-span-2">
                 <Label className="mb-1.5 block">API Key</Label>
@@ -684,6 +694,34 @@ function AccountEditor({
                 </p>
               </div>
             </Section>
+          ) : (
+            <Section title="Amazon SES API">
+              <div className="sm:col-span-2">
+                <Label className="mb-1.5 block">Access Key ID</Label>
+                <Input
+                  value={form.sesAccessKeyId ?? ''}
+                  onChange={(e) => setForm({ ...form, sesAccessKeyId: e.target.value })}
+                  placeholder="AKIA..."
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label className="mb-1.5 block">Secret Access Key</Label>
+                <Input
+                  type="password"
+                  value={form.sesSecretAccessKey ?? ''}
+                  onChange={(e) => setForm({ ...form, sesSecretAccessKey: e.target.value })}
+                  placeholder="编辑时若不修改请保留默认值"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <Label className="mb-1.5 block">Region</Label>
+                <Input
+                  value={form.sesRegion ?? ''}
+                  onChange={(e) => setForm({ ...form, sesRegion: e.target.value })}
+                  placeholder="us-east-1"
+                />
+              </div>
+            </Section>
           )}
 
           {saveMut.isError && (
@@ -710,6 +748,7 @@ function providerLabel(provider: EmailChannelProviderValue): string {
   if (provider === 'resend') return 'Resend';
   if (provider === 'cloudflare') return 'Cloudflare';
   if (provider === 'sendgrid') return 'SendGrid';
+  if (provider === 'ses') return 'Amazon SES';
   return 'Azure ACS';
 }
 
@@ -718,6 +757,7 @@ function providerBadgeVariant(provider: EmailChannelProviderValue) {
   if (provider === 'resend') return 'warning';
   if (provider === 'cloudflare') return 'default';
   if (provider === 'sendgrid') return 'success';
+  if (provider === 'ses') return 'warning';
   return 'muted';
 }
 

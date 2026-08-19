@@ -8,6 +8,7 @@ import { CloudflareEmailService } from './cloudflare-email.service';
 import { MailgunService } from './mailgun.service';
 import { ResendService } from './resend.service';
 import { SendGridService } from './sendgrid.service';
+import { SesService } from './ses.service';
 
 @Module({
   imports: [AuthModule],
@@ -19,6 +20,7 @@ import { SendGridService } from './sendgrid.service';
     MailgunService,
     ResendService,
     SendGridService,
+    SesService,
   ],
   exports: [
     SenderDomainService,
@@ -27,6 +29,7 @@ import { SendGridService } from './sendgrid.service';
     MailgunService,
     ResendService,
     SendGridService,
+    SesService,
   ],
 })
 export class SenderDomainModule {}

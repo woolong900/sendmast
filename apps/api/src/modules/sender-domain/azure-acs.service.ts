@@ -30,7 +30,7 @@ interface ClientCacheEntry {
   key: string;
 }
 
-type AzureRecordKind = Exclude<SenderDomainRecordKind, 'Tracking'>;
+type AzureRecordKind = Exclude<SenderDomainRecordKind, 'DKIM3' | 'Tracking'>;
 
 const RECORD_KINDS: AzureRecordKind[] = ['Domain', 'SPF', 'DKIM', 'DKIM2', 'DMARC'];
 
