@@ -10,10 +10,11 @@ import type { SegmentDefinition, SegmentRule } from '@sendmast/shared';
  *                       service runs each one against ClickHouse, then
  *                       intersects (for `has`) or excludes (for `notHas`)
  *                       the resulting contactId sets with the PG result.
+ *   - `orderConstraints`: fixed date windows that must query shop_orders;
+ *                         lastOrderedAt alone cannot represent past windows.
  *
- * Why split: PG rules compose cleanly inside one WHERE; CH rules each need
- * their own GROUP BY query (different campaignId / lastDays window). We do
- * NOT mix them in a single SQL — the engines are different DBs.
+ * Why split: contact-column rules compose cleanly inside one WHERE, while
+ * event rules live in ClickHouse and fixed order windows need shop_orders.
  */
 
 export interface EventConstraint {
@@ -24,9 +25,16 @@ export interface EventConstraint {
   since: Date;
 }
 
+export interface OrderConstraint {
+  mode: 'has' | 'notHas';
+  from: Date;
+  to: Date;
+}
+
 export interface CompiledSegment {
   pgWhere: Prisma.ContactWhereInput;
   eventConstraints: EventConstraint[];
+  orderConstraints: OrderConstraint[];
 }
 
 /**
@@ -39,14 +47,16 @@ export interface CompiledSegment {
 export function compileSegment(def: SegmentDefinition): CompiledSegment {
   const andClauses: Prisma.ContactWhereInput[] = [];
   const eventConstraints: EventConstraint[] = [];
+  const orderConstraints: OrderConstraint[] = [];
 
   for (const rule of def.rules) {
-    compileRule(rule, andClauses, eventConstraints);
+    compileRule(rule, andClauses, eventConstraints, orderConstraints);
   }
 
   return {
     pgWhere: andClauses.length === 0 ? {} : { AND: andClauses },
     eventConstraints,
+    orderConstraints,
   };
 }
 
@@ -54,6 +64,7 @@ function compileRule(
   rule: SegmentRule,
   andClauses: Prisma.ContactWhereInput[],
   eventConstraints: EventConstraint[],
+  orderConstraints: OrderConstraint[],
 ): void {
   switch (rule.type) {
     case 'attribute': {
@@ -128,6 +139,14 @@ function compileRule(
       return;
     }
     case 'order': {
+      if (rule.from && rule.to) {
+        orderConstraints.push({
+          mode: rule.op,
+          from: new Date(rule.from),
+          to: new Date(rule.to),
+        });
+        return;
+      }
       // contacts.lastOrderedAt = latest PAID order time, denormalised at
       // ingest — so "ordered (within window)" is a plain column predicate.
       const since = rule.lastDays

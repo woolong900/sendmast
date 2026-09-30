@@ -93,12 +93,31 @@ const EventRule = z.object({
  * "has placed a paid order". Backfilled on store bind, kept current by the
  * order webhooks.
  */
-const OrderRule = z.object({
-  type: z.literal('order'),
-  op: z.enum(['has', 'notHas']),
-  /** Look-back window in days; absent = any time. */
-  lastDays: z.number().int().min(1).max(3650).optional(),
-});
+const OrderRule = z
+  .object({
+    type: z.literal('order'),
+    op: z.enum(['has', 'notHas']),
+    /** Look-back window in days; absent = any time. */
+    lastDays: z.number().int().min(1).max(3650).optional(),
+    /** Fixed order-time window. Both bounds are required when either is set. */
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const hasFixedRange = value.from !== undefined || value.to !== undefined;
+    if (hasFixedRange && (!value.from || !value.to)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'order date range requires both from and to',
+      });
+    }
+    if (value.lastDays !== undefined && hasFixedRange) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'order rule cannot combine lastDays with a fixed date range',
+      });
+    }
+  });
 
 const OrderCountRule = z.object({
   type: z.literal('orderMetric'),

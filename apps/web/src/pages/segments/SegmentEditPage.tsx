@@ -629,6 +629,11 @@ function OrderRuleEditor({
   rule: Extract<SegmentRule, { type: 'order' }>;
   onChange: (r: SegmentRule) => void;
 }) {
+  const isFixedRange = rule.from !== undefined || rule.to !== undefined;
+  const timeMode = isFixedRange ? 'between' : rule.lastDays === undefined ? 'any' : 'lastDays';
+  const dateRange: DateRange | null =
+    rule.from && rule.to ? { from: rule.from, to: rule.to } : null;
+
   return (
     <div className="flex flex-wrap items-center gap-3">
       <FilterSelect
@@ -641,34 +646,50 @@ function OrderRuleEditor({
         ]}
       />
       <FilterSelect
-        className="w-[160px]"
-        value={rule.lastDays === undefined ? 'any' : 'lastDays'}
+        className="w-[180px]"
+        value={timeMode}
         onChange={(v) =>
           onChange(
             v === 'any'
               ? { type: 'order', op: rule.op }
-              : { type: 'order', op: rule.op, lastDays: 30 },
+              : v === 'lastDays'
+                ? { type: 'order', op: rule.op, lastDays: 30 }
+                : { type: 'order', op: rule.op, from: '', to: '' },
           )
         }
         options={[
           { value: 'any', label: '任意时间' },
           { value: 'lastDays', label: '最近 N 天内' },
+          { value: 'between', label: '在指定日期范围内' },
         ]}
       />
-      {rule.lastDays !== undefined && (
+      {timeMode === 'lastDays' && rule.lastDays !== undefined && (
         <div className="flex items-center gap-2">
           <Input
             type="number"
             min={1}
             max={3650}
             value={rule.lastDays}
-            onChange={(e) =>
-              onChange({ ...rule, lastDays: Number(e.target.value) || 1 })
-            }
+            onChange={(e) => onChange({ ...rule, lastDays: Number(e.target.value) || 1 })}
             className="w-24"
           />
           <span className="text-sm text-muted-foreground">天</span>
         </div>
+      )}
+      {timeMode === 'between' && (
+        <DateRangePicker
+          className="min-w-[280px]"
+          value={dateRange}
+          onChange={(value) =>
+            onChange({
+              type: 'order',
+              op: rule.op,
+              from: value?.from ?? '',
+              to: value?.to ?? '',
+            })
+          }
+          placeholder="开始日期 至 结束日期"
+        />
       )}
       <div className="w-full text-xs text-muted-foreground">
         基于已绑定店铺同步的订单(已支付/已发货)进行匹配
@@ -851,6 +872,7 @@ function isRuleComplete(r: SegmentRule): boolean {
     case 'event':
       return r.lastDays > 0;
     case 'order':
+      if (r.from !== undefined || r.to !== undefined) return Boolean(r.from && r.to);
       return r.lastDays === undefined || r.lastDays > 0;
     case 'orderMetric':
       return Number.isFinite(r.value) && r.value >= 0;

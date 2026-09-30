@@ -17,7 +17,11 @@ import type {
   SegmentView,
   UpdateSegmentInput,
 } from '@sendmast/shared';
-import { compileSegment, type EventConstraint } from './segment-evaluator';
+import {
+  compileSegment,
+  type EventConstraint,
+  type OrderConstraint,
+} from './segment-evaluator';
 
 /**
  * Cap on how many contactIds we'll round-trip through application memory
@@ -25,7 +29,7 @@ import { compileSegment, type EventConstraint } from './segment-evaluator';
  * (logged) rather than risk OOMing the API process. v1: hard cap, no chunked
  * scan; revisit when a tenant actually hits the ceiling.
  */
-const EVENT_CONSTRAINT_HARD_CAP = 1_000_000;
+const DERIVED_CONSTRAINT_HARD_CAP = 1_000_000;
 /**
  * Prisma sends every `id IN (...)` value as a bind parameter. Postgres rejects
  * prepared statements above 32767 parameters; keep this safely below that once
@@ -152,16 +156,16 @@ export class SegmentService {
 
   /**
    * Evaluate a definition into the contactIds that match. Returns null if
-   * the result would exceed EVENT_CONSTRAINT_HARD_CAP (caller decides whether
+   * the result would exceed DERIVED_CONSTRAINT_HARD_CAP (caller decides whether
    * to throw or degrade). Used by:
    *   - preview (just calls .size + samples)
    *   - refresh (just calls .size, persists cachedCount)
    *   - Campaign send (turns ids into CampaignRecipient rows)
    */
   async resolveContactIds(accountId: string, def: SegmentDefinition): Promise<Set<string>> {
-    const { pgWhere, eventConstraints } = compileSegment(def);
+    const { pgWhere, eventConstraints, orderConstraints } = compileSegment(def);
 
-    // Apply event constraints first so we can narrow the PG query with `id IN`.
+    // Apply event/order constraints first so we can narrow the contact query.
     // For 'has' constraints: intersect the event-derived contactId set.
     // For 'notHas' constraints: collect to exclude later.
     const hasSets: Set<string>[] = [];
@@ -170,6 +174,15 @@ export class SegmentService {
     for (const ec of eventConstraints) {
       const ids = await this.contactIdsFromEvent(accountId, ec);
       if (ec.mode === 'has') {
+        hasSets.push(ids);
+      } else {
+        notHasIds.push(...ids);
+      }
+    }
+
+    for (const oc of orderConstraints) {
+      const ids = await this.contactIdsFromOrder(accountId, oc);
+      if (oc.mode === 'has') {
         hasSets.push(ids);
       } else {
         notHasIds.push(...ids);
@@ -309,11 +322,11 @@ export class SegmentService {
     }
 
     if (rows.length === 0) return new Set();
-    if (rows.length > EVENT_CONSTRAINT_HARD_CAP) {
+    if (rows.length > DERIVED_CONSTRAINT_HARD_CAP) {
       this.logger.warn(
-        `event constraint produced ${rows.length} rows > cap ${EVENT_CONSTRAINT_HARD_CAP}; truncating`,
+        `event constraint produced ${rows.length} rows > cap ${DERIVED_CONSTRAINT_HARD_CAP}; truncating`,
       );
-      rows = rows.slice(0, EVENT_CONSTRAINT_HARD_CAP);
+      rows = rows.slice(0, DERIVED_CONSTRAINT_HARD_CAP);
     }
 
     const recipientIds = rows.map((r) => r.recipient_id);
@@ -322,7 +335,7 @@ export class SegmentService {
     // (those recipients had their CampaignRecipient row purged ≥90d ago,
     // which is acceptable for "last N days" event lookups since N << 90).
     //
-    // Chunk the IN-list: with EVENT_CONSTRAINT_HARD_CAP this set can hold up
+    // Chunk the IN-list: with DERIVED_CONSTRAINT_HARD_CAP this set can hold up
     // to 1M ids, and a single `id IN (…)` would exceed PG's 65535 bind-param
     // limit (and bloat memory). 10k per query stays well under the ceiling.
     const contactIds = new Set<string>();
@@ -334,6 +347,37 @@ export class SegmentService {
       for (const l of links) contactIds.add(l.contactId);
     }
     return contactIds;
+  }
+
+  /** Resolve contacts with a paid/shipped order inside a fixed date range. */
+  private async contactIdsFromOrder(
+    accountId: string,
+    constraint: OrderConstraint,
+  ): Promise<Set<string>> {
+    const rows = await this.prisma.shopOrder.findMany({
+      where: {
+        accountId,
+        status: { in: ['paid', 'shipped'] },
+        contactId: { not: null },
+        orderTime: { gte: constraint.from, lte: constraint.to },
+      },
+      select: { contactId: true },
+      distinct: ['contactId'],
+      take: DERIVED_CONSTRAINT_HARD_CAP + 1,
+    });
+
+    if (rows.length > DERIVED_CONSTRAINT_HARD_CAP) {
+      this.logger.warn(
+        `order constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} contacts; truncating`,
+      );
+    }
+
+    return new Set(
+      rows
+        .slice(0, DERIVED_CONSTRAINT_HARD_CAP)
+        .map((row) => row.contactId)
+        .filter((contactId): contactId is string => contactId !== null),
+    );
   }
 
   // ---------------------------------------------------------------------------
