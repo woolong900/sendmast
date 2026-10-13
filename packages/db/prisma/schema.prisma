@@ -1196,8 +1196,8 @@ model ShopConnection {
   automations        ShopAutomation[]
   abandonedCheckouts ShopAbandonedCheckout[]
 
-  @@unique([provider, externalStoreId])
   @@index([accountId])
+  @@index([provider, externalStoreId])
   @@map("shop_connections")
 }
 

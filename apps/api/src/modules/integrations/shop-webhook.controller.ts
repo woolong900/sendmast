@@ -52,13 +52,13 @@ export class ShopWebhookController {
     const store = storeIdRaw != null ? String(storeIdRaw) : undefined;
     if (!store || !key) return { accepted: false };
 
-    const conn = await this.prisma.shopConnection.findUnique({
-      where: { provider_externalStoreId: { provider: 'shopyy', externalStoreId: store } },
+    const conn = await this.prisma.shopConnection.findFirst({
+      where: { provider: 'shopyy', externalStoreId: store, status: 'active' },
+      orderBy: { connectedAt: 'desc' },
     });
     // Constant-time compare; silently drop forged/stale calls (no info leak).
     if (
       !conn ||
-      conn.status !== 'active' ||
       !conn.webhookSecret ||
       !safeEqual(key, conn.webhookSecret)
     ) {

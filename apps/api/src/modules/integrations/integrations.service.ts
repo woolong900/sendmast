@@ -256,12 +256,18 @@ export class IntegrationsService {
     }
 
     const externalStoreId = String(result.store.id);
-    const existing = await this.prisma.shopConnection.findUnique({
-      where: { provider_externalStoreId: { provider: 'shopyy', externalStoreId } },
+    const activeExisting = await this.prisma.shopConnection.findFirst({
+      where: { provider: 'shopyy', externalStoreId, status: { not: 'revoked' } },
     });
-    if (existing && existing.accountId !== accountId) {
+    if (activeExisting && activeExisting.accountId !== accountId) {
       throw new ConflictException('该店铺已绑定到其他账户');
     }
+    const existing =
+      activeExisting ??
+      (await this.prisma.shopConnection.findFirst({
+        where: { provider: 'shopyy', externalStoreId, accountId, status: 'revoked' },
+        orderBy: { updatedAt: 'desc' },
+      }));
 
     const webhookSecret = existing?.webhookSecret ?? randomBytes(24).toString('hex');
     const detectedStoreUrl =
@@ -311,18 +317,21 @@ export class IntegrationsService {
       );
     }
 
-    const conn = await this.prisma.shopConnection.upsert({
-      where: { provider_externalStoreId: { provider: 'shopyy', externalStoreId } },
-      create: {
-        accountId,
-        provider: 'shopyy',
-        externalStoreId,
-        connectedAt: new Date(),
-        webhookIds,
-        ...data,
-      },
-      update: { ...data, webhookIds, connectedAt: new Date() },
-    });
+    const conn = existing
+      ? await this.prisma.shopConnection.update({
+          where: { id: existing.id },
+          data: { ...data, webhookIds, connectedAt: new Date() },
+        })
+      : await this.prisma.shopConnection.create({
+          data: {
+            accountId,
+            provider: 'shopyy',
+            externalStoreId,
+            connectedAt: new Date(),
+            webhookIds,
+            ...data,
+          },
+        });
 
     // Auto-provision the tenant's "店铺客户" contact list and remember it on the
     // connection. The webhook handlers and the initial sync below funnel every
