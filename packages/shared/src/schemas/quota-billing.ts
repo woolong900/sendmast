@@ -32,11 +32,11 @@ export interface QuotaPricingTierView {
 
 export const CreateQuotaOrderSchema = z.object({
   tierId: z.string().uuid(),
-  channel: z.enum(['alipay', 'wechat']).default('alipay'),
+  channel: z.literal('alipay').default('alipay'),
 });
 export type CreateQuotaOrderInput = z.infer<typeof CreateQuotaOrderSchema>;
 
-export type PaymentChannel = 'alipay' | 'wechat';
+export type PaymentChannel = 'alipay';
 
 interface QuotaOrderCheckoutBase {
   orderId: string;

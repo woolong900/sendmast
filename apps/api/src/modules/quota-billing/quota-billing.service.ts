@@ -162,7 +162,7 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
     accountId: string;
     userId: string;
     tierId: string;
-    channel: 'alipay' | 'wechat';
+    channel: 'alipay';
   }): Promise<CreateQuotaOrderResponse> {
     const provider =
       this.config.get<'shouqianba' | 'airwallex'>('QUOTA_PAYMENT_PROVIDER') ?? 'shouqianba';
@@ -212,7 +212,6 @@ export class QuotaBillingService implements OnModuleInit, OnModuleDestroy {
         totalAmountCny: amountCny,
         subject: `SendMast 发送额度 +${tier.emails.toLocaleString('en-US')}`,
         notifyUrl: `${apiBase}/api/payments/shouqianba/notify`,
-        payway: args.channel === 'wechat' ? '3' : '1',
       });
       return {
         provider: 'shouqianba',

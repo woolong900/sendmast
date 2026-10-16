@@ -7,8 +7,8 @@ import { createHash } from 'node:crypto';
  *
  * Why this replaces our Alipay path: Alipay 风控 rejected our merchant
  * application for online SaaS use of 当面付. 收钱吧 is an aggregator
- * (聚合支付) that fronts both Alipay and WeChat Pay channels under one
- * API — they take on the merchant qualification heavy-lifting and we get
+ * (聚合支付) that fronts multiple payment channels under one API. SendMast
+ * currently enables Alipay only; they take on merchant qualification and we get
  * a single integration that 'just works'. Cost: ~0.3% extra fee vs direct
  * Alipay; benefit: actually approvable.
  *
@@ -58,7 +58,7 @@ export class ShouqianbaService {
   /**
    * Precreate a 当面付 order. Returns the raw `qr_code` string (an
    * https://qr.shouqianba.com/... URL) which the frontend renders to a
-   * QR image; the buyer scans it from Alipay/WeChat to pay.
+   * QR image; the buyer scans it from Alipay to pay.
    *
    * Throws ServiceUnavailableException on:
    *   - missing config (admin hasn't pasted keys / activated terminal)
@@ -70,9 +70,6 @@ export class ShouqianbaService {
     totalAmountCny: number;
     subject: string;
     notifyUrl: string;
-    /** 1=Alipay, 3=WeChat Pay. Default Alipay since most CN users have it.
-     *  When we want a multi-channel UI we'll let the modal pick this. */
-    payway?: '1' | '3';
   }): Promise<string> {
     if (!this.isConfigured()) {
       throw new ServiceUnavailableException('支付通道未配置');
@@ -87,7 +84,7 @@ export class ShouqianbaService {
       // Shouqianba accepts amount in 分 as a string. round() rather than
       // floor()/trunc() so 14.995 doesn't silently undercharge.
       total_amount: Math.round(args.totalAmountCny * 100).toString(),
-      payway: args.payway ?? '1',
+      payway: '1',
       subject: args.subject,
       operator: 'system',
       notify_url: args.notifyUrl,

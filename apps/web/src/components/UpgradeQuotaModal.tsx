@@ -31,7 +31,6 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
   const toast = useToast();
   const qc = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
-  const [channel, setChannel] = useState<PaymentChannel>('alipay');
   const [order, setOrder] = useState<CreateQuotaOrderResponse | null>(null);
   const qrOrder = order?.provider === 'shouqianba' ? order : null;
 
@@ -62,7 +61,6 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
   useEffect(() => {
     if (!open) {
       setSelected(null);
-      setChannel('alipay');
       setOrder(null);
     }
   }, [open]);
@@ -166,7 +164,7 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
                 paid ? (
                   '支付成功,额度已到账'
                 ) : (
-                  `请使用${qrOrder.channel === 'wechat' ? '微信' : '支付宝'}扫描二维码付款`
+                  '请使用支付宝扫描二维码付款'
                 )
               ) : currentRemaining !== undefined ? (
                 <>
@@ -199,14 +197,12 @@ export function UpgradeQuotaModal({ open, currentRemaining, onClose }: Props) {
             isLoading={isLoading}
             selected={selected}
             onSelect={setSelected}
-            channel={channel}
-            onChannelChange={setChannel}
             selectedTier={selectedTier}
             selectedCny={selectedCny}
             fx={fx}
             fxFetchedDate={fxFetchedDate}
             submitting={orderMut.isPending}
-            onSubmit={() => selected && orderMut.mutate({ tierId: selected, channel })}
+            onSubmit={() => selected && orderMut.mutate({ tierId: selected, channel: 'alipay' })}
             onCancel={onClose}
           />
         )}
@@ -225,8 +221,6 @@ function SelectStep({
   isLoading,
   selected,
   onSelect,
-  channel,
-  onChannelChange,
   selectedTier,
   selectedCny,
   fx,
@@ -239,8 +233,6 @@ function SelectStep({
   isLoading: boolean;
   selected: string | null;
   onSelect: (id: string) => void;
-  channel: PaymentChannel;
-  onChannelChange: (channel: PaymentChannel) => void;
   selectedTier: QuotaPricingTierView | null;
   selectedCny: number | null;
   fx: FxRateView | undefined;
@@ -298,7 +290,7 @@ function SelectStep({
         <aside className="rounded-lg bg-muted/30 p-4">
           <div className="mb-3 text-sm font-semibold">购买说明</div>
           <ol className="list-decimal space-y-2 pl-4 text-xs leading-relaxed text-muted-foreground">
-            <li>选择档位和支付方式后,生成对应的付款二维码。</li>
+            <li>选择档位后,生成支付宝付款二维码。</li>
             <li>支付成功后,所购买的发送额度将立即添加到您的账户。</li>
             <li>额度永久有效,不会过期 —— 用多少扣多少。</li>
             <li>如有支付问题或想要批量采购,请联系平台管理员。</li>
@@ -306,23 +298,8 @@ function SelectStep({
 
           <div className="mt-4 border-t pt-3">
             <div className="mb-2 text-xs font-semibold text-muted-foreground">支付方式</div>
-            <div className="inline-flex rounded-md border bg-background p-1">
-              {(['alipay', 'wechat'] as const).map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => onChannelChange(value)}
-                  className={cn(
-                    'rounded px-3 py-1.5 text-xs font-medium transition-colors',
-                    channel === value
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {value === 'alipay' ? '支付宝' : '微信'}
-                </button>
-              ))}
+            <div className="inline-flex rounded-md border bg-background px-3 py-2 text-xs font-medium text-foreground">
+              支付宝
             </div>
           </div>
         </aside>
