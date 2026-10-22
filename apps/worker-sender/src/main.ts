@@ -452,11 +452,39 @@ async function runTick(_job: Job): Promise<void> {
 
   // 1. Find all sending campaigns. We need accountId (tenant) to enforce
   //    the per-tenant prepaid quota and fromEmail to route to the email channel.
-  const campaigns = await prisma.campaign.findMany({
+  let campaigns = await prisma.campaign.findMany({
     where: { status: 'sending' },
-    select: { id: true, accountId: true, fromEmail: true },
+    select: { id: true, accountId: true, fromEmail: true, totalRecipients: true },
   });
   if (campaigns.length === 0) return;
+
+  // Reconcile campaigns whose recipients are already all terminal. Individual
+  // send paths normally finalise the campaign immediately, but this sweep also
+  // repairs state after worker crashes and protects against future failure
+  // branches forgetting the finalisation call. totalRecipients > 0 avoids
+  // racing list-only dispatches, which briefly have no recipient rows while
+  // materialisation is still in progress.
+  const activeRecipientCampaigns = await prisma.campaignRecipient.groupBy({
+    by: ['campaignId'],
+    where: {
+      campaignId: { in: campaigns.map((c) => c.id) },
+      status: { in: ['pending', 'queued'] },
+    },
+  });
+  const activeCampaignIds = new Set(activeRecipientCampaigns.map((r) => r.campaignId));
+  const drainedCampaignIds = campaigns
+    .filter((c) => c.totalRecipients > 0 && !activeCampaignIds.has(c.id))
+    .map((c) => c.id);
+  if (drainedCampaignIds.length > 0) {
+    await prisma.campaign.updateMany({
+      where: { id: { in: drainedCampaignIds }, status: 'sending' },
+      data: { status: 'sent', sentAt: new Date() },
+    });
+    console.log(`[tick] finalised ${drainedCampaignIds.length} drained campaign(s)`);
+    const drainedSet = new Set(drainedCampaignIds);
+    campaigns = campaigns.filter((c) => !drainedSet.has(c.id));
+    if (campaigns.length === 0) return;
+  }
 
   // 2. Look up per-tenant remaining quota for every involved tenant.
   //    A live tenant->remaining map drives both an early skip (saves provider calls
@@ -674,10 +702,7 @@ async function runSend(job: Job<SendJobData>) {
   }
 
   if (!c.html) {
-    await prisma.campaignRecipient.update({
-      where: { id: r.id },
-      data: { status: 'failed', errorMessage: '活动尚未设置邮件正文' },
-    });
+    await failCampaignRecipient(c.id, r.id, '活动尚未设置邮件正文');
     return;
   }
 
@@ -686,17 +711,15 @@ async function runSend(job: Job<SendJobData>) {
   // re-bind the sender domain.
   const acct = await getEmailChannel(job.data.emailChannelId);
   if (!acct) {
-    await prisma.campaignRecipient.update({
-      where: { id: r.id },
-      data: { status: 'failed', errorMessage: '邮件通道已不存在' },
-    });
+    await failCampaignRecipient(c.id, r.id, '邮件通道已不存在');
     return;
   }
   if (acct.status !== 'active') {
-    await prisma.campaignRecipient.update({
-      where: { id: r.id },
-      data: { status: 'failed', errorMessage: `邮件通道 ${acct.name} 当前状态为 ${acct.status}` },
-    });
+    await failCampaignRecipient(
+      c.id,
+      r.id,
+      `邮件通道 ${acct.name} 当前状态为 ${acct.status}`,
+    );
     return;
   }
 
@@ -758,7 +781,12 @@ async function runSend(job: Job<SendJobData>) {
   const tagIndex = await loadCustomTagIndex(r.accountId);
   const subjectSys = applySystemTags(c.subject, sysCtx, 'text');
   const bodyHtmlSys = applySystemTags(ensureUnsubscribeFooter(c.html), sysCtx, 'html');
-  const subject = applyCustomTags(subjectSys, tagIndex, 'text');
+  // Email subjects are single-line header values. Pasted text can contain
+  // newlines/control characters that PostgreSQL accepts but providers reject
+  // (Azure reports this as "Invalid unicode characters in the email subject").
+  // Normalise after tag expansion because contact/custom-tag values can also
+  // introduce those characters at send time.
+  const subject = sanitizeEmailSubject(applyCustomTags(subjectSys, tagIndex, 'text'));
   let bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
 
   // Inbox preview text (preheader): resolve tags, then inject a hidden span at
@@ -797,10 +825,7 @@ async function runSend(job: Job<SendJobData>) {
     await persistCampaignTrackingLinks(r.accountId, r.id, links);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await prisma.campaignRecipient.update({
-      where: { id: r.id },
-      data: { status: 'failed', errorMessage: `追踪链接保存失败: ${msg}` },
-    });
+    await failCampaignRecipient(c.id, r.id, `追踪链接保存失败: ${msg}`);
     throw err;
   }
 
@@ -809,10 +834,7 @@ async function runSend(job: Job<SendJobData>) {
     transport = await getTransportForAccount(acct);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await prisma.campaignRecipient.update({
-      where: { id: r.id },
-      data: { status: 'failed', errorMessage: msg },
-    });
+    await failCampaignRecipient(c.id, r.id, msg);
     throw err;
   }
 
@@ -923,13 +945,11 @@ async function runSend(job: Job<SendJobData>) {
     return;
   }
 
-  await prisma.campaignRecipient.update({
-    where: { id: r.id },
-    data: {
-      status: 'failed',
-      errorMessage: result.errorMessage ?? '邮件通道发送失败',
-    },
-  });
+  await failCampaignRecipient(
+    c.id,
+    r.id,
+    result.errorMessage ?? '邮件通道发送失败',
+  );
   // Re-throw so BullMQ records this job as failed (visible in dashboard).
   // The send_logs row already carries the full provider trace.
   throw new Error(result.errorMessage ?? `provider send failed (${result.providerStatus})`);
@@ -954,6 +974,25 @@ async function maybeFinaliseCampaign(campaignId: string): Promise<void> {
       data: { status: 'sent', sentAt: new Date() },
     });
   }
+}
+
+async function failCampaignRecipient(
+  campaignId: string,
+  recipientId: string,
+  errorMessage: string,
+): Promise<void> {
+  await prisma.campaignRecipient.update({
+    where: { id: recipientId },
+    data: { status: 'failed', errorMessage },
+  });
+  await maybeFinaliseCampaign(campaignId);
+}
+
+function sanitizeEmailSubject(subject: string): string {
+  return subject
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // ============================================================================
@@ -1063,7 +1102,9 @@ async function runFlowSend(job: Job<SendJobData>) {
   };
 
   const tagIndex = await loadCustomTagIndex(send.accountId);
-  const subjectOut = applyCustomTags(applySystemTags(subject, sysCtx, 'text'), tagIndex, 'text');
+  const subjectOut = sanitizeEmailSubject(
+    applyCustomTags(applySystemTags(subject, sysCtx, 'text'), tagIndex, 'text'),
+  );
   // Marketing emails get the unsubscribe footer; transactional ones never do.
   const bodyBase = transactional ? bodyHtmlRaw : ensureUnsubscribeFooter(bodyHtmlRaw);
   const bodyHtmlSys = applySystemTags(bodyBase, sysCtx, 'html');
