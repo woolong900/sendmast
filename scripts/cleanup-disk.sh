@@ -42,9 +42,9 @@ log "Cleanup started: root usage=${before_usage}%, free=${before_free}."
 # Routine cleanup only targets resources that Docker has already determined are
 # unused. Keep two weeks of unused images to preserve a practical rollback
 # window, while build cache and stopped containers may be removed after a week.
-docker builder prune -af --filter "until=168h"
-docker container prune -f --filter "until=168h"
-docker image prune -af --filter "until=336h"
+docker builder prune -af --filter "until=168h" >/dev/null
+docker container prune -f --filter "until=168h" >/dev/null
+docker image prune -af --filter "until=336h" >/dev/null
 
 current_usage="$(root_usage_percent)"
 if (( current_usage >= WARN_PERCENT )); then
