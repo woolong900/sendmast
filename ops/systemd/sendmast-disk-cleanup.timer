@@ -1,0 +1,12 @@
+[Unit]
+Description=Run SendMast disk cleanup every day
+
+[Timer]
+# 19:30 UTC is 03:30 the next day in Asia/Shanghai.
+OnCalendar=*-*-* 19:30:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+Unit=sendmast-disk-cleanup.service
+
+[Install]
+WantedBy=timers.target

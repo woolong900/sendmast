@@ -1,0 +1,15 @@
+[Unit]
+Description=SendMast conservative disk cleanup
+Documentation=file:/root/sendmast/scripts/cleanup-disk.sh
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/sendmast/scripts/cleanup-disk.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target

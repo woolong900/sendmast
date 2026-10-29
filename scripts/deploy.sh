@@ -97,6 +97,11 @@ dc up -d caddy api worker-sender worker-events worker-import worker-thumbnail wo
 echo "▶ Pruning old images"
 docker image prune -f --filter "until=168h" >/dev/null
 
+if [[ "$(id -u)" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
+  echo "▶ Ensuring disk cleanup timer"
+  ./scripts/install-disk-cleanup-timer.sh
+fi
+
 echo
 echo "✓ Deploy complete."
 dc ps
