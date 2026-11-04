@@ -188,12 +188,83 @@ export class ContactService {
       return { affected: result.count };
     }
 
-    const status = input.action === 'subscribe' ? 'subscribed' : 'unsubscribed';
-    const result = await this.prisma.contact.updateMany({
+    const contacts = await this.prisma.contact.findMany({
       where: { accountId, id: { in: input.ids } },
-      data: { subscriptionStatus: status },
+      select: { id: true, email: true, subscriptionStatus: true },
     });
-    return { affected: result.count };
+
+    if (input.action === 'subscribe') {
+      // Hard bounces and spam complaints are permanent: re-mailing them hurts
+      // sender reputation for every tenant on the shared channels. Only
+      // contacts that opted out themselves (or were manually unsubscribed)
+      // can be re-subscribed.
+      const blocked = contacts.filter(
+        (c) => c.subscriptionStatus === 'bounced' || c.subscriptionStatus === 'complained',
+      );
+      const eligible = contacts.filter(
+        (c) => c.subscriptionStatus !== 'bounced' && c.subscriptionStatus !== 'complained',
+      );
+      // A hard-bounce / complaint suppression entry also blocks the address
+      // even if the contact row itself looks re-subscribable (e.g. it was
+      // deleted and re-imported) — keep those out too.
+      const hardSuppressed = new Set(
+        eligible.length === 0
+          ? []
+          : (
+              await this.prisma.suppressionEntry.findMany({
+                where: {
+                  accountId,
+                  email: { in: eligible.map((c) => c.email) },
+                  reason: { in: ['hard_bounce', 'soft_bounce_threshold', 'complaint'] },
+                },
+                select: { email: true },
+              })
+            ).map((s) => s.email),
+      );
+      const toSubscribe = eligible.filter((c) => !hardSuppressed.has(c.email));
+      if (toSubscribe.length > 0) {
+        await this.prisma.$transaction([
+          this.prisma.contact.updateMany({
+            where: { accountId, id: { in: toSubscribe.map((c) => c.id) } },
+            data: { subscriptionStatus: 'subscribed' },
+          }),
+          // The opt-out suppression would otherwise keep excluding them from
+          // every campaign even though they are subscribed again.
+          this.prisma.suppressionEntry.deleteMany({
+            where: {
+              accountId,
+              email: { in: toSubscribe.map((c) => c.email) },
+              reason: { in: ['unsubscribe', 'manual'] },
+            },
+          }),
+        ]);
+      }
+      return {
+        affected: toSubscribe.length,
+        skipped: blocked.length + (eligible.length - toSubscribe.length),
+      };
+    }
+
+    // unsubscribe — also record a manual suppression so the opt-out survives
+    // the contact being deleted and re-imported later.
+    if (contacts.length > 0) {
+      await this.prisma.$transaction([
+        this.prisma.contact.updateMany({
+          // Keep the stronger bounced/complained status if already set.
+          where: {
+            accountId,
+            id: { in: contacts.map((c) => c.id) },
+            subscriptionStatus: { notIn: ['bounced', 'complained'] },
+          },
+          data: { subscriptionStatus: 'unsubscribed' },
+        }),
+        this.prisma.suppressionEntry.createMany({
+          data: contacts.map((c) => ({ accountId, email: c.email, reason: 'manual' as const })),
+          skipDuplicates: true,
+        }),
+      ]);
+    }
+    return { affected: contacts.length };
   }
 
   async addToList(accountId: string, listId: string, contactIds: string[]) {

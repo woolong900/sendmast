@@ -2,16 +2,23 @@ import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
-import { Prisma, PrismaClient, type EmailChannel } from '@prisma/client';
+import { Prisma, PrismaClient, type Campaign, type EmailChannel } from '@prisma/client';
 import { rewriteHtml, signTrackingToken } from '@sendmast/email-tracking';
 import { QUEUE_NAMES } from '@sendmast/shared';
 import { buildClickHouseClient } from '@sendmast/clickhouse';
 import { getTransportForAccount } from './transport';
+import { isPlatformSideFailure } from './quota-refund';
 import { QuotaManager } from './quota';
 import { runArchiveJob } from './archive';
 import { applyCustomTags, indexCustomTags } from './custom-tags';
 import { applySystemTags, ensureUnsubscribeFooter, injectPreheader } from './system-tags';
 import { getActiveTrackingDomains, pickTrackingHost } from './tracking-pool';
+import {
+  isSuppressed,
+  materialiseCampaignAudience,
+  type AudienceContext,
+  type AudienceSender,
+} from '@sendmast/audience';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const TRACKING_SECRET = process.env.TRACKING_TOKEN_SECRET;
@@ -36,6 +43,20 @@ const MAX_INFLIGHT_PER_CHANNEL = Number(process.env.MAX_INFLIGHT_PER_CHANNEL ?? 
 const FLOW_RECOVERY_AGE_MS = Number(process.env.FLOW_RECOVERY_AGE_MS ?? '10000');
 const FLOW_RECOVERY_BATCH = Number(process.env.FLOW_RECOVERY_BATCH ?? '100');
 const SEND_LOG_SETTINGS_TTL_MS = 30_000;
+// A recipient left in `queued` longer than this with no live BullMQ job is
+// considered stranded (worker crashed / DB error mid-send) and is recovered.
+const STALE_QUEUED_MS = Number(process.env.STALE_QUEUED_MS ?? String(15 * 60_000));
+const STALE_SWEEP_INTERVAL_MS = 60_000;
+const STALE_SWEEP_BATCH = 500;
+// Campaign content is immutable while sending/paused (the API only allows
+// edits in draft/scheduled), so it is cached per process and revalidated
+// against campaign.updatedAt, which is read fresh with every recipient.
+const CAMPAIGN_CONTENT_TTL_MS = 10 * 60_000;
+const CAMPAIGN_CONTENT_CACHE_MAX = 200;
+// Custom tag VALUE LISTS (not the per-recipient random pick) can be edited by
+// the tenant at any time; a short TTL bounds how stale they can get.
+const CUSTOM_TAG_TTL_MS = 15_000;
+const CUSTOM_TAG_CACHE_MAX = 1000;
 
 if (!TRACKING_SECRET) {
   throw new Error('TRACKING_TOKEN_SECRET is required');
@@ -68,6 +89,19 @@ const ch = buildClickHouseClient({
   username: process.env.CLICKHOUSE_USER ?? 'default',
   password: process.env.CLICKHOUSE_PASSWORD ?? '',
 });
+
+// Audience resolution (segment evaluation incl. ClickHouse event rules,
+// suppression filtering, recipient materialisation) shared with the API.
+const audienceCtx: AudienceContext = {
+  prisma,
+  ch: {
+    async query<T>(sql: string, params: Record<string, unknown> = {}): Promise<T[]> {
+      const res = await ch.query({ query: sql, query_params: params, format: 'JSONEachRow' });
+      return res.json<T>();
+    },
+  },
+  logger: { warn: (m) => console.warn(`[audience] ${m}`) },
+};
 
 interface DispatchJobData {
   campaignId: string;
@@ -220,7 +254,11 @@ async function runDispatch(job: Job<DispatchJobData>) {
 
   const campaign = await prisma.campaign.findFirst({
     where: { id: campaignId, accountId },
-    include: { lists: { orderBy: { position: 'asc' } }, senders: { orderBy: { position: 'asc' } } },
+    include: {
+      lists: { orderBy: { position: 'asc' } },
+      segments: true,
+      senders: { orderBy: { position: 'asc' } },
+    },
   });
   if (!campaign) throw new Error('Campaign not found');
   if (
@@ -250,11 +288,10 @@ async function runDispatch(job: Job<DispatchJobData>) {
     return;
   }
 
-  // Persist the final recipient count we just materialised. For the
-  // segment-enabled path the API already set this before enqueuing, so we
-  // skip the write to keep that flow untouched (and to avoid clobbering
-  // the API's count if API-side and worker-side counts ever drift).
-  if (campaign.totalRecipients === 0) {
+  // Persist the final recipient count we just materialised (the API leaves
+  // it at 0; it only becomes > 0 here, which also arms the tick's
+  // drained-campaign finalisation).
+  if (campaign.totalRecipients !== finalCount) {
     await prisma.campaign.update({
       where: { id: campaignId },
       data: { totalRecipients: finalCount },
@@ -272,25 +309,26 @@ async function runDispatch(job: Job<DispatchJobData>) {
 }
 
 /**
- * Stream recipients into `campaign_recipients` in cursor-paginated batches.
+ * Materialise the campaign audience (lists ∪ segments, minus suppressed
+ * addresses) into `campaign_recipients` via @sendmast/audience.
  *
  * Idempotency:
  *   - `skipDuplicates: true` makes per-row inserts safe under retry.
- *   - The early-exit shortcut (`existing >= totalRecipients`) only fires
- *     when totalRecipients is set AND already met — i.e. the segment-enabled
- *     API path has already done the work and a queue retry is wasteful.
- *     For the list-only path (totalRecipients=0 at entry) we always run
- *     the full streaming insert; the unique-index dedup handles retries.
+ *   - The early-exit shortcut (`existing >= totalRecipients`) only fires when
+ *     totalRecipients is already set and met (rows materialised by an older
+ *     API build, or a retry after the count was persisted).
  *
- * Returns the post-condition recipient count so the caller can persist it
- * back to `campaign.totalRecipients` and decide whether to short-circuit
- * to "sent" on an empty audience.
+ * Returns the post-condition recipient count (a COUNT, not a running sum, so
+ * a retried dispatch can't over-count) for `campaign.totalRecipients` and the
+ * empty-audience short-circuit.
  */
 async function materialiseRecipients(
   campaign: {
     id: string;
     fromEmail: string;
+    fromName: string;
     lists: { listId: string }[];
+    segments: { segmentId: string }[];
     senders: { fromEmail: string; fromName: string }[];
     totalRecipients: number;
   },
@@ -303,95 +341,44 @@ async function materialiseRecipients(
     return existing;
   }
 
-  // Multi-sender campaigns round-robin a from address onto each recipient.
-  // We seed the rotation index from `existing` so a mid-stream retry keeps
-  // the distribution roughly even instead of restarting at sender 0.
-  const senders = campaign.senders;
-  const rotate = senders.length > 1;
-
   // Resolve the email channel each sender's domain routes to, so we can stamp
   // it per recipient (cross-channel campaigns route each recipient independently).
-  const senderChannels: (string | null)[] = [];
-  for (const s of senders) {
+  // Pre-feature campaigns have no campaign_senders rows → single primary sender.
+  const roster =
+    campaign.senders.length > 0
+      ? campaign.senders
+      : [{ fromEmail: campaign.fromEmail, fromName: campaign.fromName }];
+  const senders: AudienceSender[] = [];
+  for (const s of roster) {
     const d = s.fromEmail.split('@')[1]?.toLowerCase();
-    senderChannels.push(d ? await resolveEmailChannelIdForDomain(d) : null);
+    senders.push({
+      fromEmail: s.fromEmail,
+      fromName: s.fromName,
+      emailChannelId: d ? await resolveEmailChannelIdForDomain(d) : null,
+    });
   }
-  const primaryDomain = (senders[0]?.fromEmail ?? campaign.fromEmail).split('@')[1]?.toLowerCase();
-  const primaryChannel = primaryDomain ? await resolveEmailChannelIdForDomain(primaryDomain) : null;
 
   const listIds = campaign.lists.map((l) => l.listId);
-  // No lists means this is the segment-only path; API already materialised
-  // (we wouldn't be here with totalRecipients=0 in the segment case unless
-  // the API's materialisation crashed mid-flight, in which case `existing`
-  // is the truth and the tick scheduler will pick up what's there).
-  if (listIds.length === 0) return existing;
+  const segmentIds = campaign.segments.map((s) => s.segmentId);
+  if (listIds.length === 0 && segmentIds.length === 0) return existing;
 
-  // {{list_name}} is captured per recipient at materialisation: each contact
-  // gets the name of the target list THEY belong to — the FIRST one by
-  // selection order (listIds is ordered by CampaignList.position) when the
-  // contact is in several. Frozen here so a later membership change can't drift
-  // the rendered email and so runSend needs no extra query. Build id→name once.
-  const listNameById = new Map(
-    (
-      await prisma.contactList.findMany({
-        where: { id: { in: listIds } },
-        select: { id: true, name: true },
-      })
-    ).map((l) => [l.id, l.name]),
+  const { inserted, suppressed } = await materialiseCampaignAudience(audienceCtx, {
+    campaignId: campaign.id,
+    accountId,
+    listIds,
+    segmentIds,
+    senders,
+    // Seed the rotation from what's already there so a mid-stream retry keeps
+    // the multi-sender distribution roughly even.
+    rotationOffset: existing,
+  });
+
+  const total = await prisma.campaignRecipient.count({ where: { campaignId: campaign.id } });
+  console.log(
+    `[dispatch ${campaign.id}] materialised ${inserted} new recipient rows ` +
+      `(total ${total}, ${suppressed} suppressed address(es) skipped)`,
   );
-
-  const PAGE = 5000;
-  let cursor: string | undefined;
-  let inserted = existing;
-
-  while (true) {
-    const batch = await prisma.contact.findMany({
-      where: {
-        accountId,
-        subscriptionStatus: 'subscribed',
-        memberships: { some: { listId: { in: listIds } } },
-      },
-      select: {
-        id: true,
-        email: true,
-        memberships: {
-          where: { listId: { in: listIds } },
-          select: { listId: true },
-        },
-      },
-      take: PAGE,
-      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-      orderBy: { id: 'asc' },
-    });
-    if (batch.length === 0) break;
-
-    await prisma.campaignRecipient.createMany({
-      data: batch.map((c, j) => {
-        const idx = (inserted + j) % senders.length;
-        const s = rotate ? senders[idx] : null;
-        const member = new Set(c.memberships.map((m) => m.listId));
-        const firstListId = listIds.find((id) => member.has(id));
-        const listName = firstListId ? (listNameById.get(firstListId) ?? null) : null;
-        return {
-          accountId,
-          campaignId: campaign.id,
-          contactId: c.id,
-          email: c.email,
-          status: 'pending' as const,
-          listName,
-          fromEmail: s?.fromEmail ?? null,
-          fromName: s?.fromName ?? null,
-          emailChannelId: rotate ? senderChannels[idx] : primaryChannel,
-        };
-      }),
-      skipDuplicates: true,
-    });
-    inserted += batch.length;
-    cursor = batch[batch.length - 1].id;
-  }
-
-  console.log(`[dispatch ${campaign.id}] materialised ${inserted} recipient rows`);
-  return inserted;
+  return total;
 }
 
 // ============================================================================
@@ -447,6 +434,74 @@ async function recoverPendingFlowSends(): Promise<void> {
   }
 }
 
+/**
+ * Recover campaign recipients stranded in `queued`.
+ *
+ * The tick flips rows pending → queued when it enqueues their send job. If
+ * that job then dies without moving the row to a terminal state (worker
+ * crash, DB error mid-send, transport exception) the row stays `queued`
+ * forever: the tick only picks `pending`, the campaign never finalises, and
+ * every stranded row permanently eats MAX_INFLIGHT_PER_CHANNEL headroom.
+ *
+ * For rows queued longer than STALE_QUEUED_MS whose BullMQ job is no longer
+ * live: if a successful send_log exists the email did go out (only the final
+ * status write was lost) → mark sent; otherwise → back to pending so the
+ * tick re-enqueues it. The old failed job is removed first because BullMQ
+ * silently ignores add() for a jobId that still exists.
+ */
+let lastStaleSweepAt = 0;
+const LIVE_JOB_STATES = new Set(['waiting', 'active', 'delayed', 'prioritized', 'waiting-children']);
+
+async function recoverStaleQueuedRecipients(campaignIds: string[]): Promise<void> {
+  const now = Date.now();
+  if (campaignIds.length === 0 || now - lastStaleSweepAt < STALE_SWEEP_INTERVAL_MS) return;
+  lastStaleSweepAt = now;
+
+  const stale = await prisma.campaignRecipient.findMany({
+    where: {
+      campaignId: { in: campaignIds },
+      status: 'queued',
+      updatedAt: { lt: new Date(now - STALE_QUEUED_MS) },
+    },
+    select: { id: true },
+    take: STALE_SWEEP_BATCH,
+  });
+  if (stale.length === 0) return;
+
+  let requeued = 0;
+  let markedSent = 0;
+  for (const { id } of stale) {
+    try {
+      const job = await sendEmailQueue.getJob(`r-${id}`);
+      if (job) {
+        const state = await job.getState();
+        if (LIVE_JOB_STATES.has(state)) continue; // still legitimately in flight
+        await job.remove();
+      }
+      const delivered = await prisma.sendLog.findFirst({
+        where: { recipientId: id, ok: true },
+        select: { id: true },
+      });
+      const res = await prisma.campaignRecipient.updateMany({
+        where: { id, status: 'queued' },
+        data: delivered ? { status: 'sent', sentAt: new Date() } : { status: 'pending' },
+      });
+      if (res.count > 0) {
+        if (delivered) markedSent++;
+        else requeued++;
+      }
+    } catch (err) {
+      console.error(`[tick] failed to recover stale queued recipient ${id}:`, err);
+    }
+  }
+  if (requeued + markedSent > 0) {
+    console.warn(
+      `[tick] recovered ${requeued + markedSent} stale queued recipient(s): ` +
+        `${requeued} back to pending, ${markedSent} marked sent (send_log ok)`,
+    );
+  }
+}
+
 async function runTick(_job: Job): Promise<void> {
   await recoverPendingFlowSends();
 
@@ -472,6 +527,7 @@ async function runTick(_job: Job): Promise<void> {
     },
   });
   const activeCampaignIds = new Set(activeRecipientCampaigns.map((r) => r.campaignId));
+  await recoverStaleQueuedRecipients([...activeCampaignIds]);
   const drainedCampaignIds = campaigns
     .filter((c) => c.totalRecipients > 0 && !activeCampaignIds.has(c.id))
     .map((c) => c.id);
@@ -650,17 +706,103 @@ async function runTick(_job: Job): Promise<void> {
 }
 
 /**
- * Load the account's custom tags and index them for fast lookup. Done once
- * per recipient send (~ms-scale on a small table); not cached because tags
- * may change between sends and a stale cache would surprise users editing
- * mid-campaign. Add a per-tick LRU here if profiling shows it matters.
+ * Load the account's custom tags (name → candidate values) for tag
+ * substitution. Only the candidate lists are cached (short TTL); the random
+ * pick in applyCustomTags still happens per recipient, per placeholder.
  */
+const customTagCache = new Map<string, { index: Map<string, string[]>; loadedAt: number }>();
+
 async function loadCustomTagIndex(accountId: string): Promise<Map<string, string[]>> {
+  const now = Date.now();
+  const cached = customTagCache.get(accountId);
+  if (cached && cached.loadedAt + CUSTOM_TAG_TTL_MS > now) return cached.index;
   const tags = await prisma.customTag.findMany({
     where: { accountId },
     select: { name: true, values: true },
   });
-  return indexCustomTags(tags);
+  const index = indexCustomTags(tags);
+  if (customTagCache.size >= CUSTOM_TAG_CACHE_MAX) customTagCache.clear();
+  customTagCache.set(accountId, { index, loadedAt: now });
+  return index;
+}
+
+type CampaignContent = Pick<
+  Campaign,
+  | 'id'
+  | 'name'
+  | 'subject'
+  | 'preheader'
+  | 'html'
+  | 'fromEmail'
+  | 'fromName'
+  | 'utmEnabled'
+  | 'utmSource'
+  | 'utmMedium'
+  | 'utmCampaign'
+  | 'trackClicks'
+>;
+
+const campaignContentCache = new Map<
+  string,
+  { content: CampaignContent; updatedAt: number; loadedAt: number }
+>();
+
+/**
+ * Campaign body/subject/etc. for the send path. Loading the full row (HTML can
+ * be hundreds of KB) once per recipient was the dominant per-send DB cost; the
+ * content cannot change while a campaign is sending, so we cache it and use
+ * the freshly-read `updatedAt` as a version check.
+ */
+async function getCampaignContent(ref: {
+  id: string;
+  updatedAt: Date;
+}): Promise<CampaignContent | null> {
+  const now = Date.now();
+  const version = ref.updatedAt.getTime();
+  const cached = campaignContentCache.get(ref.id);
+  if (cached && cached.updatedAt === version && cached.loadedAt + CAMPAIGN_CONTENT_TTL_MS > now) {
+    return cached.content;
+  }
+  const content = await prisma.campaign.findUnique({
+    where: { id: ref.id },
+    select: {
+      id: true,
+      name: true,
+      subject: true,
+      preheader: true,
+      html: true,
+      fromEmail: true,
+      fromName: true,
+      utmEnabled: true,
+      utmSource: true,
+      utmMedium: true,
+      utmCampaign: true,
+      trackClicks: true,
+    },
+  });
+  if (!content) {
+    campaignContentCache.delete(ref.id);
+    return null;
+  }
+  if (campaignContentCache.size >= CAMPAIGN_CONTENT_CACHE_MAX) {
+    // Map iteration order is insertion order → drop the oldest entry.
+    const oldest = campaignContentCache.keys().next().value;
+    if (oldest !== undefined) campaignContentCache.delete(oldest);
+  }
+  campaignContentCache.set(ref.id, { content, updatedAt: version, loadedAt: now });
+  return content;
+}
+
+/** Give back one unit of tenant prepaid quota reserved for a send. */
+async function refundTenantQuota(accountId: string, reason: string): Promise<void> {
+  try {
+    await prisma.account.update({
+      where: { id: accountId },
+      data: { sendQuotaRemaining: { increment: 1 } },
+    });
+  } catch (err) {
+    console.error(`[quota] failed to refund 1 unit to ${accountId} (${reason}):`, err);
+  }
 }
 
 // ============================================================================
@@ -672,28 +814,32 @@ async function loadCustomTagIndex(accountId: string): Promise<Map<string, string
 
 async function runSend(job: Job<SendJobData>) {
   if (!job.data.recipientId) return;
+  // Status/version are read fresh every time (pause / cancel must take effect
+  // immediately); the heavy content comes from the per-process cache.
   const r = await prisma.campaignRecipient.findUnique({
     where: { id: job.data.recipientId },
-    include: { campaign: true },
+    include: { campaign: { select: { id: true, status: true, updatedAt: true } } },
   });
   if (!r) return;
   if (r.status === 'sent' || r.status === 'failed' || r.status === 'skipped') return;
 
-  const c = r.campaign;
+  const campaignStatus = r.campaign.status;
+  const c = await getCampaignContent(r.campaign);
+  if (!c) return;
   // Per-recipient sender assigned at materialisation for multi-sender
   // campaigns; NULL on single-sender campaigns (and all pre-feature rows),
   // where we fall back to the campaign's primary from address.
   const fromEmail = r.fromEmail ?? c.fromEmail;
   const fromName = r.fromName ?? c.fromName;
 
-  if (c.status === 'paused') {
+  if (campaignStatus === 'paused') {
     await prisma.campaignRecipient.update({
       where: { id: r.id },
       data: { status: 'pending' },
     });
     return;
   }
-  if (c.status === 'canceled') {
+  if (campaignStatus === 'canceled') {
     await prisma.campaignRecipient.update({
       where: { id: r.id },
       data: { status: 'skipped' },
@@ -866,26 +1012,35 @@ async function runSend(job: Job<SendJobData>) {
   // within milliseconds. Reuse the existing id on a retried send so the provider treats
   // it as the same operation (idempotent — no duplicate email).
   const operationId = r.messageId ?? randomUUID();
-  if (!r.messageId) {
-    await prisma.campaignRecipient.update({
-      where: { id: r.id },
-      data: { messageId: operationId },
-    });
-  }
+  let result;
+  try {
+    if (!r.messageId) {
+      await prisma.campaignRecipient.update({
+        where: { id: r.id },
+        data: { messageId: operationId },
+      });
+    }
 
-  const result = await transport.send({
-    from: { name: fromName, address: fromEmail },
-    to: r.email,
-    subject,
-    html,
-    operationId,
-    headers: {
-      'List-Unsubscribe': `<${unsubUrl}>, <mailto:unsubscribe@${fromEmail.split('@')[1]}>`,
-      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-      'X-SendMast-Recipient': r.id,
-      'X-SendMast-Campaign': c.id,
-    },
-  });
+    result = await transport.send({
+      from: { name: fromName, address: fromEmail },
+      to: r.email,
+      subject,
+      html,
+      operationId,
+      headers: {
+        'List-Unsubscribe': `<${unsubUrl}>, <mailto:unsubscribe@${fromEmail.split('@')[1]}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        'X-SendMast-Recipient': r.id,
+        'X-SendMast-Campaign': c.id,
+      },
+    });
+  } catch (err) {
+    // Nothing reached the provider (transports resolve, never reject, once
+    // the request is made) — the recipient stays `queued` and the stale-queue
+    // sweeper will retry it, which reserves quota again. Give this unit back.
+    await refundTenantQuota(r.accountId, `send ${r.id} threw before provider result`);
+    throw err;
+  }
 
   // Persist a send_logs row regardless of outcome. Best-effort: a log-write
   // failure must not block the recipient state transition or the BullMQ ack.
@@ -941,10 +1096,15 @@ async function runSend(job: Job<SendJobData>) {
     try {
       await quota.consume(job.data.emailChannelId, acct, 1);
     } catch {}
-    await maybeFinaliseCampaign(c.id);
+    // No per-send maybeFinaliseCampaign() here: a COUNT over the campaign's
+    // pending/queued rows after every successful send is O(N) queries for an
+    // N-recipient campaign. The 1Hz tick finalises drained campaigns.
     return;
   }
 
+  if (isPlatformSideFailure(result)) {
+    await refundTenantQuota(r.accountId, `platform-side failure ${result.providerStatus}`);
+  }
   await failCampaignRecipient(
     c.id,
     r.id,
@@ -1042,6 +1202,12 @@ async function runFlowSend(job: Job<SendJobData>) {
   });
   if (!transactional && contact && contact.subscriptionStatus !== 'subscribed') {
     await fail('联系人已退订/被抑制', 'skipped');
+    return;
+  }
+  // The suppression list outlives contact rows (delete + re-import / shop
+  // re-sync recreates them as subscribed), so check it as well.
+  if (!transactional && (await isSuppressed(prisma, send.accountId, send.email))) {
+    await fail('联系人在抑制名单中(退订/退信/投诉)', 'skipped');
     return;
   }
 
@@ -1164,10 +1330,15 @@ async function runFlowSend(job: Job<SendJobData>) {
 
   const operationId = send.messageId ?? randomUUID();
   if (!send.messageId) {
-    await prisma.shopAutomationSend.update({
-      where: { id: sendId },
-      data: { messageId: operationId },
-    });
+    try {
+      await prisma.shopAutomationSend.update({
+        where: { id: sendId },
+        data: { messageId: operationId },
+      });
+    } catch (err) {
+      await refundTenantQuota(send.accountId, `flow send ${send.id} failed before provider call`);
+      throw err;
+    }
   }
 
   const headers: Record<string, string> = {
@@ -1179,14 +1350,20 @@ async function runFlowSend(job: Job<SendJobData>) {
     headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
   }
 
-  const result = await transport.send({
-    from: { name: fromName, address: fromEmail },
-    to: send.email,
-    subject: subjectOut,
-    html,
-    operationId,
-    headers,
-  });
+  let result;
+  try {
+    result = await transport.send({
+      from: { name: fromName, address: fromEmail },
+      to: send.email,
+      subject: subjectOut,
+      html,
+      operationId,
+      headers,
+    });
+  } catch (err) {
+    await refundTenantQuota(send.accountId, `flow send ${send.id} threw before provider result`);
+    throw err;
+  }
 
   const logAutomationFinalHtml = await shouldLogAutomationFinalHtml();
 
@@ -1235,6 +1412,9 @@ async function runFlowSend(job: Job<SendJobData>) {
     return;
   }
 
+  if (isPlatformSideFailure(result)) {
+    await refundTenantQuota(send.accountId, `platform-side failure ${result.providerStatus}`);
+  }
   await prisma.shopAutomationSend.update({
     where: { id: sendId },
     data: { status: 'failed', errorMessage: result.errorMessage ?? '邮件通道发送失败' },

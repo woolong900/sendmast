@@ -22,7 +22,6 @@ describe('CampaignService recipient export', () => {
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
     );
     jest
       .spyOn(service, 'listRecipients')

@@ -13,6 +13,7 @@
     "@azure/communication-email": "^1.0.0",
     "@azure/identity": "^4.13.1",
     "@prisma/client": "^5.22.0",
+    "@sendmast/audience": "workspace:*",
     "@sendmast/clickhouse": "workspace:*",
     "@sendmast/db": "workspace:*",
     "@sendmast/email-tracking": "workspace:*",

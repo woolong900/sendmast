@@ -26,6 +26,7 @@
     "@nestjs/swagger": "^7.4.2",
     "@nestjs/throttler": "^6.2.1",
     "@prisma/client": "^5.22.0",
+    "@sendmast/audience": "workspace:*",
     "@sendmast/clickhouse": "workspace:*",
     "@sendmast/db": "workspace:*",
     "@sendmast/email-tracking": "workspace:*",

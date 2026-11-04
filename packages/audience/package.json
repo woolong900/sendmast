@@ -1,0 +1,25 @@
+{
+  "name": "@sendmast/audience",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Campaign audience resolution shared by the API and worker-sender: segment evaluation, suppression filtering and recipient materialisation.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit --tsBuildInfoFile node_modules/.cache/.tsbuildinfo"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@sendmast/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

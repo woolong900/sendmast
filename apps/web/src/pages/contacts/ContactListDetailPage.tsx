@@ -120,7 +120,11 @@ export function ContactListDetailPage() {
         listId: action === 'removeFromList' ? listId : undefined,
       }),
     onError: (err) => toast(`批量操作失败:${apiErrMessage(err)}`, 'error'),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      const skipped = (res.data as { skipped?: number } | undefined)?.skipped ?? 0;
+      if (skipped > 0) {
+        toast(`${skipped} 个联系人因退信/投诉被永久抑制,未重新订阅`, 'error');
+      }
       clearSelection();
       qc.invalidateQueries({ queryKey: ['contacts', listId] });
       qc.invalidateQueries({ queryKey: ['contact-list', listId] });

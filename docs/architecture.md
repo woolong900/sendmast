@@ -32,10 +32,11 @@ flowchart LR
 
 1. User hits `POST /api/campaigns/:id/send`
 2. API:
-   - Validates the sender domain is verified
-   - Materialises every subscribed contact in the selected lists into `campaign_recipients` (1 row each)
+   - Validates the sender domain is verified and runs cheap audience / quota pre-flights
    - Enqueues a `send-campaign:dispatch` job in BullMQ
-3. `worker-sender` consumes the dispatch job, paginates `campaign_recipients` (500 at a time), and bulk-enqueues `send-email` jobs (one per recipient)
+3. `worker-sender` consumes the dispatch job and materialises the audience via `@sendmast/audience`
+   (lists ∪ segments, subscribed only, minus `suppression_entries`) into `campaign_recipients`;
+   the 1Hz tick then fairly enqueues `send-email` jobs per email channel and recovers rows stranded in `queued`
 4. `worker-sender` consumes `send-email` jobs:
    - Rewrites every `<a href>` in the campaign HTML to `/t/c/<token>?u=<original>` (per-recipient HMAC token)
    - Injects the open pixel `<img src=".../t/o/<token>.gif">`

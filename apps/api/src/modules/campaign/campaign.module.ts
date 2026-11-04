@@ -7,8 +7,8 @@ import { SegmentModule } from '../segment/segment.module';
 import { TrackingDomainModule } from '../tracking-domain/tracking-domain.module';
 
 @Module({
-  // AuthModule provides AuthService for assertActive() gating; SegmentModule
-  // provides SegmentService so send() can resolve segmentIds → contactIds.
+  // AuthModule provides AuthService for assertActive() gating. Segment
+  // evaluation for sends now happens in worker-sender (@sendmast/audience).
   imports: [TemplateModule, AuthModule, SegmentModule, TrackingDomainModule],
   controllers: [CampaignController],
   providers: [CampaignService],

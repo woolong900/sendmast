@@ -65,13 +65,19 @@ async function bootstrap() {
   );
   app.useGlobalFilters(new GlobalExceptionFilter());
 
-  const swaggerCfg = new DocumentBuilder()
-    .setTitle('SendMast API')
-    .setVersion('0.1.0')
-    .addBearerAuth()
-    .build();
-  const doc = SwaggerModule.createDocument(app, swaggerCfg);
-  SwaggerModule.setup('api/docs', app, doc);
+  // Swagger exposes every route + DTO shape. Keep it out of production unless
+  // explicitly re-enabled for a debugging session (ENABLE_SWAGGER=true).
+  const swaggerEnabled =
+    config.get<string>('NODE_ENV') !== 'production' || process.env.ENABLE_SWAGGER === 'true';
+  if (swaggerEnabled) {
+    const swaggerCfg = new DocumentBuilder()
+      .setTitle('SendMast API')
+      .setVersion('0.1.0')
+      .addBearerAuth()
+      .build();
+    const doc = SwaggerModule.createDocument(app, swaggerCfg);
+    SwaggerModule.setup('api/docs', app, doc);
+  }
 
   // Forward SIGINT/SIGTERM into Nest's lifecycle so PrismaService /
   // BullMQ Queue / Redis / S3 / CH clients get a chance to flush+close on
@@ -82,7 +88,7 @@ async function bootstrap() {
   const port = config.get<number>('API_PORT', 4000);
   await app.listen(port);
   logger.log(`SendMast API listening on http://localhost:${port}`);
-  logger.log(`Swagger UI:  http://localhost:${port}/api/docs`);
+  if (swaggerEnabled) logger.log(`Swagger UI:  http://localhost:${port}/api/docs`);
 }
 
 bootstrap().catch((err) => {

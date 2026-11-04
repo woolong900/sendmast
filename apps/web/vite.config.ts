@@ -35,7 +35,10 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      sourcemap: true,
+      // Production builds emit maps without the `//# sourceMappingURL` comment
+      // ('hidden'), and the web image deletes them, so original sources are
+      // never publicly downloadable. Dev/preview builds keep linked maps.
+      sourcemap: mode === 'production' ? 'hidden' : true,
     },
     // Force-prebundle the workspace shared package. Without this, Vite serves
     // dist/index.js straight from /@fs/.../packages/shared/dist as ESM, but

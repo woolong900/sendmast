@@ -54,6 +54,7 @@ COPY apps/worker-import/package.json apps/worker-import/
 COPY apps/worker-thumbnail/package.json apps/worker-thumbnail/
 COPY apps/worker-shop-sync/package.json apps/worker-shop-sync/
 COPY packages/db/package.json packages/db/
+COPY packages/audience/package.json packages/audience/
 COPY packages/shared/package.json packages/shared/
 COPY packages/clickhouse/package.json packages/clickhouse/
 COPY packages/shopyy/package.json packages/shopyy/
@@ -186,6 +187,8 @@ CMD ["sh", "-c", "pnpm --filter @sendmast/db exec prisma migrate deploy --schema
 # Certbot, no manual cert renewals.
 FROM caddy:2.8-alpine AS web
 COPY --from=build /app/apps/web/dist /srv/web
+# Source maps stay in the build stage only — never serve original sources.
+RUN find /srv/web -name '*.map' -type f -delete
 # Apex marketing site (sendmast.com landing page). Plain HTML + Tailwind CDN,
 # no build step. Edit marketing/index.html and rebuild this image to ship.
 COPY marketing /srv/marketing

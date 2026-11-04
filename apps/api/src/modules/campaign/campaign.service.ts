@@ -11,7 +11,6 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueueService } from '../../common/queue/queue.service';
 import { ClickHouseService } from '../../common/clickhouse/clickhouse.service';
 import { AuthService } from '../auth/auth.service';
-import { SegmentService } from '../segment/segment.service';
 import { TemplateService } from '../template/template.service';
 import { TrackingDomainService } from '../tracking-domain/tracking-domain.service';
 import { renderMjml } from '../template/mjml-renderer';
@@ -310,7 +309,6 @@ export class CampaignService {
     private readonly templates: TemplateService,
     private readonly ch: ClickHouseService,
     private readonly auth: AuthService,
-    private readonly segments: SegmentService,
     private readonly trackingDomains: TrackingDomainService,
   ) {}
 
@@ -1541,114 +1539,87 @@ export class CampaignService {
         ? c.senders.map((s) => ({ fromEmail: s.fromEmail, fromName: s.fromName }))
         : [{ fromEmail: c.fromEmail, fromName: c.fromName }];
 
-    const enrichedSenders = await this.resolveCampaignSenders(accountId, senders, 'send');
+    // Validation only — the dispatch worker re-resolves each sender's channel
+    // when it materialises recipients.
+    await this.resolveCampaignSenders(accountId, senders, 'send');
 
-    // Audience resolution & recipient materialisation strategy:
+    // Audience resolution & recipient materialisation happen in the dispatch
+    // worker (worker-sender → @sendmast/audience) for BOTH list and segment
+    // audiences: it streams recipients in cursor-paginated batches, evaluates
+    // segments (incl. ClickHouse event rules) and drops suppressed addresses.
+    // Doing segment evaluation here used to make send() latency scale with
+    // audience size and time out on large segments.
     //
-    //   - List-only campaigns (no segments): cheap pre-flight here ("is at
-    //     least one subscribed contact reachable?") then punt the heavy
-    //     `findMany(contacts) → INSERT(recipients)` work to the dispatch
-    //     worker, which streams it in cursor-paginated batches.
-    //
-    //   - Segment-enabled campaigns: keep doing the full resolution here —
-    //     the worker is list-only by design (it doesn't know how to compile
-    //     SegmentDefinition + reach into ClickHouse for event constraints),
-    //     and pulling segment evaluation into the worker would mean either
-    //     a new shared package or duplicating ~100 lines of logic. Punt
-    //     that refactor; sub-100k segment audiences finish well within the
-    //     existing API budget anyway.
-    //
-    // The trade-off was "send() latency scales with audience size — fine
-    // for v1 (< ~100k)". 342k+ list audiences blew past that and that's
-    // what motivates this split.
-    const hasSegments = c.segments.length > 0;
+    // Here we only run cheap pre-flights so the user gets immediate feedback:
+    //   - list audience: one COUNT on the (account, list, status) path;
+    //   - segments: the last computed cachedCount (exact evaluation is
+    //     deferred to the worker — scheduled campaigns are evaluated at send
+    //     time, which is what the user expects anyway).
+    const listIds = c.lists.map((l) => l.listId);
+    const segmentIds = c.segments.map((s) => s.segmentId);
+    if (listIds.length === 0 && segmentIds.length === 0) {
+      throw new BadRequestException('请至少选择一个联系人列表或动态分群');
+    }
+
+    const listCount =
+      listIds.length > 0
+        ? await this.prisma.contact.count({
+            where: {
+              accountId,
+              subscriptionStatus: 'subscribed',
+              memberships: { some: { listId: { in: listIds } } },
+            },
+          })
+        : 0;
+
+    if (listCount === 0) {
+      let audienceMayExist = false;
+      if (segmentIds.length > 0) {
+        const segs = await this.prisma.segment.findMany({
+          where: { accountId, id: { in: segmentIds } },
+          select: { cachedCount: true },
+        });
+        // Unknown (never computed / definition just edited) counts as "may
+        // have members"; only a known 0 on every segment is a definite empty.
+        audienceMayExist = segs.some((s) => s.cachedCount === null || s.cachedCount > 0);
+      }
+      if (!audienceMayExist) {
+        throw new BadRequestException(
+          segmentIds.length > 0
+            ? '所选列表/分群中没有可发送的联系人(分群人数为最近一次计算结果,如有变化请先在分群页刷新)'
+            : '所选列表/分群中没有可发送的联系人',
+        );
+      }
+    }
+
+    // listCount is a lower bound of the final audience (segments only add,
+    // and suppression filtering removes very few). The exact count is only
+    // known after materialisation; runtime quota is still enforced per send
+    // and the tick finalises the campaign if the tenant runs out mid-way.
+    if (account.sendQuotaRemaining < listCount) {
+      throw new BadRequestException(
+        `发送额度不足:本次预计需要 ${listCount} 封,当前剩余 ${account.sendQuotaRemaining} 封。请先购买额度。`,
+      );
+    }
 
     const isFuture = !!(c.scheduledAt && c.scheduledAt > new Date());
     const nextStatus = isFuture ? 'scheduled' : 'sending';
 
-    if (hasSegments) {
-      // Slow path: resolve & materialise here so the worker can dispatch
-      // immediately without needing segment evaluation logic.
-      //
-      // Materialise recipients BEFORE flipping status. Previously the status
-      // was set to `sending` first and materialisation ran after — a failure
-      // (or crash) in between left the campaign stranded in `sending` with
-      // partial/zero recipients. Inserting first means any failure here throws
-      // with the campaign still in its prior (non-sending) state; createMany's
-      // skipDuplicates keeps a retry idempotent. The status CAS below is the
-      // single point that actually commits the send.
-      const inserted = await this.materialiseSegmentAudience(
-        c.id,
+    // Status compare-and-swap. totalRecipients stays at 0 — the worker sets
+    // the real count after streaming the recipient rows in.
+    const swap = await this.prisma.campaign.updateMany({
+      where: {
+        id: c.id,
         accountId,
-        c.lists.map((l) => l.listId),
-        c.segments.map((s) => s.segmentId),
-        enrichedSenders,
-      );
-      if (inserted === 0) {
-        throw new BadRequestException('所选列表/分群中没有可发送的联系人');
-      }
-      if (account.sendQuotaRemaining < inserted) {
-        await this.prisma.campaignRecipient.deleteMany({
-          where: { campaignId: c.id, accountId, status: 'pending' },
-        });
-        throw new BadRequestException(
-          `发送额度不足:本次预计需要 ${inserted} 封,当前剩余 ${account.sendQuotaRemaining} 封。请先购买额度。`,
-        );
-      }
-
-      const swap = await this.prisma.campaign.updateMany({
-        where: {
-          id: c.id,
-          accountId,
-          status: { notIn: ['sending', 'sent', 'canceled'] },
-        },
-        data: {
-          status: nextStatus,
-          totalRecipients: inserted,
-          sendingStartedAt: isFuture ? null : new Date(),
-        },
-      });
-      if (swap.count === 0) throw new ConflictException('当前活动状态不允许发送');
-    } else {
-      // Fast path: cheap pre-flight only. A single LIMIT-1 query on the
-      // (accountId, listId, subscriptionStatus) index — sub-ms even on huge
-      // lists — gives the user immediate "your audience is empty" feedback
-      // without paying for the full scan.
-      const listIds = c.lists.map((l) => l.listId);
-      if (listIds.length === 0) {
-        throw new BadRequestException('请至少选择一个联系人列表或动态分群');
-      }
-      const targetCount = await this.prisma.contact.count({
-        where: {
-          accountId,
-          subscriptionStatus: 'subscribed',
-          memberships: { some: { listId: { in: listIds } } },
-        },
-      });
-      if (targetCount === 0) {
-        throw new BadRequestException('所选列表/分群中没有可发送的联系人');
-      }
-      if (account.sendQuotaRemaining < targetCount) {
-        throw new BadRequestException(
-          `发送额度不足:本次预计需要 ${targetCount} 封,当前剩余 ${account.sendQuotaRemaining} 封。请先购买额度。`,
-        );
-      }
-
-      // Status compare-and-swap. totalRecipients stays at 0 — the worker
-      // sets the real count after streaming the recipient rows in.
-      const swap = await this.prisma.campaign.updateMany({
-        where: {
-          id: c.id,
-          accountId,
-          status: { notIn: ['sending', 'sent', 'canceled'] },
-        },
-        data: {
-          status: nextStatus,
-          sendingStartedAt: isFuture ? null : new Date(),
-        },
-      });
-      if (swap.count === 0) throw new ConflictException('当前活动状态不允许发送');
-    }
+        status: { notIn: ['sending', 'sent', 'canceled'] },
+      },
+      data: {
+        status: nextStatus,
+        totalRecipients: 0,
+        sendingStartedAt: isFuture ? null : new Date(),
+      },
+    });
+    if (swap.count === 0) throw new ConflictException('当前活动状态不允许发送');
 
     const delay = isFuture ? c.scheduledAt!.getTime() - Date.now() : 0;
     await this.queue.add(
@@ -1695,149 +1666,6 @@ export class CampaignService {
     if (!/\{\{unsubscribe_url\}\}/.test(sendableHtml)) {
       throw new BadRequestException('模板缺少退订链接 {{unsubscribe_url}}');
     }
-  }
-
-  /**
-   * Stream a segment-enabled campaign's audience into campaign_recipients in
-   * bounded batches. Audience = ∪(subscribed contacts in any list) ∪
-   * ∪(subscribed contacts matching any segment).
-   *
-   * Memory and PG bind-params are both bounded: lists are streamed by id
-   * cursor (same as the worker's list-only path) and each segment is resolved
-   * to an id set then chunk-fetched — every `id IN (…)` query is ≤ BATCH, so
-   * we never approach PG's 65535 param limit and never hold the full audience
-   * in memory. A 342k-contact list used to blow up here on both counts.
-   *
-   * `skipDuplicates` deduplicates contacts shared across lists/segments and
-   * keeps the whole thing idempotent under retry. Returns the number of
-   * recipient rows actually inserted (= the subscribed audience size), which
-   * the caller persists as `totalRecipients` and uses for the empty check.
-   *
-   * Note: segment evaluation stays in the API (the dispatch worker is
-   * list-only by design and doesn't compile SegmentDefinition); only the
-   * materialisation is streamed.
-   */
-  private async materialiseSegmentAudience(
-    campaignId: string,
-    accountId: string,
-    listIds: string[],
-    segmentIds: string[],
-    senders: Array<{ fromEmail: string; fromName: string; emailChannelId: string }>,
-  ): Promise<number> {
-    // Single-sender campaigns leave the per-recipient from-columns NULL so the
-    // worker falls back to Campaign.fromEmail/fromName — but we always stamp
-    // emailChannelId so the dispatcher can route without re-resolving the domain.
-    const rotate = senders.length > 1;
-    const primaryChannel = senders[0]?.emailChannelId ?? null;
-    const BATCH = 5000;
-    let inserted = 0;
-    // Rotation is positioned over rows *processed* (not just inserted) so the
-    // round-robin stays even across batches even when skipDuplicates drops a
-    // few — mirrors the worker's `(inserted + j)` convention.
-    let positioned = 0;
-
-    const insertBatch = async (
-      rows: Array<{ id: string; email: string; listName?: string | null }>,
-    ) => {
-      if (rows.length === 0) return;
-      const res = await this.prisma.campaignRecipient.createMany({
-        data: rows.map((c, j) => {
-          const s = rotate ? senders[(positioned + j) % senders.length] : null;
-          return {
-            accountId,
-            campaignId,
-            contactId: c.id,
-            email: c.email,
-            status: 'pending' as const,
-            listName: c.listName ?? null,
-            fromEmail: s?.fromEmail ?? null,
-            fromName: s?.fromName ?? null,
-            emailChannelId: s?.emailChannelId ?? primaryChannel,
-          };
-        }),
-        skipDuplicates: true,
-      });
-      positioned += rows.length;
-      inserted += res.count;
-    };
-
-    // 1. Lists — cursor-stream subscribed contacts so memory stays at one
-    //    batch regardless of list size. Capture each contact's target list name
-    //    for {{list_name}} — when a contact is in several target lists we take
-    //    the FIRST one (by selection order; listIds is ordered by
-    //    CampaignList.position). Frozen at materialisation, no send-time join.
-    if (listIds.length > 0) {
-      const listNameById = new Map(
-        (
-          await this.prisma.contactList.findMany({
-            where: { id: { in: listIds } },
-            select: { id: true, name: true },
-          })
-        ).map((l) => [l.id, l.name]),
-      );
-      let cursor: string | undefined;
-      for (;;) {
-        const rows = await this.prisma.contact.findMany({
-          where: {
-            accountId,
-            subscriptionStatus: 'subscribed',
-            memberships: { some: { listId: { in: listIds } } },
-          },
-          select: {
-            id: true,
-            email: true,
-            memberships: {
-              where: { listId: { in: listIds } },
-              select: { listId: true },
-            },
-          },
-          take: BATCH,
-          ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-          orderBy: { id: 'asc' },
-        });
-        if (rows.length === 0) break;
-        await insertBatch(
-          rows.map((c) => {
-            const member = new Set(c.memberships.map((m) => m.listId));
-            const firstListId = listIds.find((id) => member.has(id));
-            return {
-              id: c.id,
-              email: c.email,
-              listName: firstListId ? (listNameById.get(firstListId) ?? null) : null,
-            };
-          }),
-        );
-        if (rows.length < BATCH) break;
-        cursor = rows[rows.length - 1].id;
-      }
-    }
-
-    // 2. Segments — resolve each to an id set, then chunk-fetch subscribed
-    //    contacts (segments don't apply the subscription filter implicitly).
-    //    skipDuplicates dedupes against lists / other segments.
-    for (const segmentId of segmentIds) {
-      const seg = await this.prisma.segment.findFirst({
-        where: { accountId, id: segmentId },
-        select: { definition: true },
-      });
-      if (!seg) continue;
-      const ids = await this.segments.resolveContactIds(accountId, seg.definition as never);
-      if (ids.size === 0) continue;
-      const arr = [...ids];
-      for (let i = 0; i < arr.length; i += BATCH) {
-        const rows = await this.prisma.contact.findMany({
-          where: {
-            accountId,
-            subscriptionStatus: 'subscribed',
-            id: { in: arr.slice(i, i + BATCH) },
-          },
-          select: { id: true, email: true },
-        });
-        await insertBatch(rows);
-      }
-    }
-
-    return inserted;
   }
 
   async pause(accountId: string, id: string) {
