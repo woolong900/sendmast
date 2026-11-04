@@ -25,13 +25,17 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { firstZodError } from '../../common/zod-error';
 import { IntegrationsService } from './integrations.service';
+import { SiteTrackingService } from '../tracking/site-tracking.service';
 
 @ApiTags('integrations')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('integrations/shopyy')
 export class IntegrationsController {
-  constructor(private readonly svc: IntegrationsService) {}
+  constructor(
+    private readonly svc: IntegrationsService,
+    private readonly siteTracking: SiteTrackingService,
+  ) {}
 
   /** List this tenant's shopyy connections + whether the feature is configured. */
   @Get()
@@ -66,6 +70,15 @@ export class IntegrationsController {
     @Param('id', new ParseUUIDPipe()) id: string,
   ) {
     return this.svc.listCoupons(user.accountId, id);
+  }
+
+  /** Storefront behaviour script: embed snippet + last-seen status. */
+  @Get(':id/site-tracking')
+  siteTrackingStatus(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.siteTracking.getStatus(user.accountId, id);
   }
 
   @Get(':id/health')

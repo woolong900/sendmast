@@ -92,4 +92,38 @@ export const DDL_STATEMENTS: string[] = [
    ENGINE = MergeTree
    PARTITION BY toYYYYMM(click_time)
    ORDER BY (account_id, campaign_id, contact_id, click_time)`,
+
+  // Storefront behaviour of visitors who arrived from one of our emails
+  // (landing-page script + server-side order webhooks). Identity is the
+  // `sm_mid` stamped on every email link, resolved to the contact at ingest,
+  // so segment queries filter by (account_id, event_type, event_time) and
+  // GROUP BY contact_id without touching PG.
+  //   source_type: 'campaign' | 'flow'  — which kind of send brought them
+  //   source_id:   campaign id or automation id (ZERO_UUID if unknown)
+  //   origin:      'script' (browser) | 'webhook' (server-side order event)
+  `CREATE TABLE IF NOT EXISTS sendmast.site_events (
+      account_id     UUID,
+      shop_id        UUID,
+      contact_id     UUID,
+      recipient_id   UUID,
+      source_type    LowCardinality(String),
+      source_id      UUID,
+      event_type     LowCardinality(String),
+      event_time     DateTime64(3, 'UTC'),
+      session_id     String DEFAULT '',
+      page_url       String DEFAULT '' CODEC(ZSTD(3)),
+      product_id     String DEFAULT '',
+      value          Nullable(Decimal(18, 2)),
+      currency       LowCardinality(String) DEFAULT '',
+      origin         LowCardinality(String) DEFAULT 'script',
+      ip             Nullable(IPv6),
+      user_agent     Nullable(String) CODEC(ZSTD(3)),
+      raw_meta       Nullable(String) CODEC(ZSTD(3)),
+      ingested_at    DateTime DEFAULT now()
+   )
+   ENGINE = MergeTree
+   PARTITION BY toYYYYMM(event_time)
+   ORDER BY (account_id, event_type, event_time, contact_id)
+   TTL toDateTime(event_time) + INTERVAL 24 MONTH DELETE
+   SETTINGS index_granularity = 8192`,
 ];

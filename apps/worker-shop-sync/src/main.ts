@@ -8,6 +8,7 @@ import {
   insertAttributions,
   insertOrders,
   toClickHouseDateTime,
+  insertSiteEvents,
 } from '@sendmast/clickhouse';
 import { QUEUE_NAMES, type ShopEventJob, type ShopSyncJob } from '@sendmast/shared';
 import {
@@ -330,6 +331,84 @@ async function handleCustomerCreated(job: ShopEventJob): Promise<void> {
   });
 }
 
+/**
+ * Write a server-side `purchase` row into site_events for an email-attributed
+ * order. Skipped when the landing-page script already reported a purchase for
+ * the same contact around the order time (thank-you page detection), so the
+ * 完成支付 count isn't doubled.
+ */
+async function recordWebhookPurchase(o: {
+  accountId: string;
+  shopId: string;
+  orderContactId: string;
+  campaign: { recipientId: string; campaignId: string; contactId: string } | null;
+  flow: { automationId: string; sendId: string } | null;
+  externalOrderId: string;
+  orderNo: string | null;
+  value: number;
+  currency: string;
+  orderTime: Date;
+  landingPage: string | null;
+}): Promise<void> {
+  let contactId = o.orderContactId;
+  let recipientId: string;
+  let sourceType: 'campaign' | 'flow';
+  let sourceId: string;
+  if (o.campaign) {
+    contactId = o.campaign.contactId;
+    recipientId = o.campaign.recipientId;
+    sourceType = 'campaign';
+    sourceId = o.campaign.campaignId;
+  } else if (o.flow) {
+    const send = await prisma.shopAutomationSend.findUnique({
+      where: { id: o.flow.sendId },
+      select: { contactId: true },
+    });
+    contactId = send?.contactId ?? o.orderContactId;
+    recipientId = o.flow.sendId;
+    sourceType = 'flow';
+    sourceId = o.flow.automationId;
+  } else {
+    return;
+  }
+
+  const existing = (await ch
+    .query({
+      query: `SELECT count() AS n
+              FROM sendmast.site_events
+              WHERE account_id = {acc:UUID}
+                AND event_type = 'purchase'
+                AND contact_id = {cid:UUID}
+                AND event_time >= parseDateTime64BestEffort({from:String}, 3)`,
+      query_params: {
+        acc: o.accountId,
+        cid: contactId,
+        from: toClickHouseDateTime(new Date(o.orderTime.getTime() - 2 * 3600_000)),
+      },
+      format: 'JSONEachRow',
+    })
+    .then((r) => r.json())) as Array<{ n: string | number }>;
+  if (Number(existing[0]?.n ?? 0) > 0) return;
+
+  await insertSiteEvents(ch, [
+    {
+      account_id: o.accountId,
+      shop_id: o.shopId,
+      contact_id: contactId,
+      recipient_id: recipientId,
+      source_type: sourceType,
+      source_id: sourceId,
+      event_type: 'purchase',
+      event_time: toClickHouseDateTime(o.orderTime),
+      page_url: o.landingPage ?? '',
+      value: o.value,
+      currency: o.currency,
+      origin: 'webhook',
+      raw_meta: JSON.stringify({ order: o.orderNo ?? o.externalOrderId }),
+    },
+  ]);
+}
+
 async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
   const order = mapOrder(job.payload);
   if (!order) {
@@ -482,6 +561,27 @@ async function handleOrder(job: ShopEventJob, shipped: boolean): Promise<void> {
       attribution_model: saved.attributionModel ?? '',
     },
   ]).catch((e) => console.error('[shop-sync] CH orders insert failed:', e));
+
+  // Storefront behaviour: a paid order that came through one of our emails
+  // (hard sm_mid / clicked recovery email) is the authoritative 完成支付 event
+  // for segments. Only on the FIRST paid transition so webhook retries and the
+  // later shipped event don't add duplicates.
+  const firstPaid = !shipped && (!existingOrder || existingOrder.status === 'pending');
+  if (firstPaid && (campaignHard || flowAttr)) {
+    await recordWebhookPurchase({
+      accountId: job.accountId,
+      shopId: job.connectionId,
+      orderContactId: contactId,
+      campaign: campaignHard && mid ? { recipientId: mid, ...campaignHard } : null,
+      flow: flowAttr,
+      externalOrderId: order.externalOrderId,
+      orderNo: order.orderNo ?? null,
+      value: order.value,
+      currency: order.currency,
+      orderTime: order.orderTime,
+      landingPage: order.landingPage ?? null,
+    }).catch((e) => console.error('[shop-sync] site_events purchase insert failed:', e));
+  }
 
   // The attributions side-table records the click→order path, so it only
   // applies to last-click (hard sm_mid attribution has no click event).

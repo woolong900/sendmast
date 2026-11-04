@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import type { SegmentDefinition, SegmentRule } from '@sendmast/shared';
+import type { SegmentDefinition, SegmentRule, SiteEventType } from '@sendmast/shared';
 
 /**
  * Pure function that turns a SegmentDefinition into the inputs needed to
@@ -31,10 +31,23 @@ export interface OrderConstraint {
   to: Date;
 }
 
+/**
+ * Storefront behaviour (ClickHouse site_events). 'has' = performed `event` at
+ * least `minCount` times since `since`; 'notHas' = fewer than that.
+ */
+export interface SiteEventConstraint {
+  mode: 'has' | 'notHas';
+  event: SiteEventType;
+  since: Date;
+  minCount: number;
+  campaignId?: string;
+}
+
 export interface CompiledSegment {
   pgWhere: Prisma.ContactWhereInput;
   eventConstraints: EventConstraint[];
   orderConstraints: OrderConstraint[];
+  siteEventConstraints: SiteEventConstraint[];
 }
 
 /**
@@ -48,15 +61,17 @@ export function compileSegment(def: SegmentDefinition): CompiledSegment {
   const andClauses: Prisma.ContactWhereInput[] = [];
   const eventConstraints: EventConstraint[] = [];
   const orderConstraints: OrderConstraint[] = [];
+  const siteEventConstraints: SiteEventConstraint[] = [];
 
   for (const rule of def.rules) {
-    compileRule(rule, andClauses, eventConstraints, orderConstraints);
+    compileRule(rule, andClauses, eventConstraints, orderConstraints, siteEventConstraints);
   }
 
   return {
     pgWhere: andClauses.length === 0 ? {} : { AND: andClauses },
     eventConstraints,
     orderConstraints,
+    siteEventConstraints,
   };
 }
 
@@ -65,6 +80,7 @@ function compileRule(
   andClauses: Prisma.ContactWhereInput[],
   eventConstraints: EventConstraint[],
   orderConstraints: OrderConstraint[],
+  siteEventConstraints: SiteEventConstraint[],
 ): void {
   switch (rule.type) {
     case 'attribute': {
@@ -161,6 +177,16 @@ function compileRule(
             : { lastOrderedAt: null },
         );
       }
+      return;
+    }
+    case 'siteEvent': {
+      siteEventConstraints.push({
+        mode: rule.op,
+        event: rule.event,
+        since: new Date(Date.now() - rule.lastDays * 86_400_000),
+        minCount: rule.minCount ?? 1,
+        campaignId: rule.campaignId,
+      });
       return;
     }
     case 'orderMetric': {

@@ -99,6 +99,42 @@ export async function insertEmailEvents(
 }
 
 // ---------------------------------------------------------------------------
+// Storefront (landing-page) behaviour events
+// ---------------------------------------------------------------------------
+
+export interface SiteEventRow {
+  account_id: string;
+  shop_id: string;
+  contact_id: string;
+  recipient_id: string;
+  source_type: 'campaign' | 'flow';
+  source_id: string;
+  event_type: string;
+  event_time: string;
+  session_id?: string;
+  page_url?: string;
+  product_id?: string;
+  value?: number | null;
+  currency?: string;
+  origin?: 'script' | 'webhook';
+  ip?: string | null;
+  user_agent?: string | null;
+  raw_meta?: string | null;
+}
+
+export async function insertSiteEvents(
+  client: ClickHouseClient,
+  rows: SiteEventRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  await client.insert({
+    table: 'sendmast.site_events',
+    values: rows,
+    format: 'JSONEachRow',
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Shop orders / attributions (e-commerce integration)
 // ---------------------------------------------------------------------------
 

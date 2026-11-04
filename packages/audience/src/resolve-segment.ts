@@ -1,6 +1,11 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import type { SegmentDefinition } from '@sendmast/shared';
-import { compileSegment, type EventConstraint, type OrderConstraint } from './segment-evaluator';
+import {
+  compileSegment,
+  type EventConstraint,
+  type OrderConstraint,
+  type SiteEventConstraint,
+} from './segment-evaluator';
 
 /** Minimal ClickHouse surface the resolver needs (JSONEachRow query). */
 export interface AudienceClickHouse {
@@ -48,7 +53,7 @@ export async function resolveSegmentContactIds(
 ): Promise<Set<string>> {
   const { prisma } = ctx;
   const logger = ctx.logger ?? consoleLogger;
-  const { pgWhere, eventConstraints, orderConstraints } = compileSegment(def);
+  const { pgWhere, eventConstraints, orderConstraints, siteEventConstraints } = compileSegment(def);
 
   // Apply event/order constraints first so we can narrow the contact query.
   // For 'has' constraints: intersect the event-derived contactId set.
@@ -65,6 +70,14 @@ export async function resolveSegmentContactIds(
   for (const oc of orderConstraints) {
     const ids = await contactIdsFromOrder(prisma, logger, accountId, oc);
     if (oc.mode === 'has') hasSets.push(ids);
+    else notHasIds.push(...ids);
+  }
+
+  // Site events: the query always returns contacts that reached minCount;
+  // 'notHas' excludes exactly those (→ "fewer than minCount", 1 = never).
+  for (const sc of siteEventConstraints) {
+    const ids = await contactIdsFromSiteEvent(ctx, logger, accountId, sc);
+    if (sc.mode === 'has') hasSets.push(ids);
     else notHasIds.push(...ids);
   }
 
@@ -211,6 +224,50 @@ async function contactIdsFromEvent(
     for (const l of links) contactIds.add(l.contactId);
   }
   return contactIds;
+}
+
+/**
+ * Contacts that performed a storefront event at least `minCount` times since
+ * `since` (ClickHouse site_events; contact ids are resolved at ingest, so no
+ * PG mapping step). A CH failure fails the evaluation instead of degrading to
+ * an empty set: for a 'notHas' rule an empty exclusion set would silently
+ * widen the audience (e.g. mail every "加购未支付" contact including buyers).
+ */
+async function contactIdsFromSiteEvent(
+  ctx: AudienceContext,
+  logger: AudienceLogger,
+  accountId: string,
+  sc: SiteEventConstraint,
+): Promise<Set<string>> {
+  const params: Record<string, unknown> = {
+    acc: accountId,
+    et: sc.event,
+    since: sc.since.toISOString(),
+    n: sc.minCount,
+  };
+  let extraFilter = '';
+  if (sc.campaignId) {
+    extraFilter = "AND source_type = 'campaign' AND source_id = {cid:UUID}";
+    params.cid = sc.campaignId;
+  }
+  const rows = await ctx.ch.query<{ contact_id: string }>(
+    `SELECT toString(contact_id) AS contact_id
+     FROM sendmast.site_events
+     WHERE account_id = {acc:UUID}
+       AND event_type = {et:String}
+       AND event_time >= parseDateTime64BestEffort({since:String}, 3)
+       ${extraFilter}
+     GROUP BY contact_id
+     HAVING count() >= {n:UInt32}
+     LIMIT ${DERIVED_CONSTRAINT_HARD_CAP + 1}`,
+    params,
+  );
+  if (rows.length > DERIVED_CONSTRAINT_HARD_CAP) {
+    logger.warn(
+      `site event constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} contacts; truncating`,
+    );
+  }
+  return new Set(rows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.contact_id));
 }
 
 /** Resolve contacts with a paid/shipped order inside a fixed date range. */

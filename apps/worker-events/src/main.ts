@@ -6,12 +6,15 @@ import {
   buildClickHouseClient,
   findArchivedRecipientById,
   insertEmailEvents,
+  insertSiteEvents,
+  toClickHouseDateTime,
+  type SiteEventRow,
   ZERO_UUID,
   type BounceKind,
   type EmailEventRow,
   type EmailEventType,
 } from '@sendmast/clickhouse';
-import { QUEUE_NAMES } from '@sendmast/shared';
+import { QUEUE_NAMES, type SiteEventsJobData } from '@sendmast/shared';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const FLUSH_BATCH = Number(process.env.EVENTS_FLUSH_BATCH ?? '500');
@@ -310,11 +313,132 @@ new Worker<EventJobData>(QUEUE_NAMES.EVENTS_INGEST, runEventJob, {
   concurrency: 16,
 });
 
+// ============================================================================
+// Storefront (landing-page) behaviour events → sendmast.site_events
+// ============================================================================
+
+let siteBuffer: SiteEventRow[] = [];
+let siteFlushTimer: NodeJS.Timeout | null = null;
+
+async function flushSite(): Promise<void> {
+  if (siteBuffer.length === 0) return;
+  const batch = siteBuffer;
+  siteBuffer = [];
+  try {
+    await insertSiteEvents(ch, batch);
+  } catch (err) {
+    console.error('ClickHouse site_events insert failed; re-queueing batch:', err);
+    siteBuffer = batch.concat(siteBuffer);
+  }
+}
+
+function scheduleSiteFlush() {
+  if (siteFlushTimer) return;
+  siteFlushTimer = setTimeout(async () => {
+    siteFlushTimer = null;
+    await flushSite();
+  }, FLUSH_INTERVAL_MS);
+}
+
+interface SiteIdentity {
+  accountId: string;
+  contactId: string;
+  recipientId: string;
+  sourceType: 'campaign' | 'flow';
+  sourceId: string;
+}
+
+// sm_mid → identity. A visitor fires many events per session; the mapping
+// never changes, so a small process cache saves most PG lookups.
+const midCache = new Map<string, { v: SiteIdentity | null; at: number }>();
+const MID_CACHE_TTL_MS = 10 * 60_000;
+const MID_CACHE_MAX = 20_000;
+
+/**
+ * Resolve an `sm_mid` the same way order attribution does: the landing URL
+ * doesn't say whether it is a campaign recipient or a flow send, so try both.
+ */
+async function resolveMid(mid: string): Promise<SiteIdentity | null> {
+  const now = Date.now();
+  const cached = midCache.get(mid);
+  if (cached && now - cached.at < MID_CACHE_TTL_MS) return cached.v;
+
+  let v: SiteIdentity | null = null;
+  const rec = await prisma.campaignRecipient.findUnique({
+    where: { id: mid },
+    select: { id: true, accountId: true, contactId: true, campaignId: true },
+  });
+  if (rec) {
+    v = {
+      accountId: rec.accountId,
+      contactId: rec.contactId,
+      recipientId: rec.id,
+      sourceType: 'campaign',
+      sourceId: rec.campaignId,
+    };
+  } else {
+    const flow = await prisma.shopAutomationSend.findUnique({
+      where: { id: mid },
+      select: { id: true, accountId: true, contactId: true, automationId: true },
+    });
+    if (flow?.contactId) {
+      v = {
+        accountId: flow.accountId,
+        contactId: flow.contactId,
+        recipientId: flow.id,
+        sourceType: 'flow',
+        sourceId: flow.automationId,
+      };
+    }
+  }
+  if (midCache.size >= MID_CACHE_MAX) midCache.clear();
+  midCache.set(mid, { v, at: now });
+  return v;
+}
+
+async function runSiteEventsJob(job: Job<SiteEventsJobData>) {
+  const data = job.data;
+  const who = await resolveMid(data.mid);
+  // Unknown id, or an id from ANOTHER tenant than the store's site key —
+  // never attribute cross-tenant (forged / mis-pasted ids).
+  if (!who || who.accountId !== data.accountId) return;
+
+  for (const e of data.events) {
+    siteBuffer.push({
+      account_id: who.accountId,
+      shop_id: data.shopId,
+      contact_id: who.contactId,
+      recipient_id: who.recipientId,
+      source_type: who.sourceType,
+      source_id: who.sourceId,
+      event_type: e.t,
+      event_time: toClickHouseDateTime(e.ts ?? data.receivedAt),
+      session_id: data.sid ?? '',
+      page_url: e.u ?? '',
+      product_id: e.p ?? '',
+      value: e.v ?? null,
+      currency: e.c ?? '',
+      origin: data.origin,
+      ip: data.ip ?? null,
+      user_agent: data.userAgent ?? null,
+      raw_meta: e.m ? JSON.stringify(e.m) : null,
+    });
+  }
+  if (siteBuffer.length >= FLUSH_BATCH) await flushSite();
+  else scheduleSiteFlush();
+}
+
+new Worker<SiteEventsJobData>(QUEUE_NAMES.SITE_EVENTS_INGEST, runSiteEventsJob, {
+  connection,
+  concurrency: 16,
+});
+
 console.log('worker-events started');
 
 async function shutdown() {
   console.log('Shutting down worker-events...');
   await flush();
+  await flushSite();
   await ch.close();
   await connection.quit();
   await prisma.$disconnect();

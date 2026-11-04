@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SubscriptionStatusSchema } from './contact.js';
+import { SiteEventTypeSchema } from './site-events.js';
 
 /**
  * Dynamic-audience definition. A flat list of rules joined by a single
@@ -133,6 +134,23 @@ const OrderAmountRule = z.object({
   value: z.number().min(0).max(1_000_000_000_000),
 });
 
+/**
+ * Storefront behaviour after an email click (site_events in ClickHouse).
+ *   has    → did `event` at least `minCount` times in the last `lastDays` days
+ *   notHas → did it fewer than `minCount` times (minCount=1 → never)
+ * Funnels ("加购但未支付") are two rules AND-ed together.
+ */
+const SiteEventRule = z.object({
+  type: z.literal('siteEvent'),
+  event: SiteEventTypeSchema,
+  op: z.enum(['has', 'notHas']),
+  lastDays: z.number().int().min(1).max(3650),
+  /** Minimum occurrences; absent = 1. */
+  minCount: z.number().int().min(1).max(100_000).optional(),
+  /** Only count visits that came from this campaign's emails. */
+  campaignId: Uuid.optional(),
+});
+
 export const SegmentRuleSchema = z.union([
   AttributeRuleScalar,
   AttributeRuleList,
@@ -145,6 +163,7 @@ export const SegmentRuleSchema = z.union([
   OrderRule,
   OrderCountRule,
   OrderAmountRule,
+  SiteEventRule,
 ]);
 export type SegmentRule = z.infer<typeof SegmentRuleSchema>;
 

@@ -13,11 +13,13 @@ import {
 } from '@/components/ui/date-range-picker';
 import { api, apiErrMessage } from '@/lib/api';
 import { formatNumber } from '@/lib/utils';
-import type {
-  SegmentDefinition,
-  SegmentPreviewResult,
-  SegmentRule,
-  SegmentView,
+import {
+  SITE_EVENT_LABELS,
+  SITE_EVENT_TYPES,
+  type SegmentDefinition,
+  type SegmentPreviewResult,
+  type SegmentRule,
+  type SegmentView,
 } from '@sendmast/shared';
 
 // ---------------------------------------------------------------------------
@@ -42,6 +44,7 @@ const RULE_TYPE_LABELS: Record<SegmentRule['type'], string> = {
   event: '行为',
   order: '下单',
   orderMetric: '订单累计',
+  siteEvent: '店铺行为',
 };
 
 const ATTRIBUTE_FIELD_LABELS: Record<string, string> = {
@@ -90,6 +93,7 @@ const ADDABLE_RULE_TYPES: Array<{
     label: '累计订单金额',
     create: () => ({ type: 'orderMetric', metric: 'amount', op: 'gte', value: 100 }),
   },
+  { key: 'siteEvent', label: '店铺行为(邮件引流后)', create: () => makeDefaultRule('siteEvent') },
 ];
 
 function makeDefaultRule(type: SegmentRule['type']): SegmentRule {
@@ -110,6 +114,8 @@ function makeDefaultRule(type: SegmentRule['type']): SegmentRule {
       return { type: 'order', op: 'has' };
     case 'orderMetric':
       return { type: 'orderMetric', metric: 'count', op: 'gte', value: 1 };
+    case 'siteEvent':
+      return { type: 'siteEvent', event: 'add_to_cart', op: 'has', lastDays: 30 };
   }
 }
 
@@ -366,6 +372,9 @@ function RuleCard({
       {rule.type === 'orderMetric' && (
         <OrderMetricRuleEditor rule={rule} onChange={onChange} />
       )}
+      {rule.type === 'siteEvent' && (
+        <SiteEventRuleEditor rule={rule} onChange={onChange} campaigns={campaigns} />
+      )}
     </div>
   );
 }
@@ -617,6 +626,92 @@ function EventRuleEditor({
           />
           <span className="text-sm text-muted-foreground">天</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SiteEventRuleEditor({
+  rule,
+  onChange,
+  campaigns,
+}: {
+  rule: Extract<SegmentRule, { type: 'siteEvent' }>;
+  onChange: (r: SegmentRule) => void;
+  campaigns: CampaignOption[];
+}) {
+  const minCount = rule.minCount ?? 1;
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div>
+        <label className="text-xs text-muted-foreground">行为</label>
+        <FilterSelect
+          className="mt-1"
+          value={rule.event}
+          onChange={(v) => onChange({ ...rule, event: v as typeof rule.event })}
+          options={SITE_EVENT_TYPES.map((t) => ({ value: t, label: SITE_EVENT_LABELS[t] }))}
+        />
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">操作</label>
+        <FilterSelect
+          className="mt-1"
+          value={rule.op}
+          onChange={(v) => onChange({ ...rule, op: v as typeof rule.op })}
+          options={[
+            { value: 'has', label: '做过' },
+            { value: 'notHas', label: '没做过' },
+          ]}
+        />
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">最近 N 天内</label>
+        <div className="mt-1 flex items-center gap-2">
+          <Input
+            type="number"
+            min={1}
+            max={3650}
+            value={rule.lastDays}
+            onChange={(e) => onChange({ ...rule, lastDays: Number(e.target.value) || 1 })}
+            className="w-24"
+          />
+          <span className="text-sm text-muted-foreground">天</span>
+        </div>
+      </div>
+      <div>
+        <label className="text-xs text-muted-foreground">
+          {rule.op === 'has' ? '至少次数' : '少于次数'}
+        </label>
+        <div className="mt-1 flex items-center gap-2">
+          <Input
+            type="number"
+            min={1}
+            max={100000}
+            value={minCount}
+            onChange={(e) => {
+              const n = Math.max(1, Math.floor(Number(e.target.value) || 1));
+              onChange({ ...rule, minCount: n === 1 ? undefined : n });
+            }}
+            className="w-24"
+          />
+          <span className="text-sm text-muted-foreground">次</span>
+        </div>
+      </div>
+      <div className="col-span-2">
+        <label className="text-xs text-muted-foreground">来源活动(留空 = 任何邮件)</label>
+        <FilterSelect
+          className="mt-1"
+          value={rule.campaignId ?? ''}
+          onChange={(v) => onChange({ ...rule, campaignId: v === '' ? undefined : v })}
+          options={[
+            { value: '', label: '— 任何邮件(活动或自动化) —' },
+            ...campaigns.map((c) => ({ value: c.id, label: c.name })),
+          ]}
+        />
+      </div>
+      <div className="col-span-2 text-xs text-muted-foreground">
+        仅统计从邮件点击进入店铺的访客(需在「店铺连接」安装追踪代码)。漏斗可用多条规则组合,
+        例如「加入购物车 · 做过」+「完成支付 · 没做过」= 加购未支付。
       </div>
     </div>
   );
@@ -876,5 +971,7 @@ function isRuleComplete(r: SegmentRule): boolean {
       return r.lastDays === undefined || r.lastDays > 0;
     case 'orderMetric':
       return Number.isFinite(r.value) && r.value >= 0;
+    case 'siteEvent':
+      return r.lastDays > 0 && (r.minCount === undefined || r.minCount >= 1);
   }
 }

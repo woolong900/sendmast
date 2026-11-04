@@ -4,6 +4,8 @@ export const QUEUE_NAMES = {
   SEND_EMAIL: 'send-email',
   SEND_TICK: 'send-tick',
   EVENTS_INGEST: 'events-ingest',
+  /** Storefront (landing-page) behaviour events from the site script / order webhooks. */
+  SITE_EVENTS_INGEST: 'site-events-ingest',
   /** Inbound shopyy webhook events (customer registration, orders, checkout abandonment). */
   SHOP_EVENTS: 'shop-events',
   /** Initial full store sync after bind (customers → list, paid orders). */

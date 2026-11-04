@@ -1187,6 +1187,16 @@ model ShopConnection {
   /// Auto-created "店铺客户" list this store's customers are funnelled into
   /// (customers/create + order webhooks + initial full sync).
   customerListId  String?              @map("customer_list_id") @db.Uuid
+  /// Public key embedded in the storefront tracking script (`/t/s/sdk.js?k=`).
+  /// Identifies the store/tenant for landing-page behaviour events. Not a
+  /// secret (it is visible in page source) — it only scopes which tenant an
+  /// event may be attributed to. Generated lazily on first install.
+  siteTrackingKey        String?   @unique @map("site_tracking_key")
+  /// Last time a storefront event from this store was accepted (throttled
+  /// write, ~5 min granularity). Drives the "已安装/未检测到" status in the UI.
+  siteTrackingLastSeenAt DateTime? @map("site_tracking_last_seen_at")
+  /// How the script was installed: 'api' (Shopyy OpenAPI) | 'manual'.
+  siteTrackingInstall    String?   @map("site_tracking_install")
   createdAt       DateTime             @default(now()) @map("created_at")
   updatedAt       DateTime             @updatedAt @map("updated_at")
 

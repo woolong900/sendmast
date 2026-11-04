@@ -4,7 +4,7 @@ import { ValidationPipe, Logger, RequestMethod } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { json, urlencoded } from 'express';
+import { json, text, urlencoded } from 'express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
@@ -41,6 +41,11 @@ async function bootstrap() {
   // JSON.stringify(parsed) would
   // shuffle whitespace/key-order and break the hash. Same trick used by
   // the Stripe / Shopify SDKs.
+  // Storefront beacons arrive as text/plain (sendBeacon / no-cors fetch, so
+  // browsers skip the CORS preflight). Parse them as raw text before the
+  // JSON parser; SiteTrackingService does its own JSON.parse + validation.
+  app.use('/t/s/e', text({ type: () => true, limit: '64kb' }));
+
   app.use(
     json({
       limit: '10mb',

@@ -10,6 +10,8 @@ import {
   Wrench,
   Save,
   ExternalLink,
+  Copy,
+  Activity,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,7 +22,11 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { Link } from 'react-router-dom';
 import { api, apiErrMessage } from '@/lib/api';
-import type { ShopConnectionHealthView, ShopConnectionView } from '@sendmast/shared';
+import type {
+  ShopConnectionHealthView,
+  ShopConnectionView,
+  SiteTrackingStatus,
+} from '@sendmast/shared';
 
 interface ShopConnectionsResponse {
   configured: boolean;
@@ -271,6 +277,7 @@ function ConnectionCard({
             </Button>
           </div>
         </div>
+        {connection.status === 'active' && <SiteTrackingSection connectionId={connection.id} />}
         {h && (
           <div
             className={`flex items-center gap-2 border-t pt-3 text-xs ${
@@ -286,6 +293,86 @@ function ConnectionCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** "Recently active" window for the storefront script status badge. */
+const SITE_TRACKING_ACTIVE_MS = 7 * 86_400_000;
+
+function SiteTrackingSection({ connectionId }: { connectionId: string }) {
+  const toast = useToast();
+  const status = useQuery<SiteTrackingStatus>({
+    queryKey: ['shop-site-tracking', connectionId],
+    queryFn: async () =>
+      (await api.get(`/api/integrations/shopyy/${connectionId}/site-tracking`)).data,
+    retry: false,
+  });
+  const s = status.data;
+  const lastSeen = s?.lastSeenAt ? new Date(s.lastSeenAt) : null;
+  const active = !!lastSeen && Date.now() - lastSeen.getTime() < SITE_TRACKING_ACTIVE_MS;
+
+  const copy = async () => {
+    if (!s) return;
+    try {
+      await navigator.clipboard.writeText(s.snippet);
+      toast('已复制追踪代码', 'success');
+    } catch {
+      toast('复制失败,请手动选中复制', 'error');
+    }
+  };
+
+  return (
+    <div className="border-t pt-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <Activity className="size-4" />
+            店铺行为追踪
+            {s && (
+              <Badge variant={active ? 'success' : 'warning'}>
+                {active ? '已收到数据' : '未检测到数据'}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            记录从邮件点击进入店铺的访客后续行为(浏览首页/详情页、加购、结账、支付),
+            可在动态分群「店铺行为」规则中筛选。
+            {lastSeen && ` 最近一次上报:${lastSeen.toLocaleString('zh-CN')}`}
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => status.refetch()}
+          disabled={status.isFetching}
+        >
+          <RefreshCw className={`mr-1 size-4 ${status.isFetching ? 'animate-spin' : ''}`} />
+          刷新状态
+        </Button>
+      </div>
+      {status.isLoading && <Skeleton className="h-16 w-full" />}
+      {status.isError && (
+        <div className="text-xs text-destructive">{apiErrMessage(status.error)}</div>
+      )}
+      {s && (
+        <>
+          <div className="relative">
+            <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 pr-20 text-xs">
+              {s.snippet}
+            </pre>
+            <Button size="sm" variant="outline" className="absolute right-2 top-2" onClick={copy}>
+              <Copy className="mr-1 size-3.5" />
+              复制
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {s.apiInstallSupported
+              ? '已通过 Shopyy 接口自动安装;如未生效,也可手动粘贴上方代码。'
+              : '请将上方代码粘贴到 Shopyy 后台的全局自定义代码(放在 <head> 中,并勾选应用到结账页),保存后从测试邮件点进店铺即可看到数据。'}
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 

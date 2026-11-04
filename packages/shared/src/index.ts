@@ -14,4 +14,5 @@ export * from './schemas/tracking-domain.js';
 export * from './schemas/referral.js';
 export * from './schemas/shopyy.js';
 export * from './schemas/queue.js';
+export * from './schemas/site-events.js';
 export * from './queue-names.js';
