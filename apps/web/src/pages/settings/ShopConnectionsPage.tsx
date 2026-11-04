@@ -307,6 +307,19 @@ function SiteTrackingSection({ connectionId }: { connectionId: string }) {
       (await api.get(`/api/integrations/shopyy/${connectionId}/site-tracking`)).data,
     retry: false,
   });
+  const install = useMutation({
+    mutationFn: async () =>
+      (
+        await api.post<SiteTrackingStatus>(
+          `/api/integrations/shopyy/${connectionId}/site-tracking/install`,
+        )
+      ).data,
+    onSuccess: () => {
+      status.refetch();
+      toast('已安装到店铺,从测试邮件点进店铺即可验证', 'success');
+    },
+    onError: (err) => toast(apiErrMessage(err), 'error'),
+  });
   const s = status.data;
   const lastSeen = s?.lastSeenAt ? new Date(s.lastSeenAt) : null;
   const active = !!lastSeen && Date.now() - lastSeen.getTime() < SITE_TRACKING_ACTIVE_MS;
@@ -340,15 +353,23 @@ function SiteTrackingSection({ connectionId }: { connectionId: string }) {
             {lastSeen && ` 最近一次上报:${lastSeen.toLocaleString('zh-CN')}`}
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => status.refetch()}
-          disabled={status.isFetching}
-        >
-          <RefreshCw className={`mr-1 size-4 ${status.isFetching ? 'animate-spin' : ''}`} />
-          刷新状态
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {s?.apiInstallSupported && (
+            <Button size="sm" onClick={() => install.mutate()} disabled={install.isPending}>
+              <Wrench className="mr-1 size-4" />
+              {install.isPending ? '安装中...' : s.install === 'api' ? '重新安装' : '自动安装到店铺'}
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => status.refetch()}
+            disabled={status.isFetching}
+          >
+            <RefreshCw className={`mr-1 size-4 ${status.isFetching ? 'animate-spin' : ''}`} />
+            刷新状态
+          </Button>
+        </div>
       </div>
       {status.isLoading && <Skeleton className="h-16 w-full" />}
       {status.isError && (
@@ -366,9 +387,9 @@ function SiteTrackingSection({ connectionId }: { connectionId: string }) {
             </Button>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            {s.apiInstallSupported
-              ? '已通过 Shopyy 接口自动安装;如未生效,也可手动粘贴上方代码。'
-              : '请将上方代码粘贴到 Shopyy 后台的全局自定义代码(放在 <head> 中,并勾选应用到结账页),保存后从测试邮件点进店铺即可看到数据。'}
+            {s.install === 'api'
+              ? '已通过 Shopyy 自定义脚本接口安装(全站 + 结账页)。如未收到数据,可点「重新安装」,或手动粘贴上方代码。'
+              : '点击「自动安装到店铺」,或将上方代码粘贴到 Shopyy 后台的自定义脚本(全站加载,并勾选结账页)。安装后从测试邮件点进店铺即可看到数据。'}
           </p>
         </>
       )}

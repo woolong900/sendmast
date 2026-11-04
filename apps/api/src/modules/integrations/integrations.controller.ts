@@ -81,6 +81,15 @@ export class IntegrationsController {
     return this.siteTracking.getStatus(user.accountId, id);
   }
 
+  /** (Re-)install the storefront script through the Shopyy custom-script API. */
+  @Post(':id/site-tracking/install')
+  installSiteTracking(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.siteTracking.installViaApi(user.accountId, id);
+  }
+
   @Get(':id/health')
   health(@CurrentUser() user: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.checkConnectionHealth(user.accountId, id);

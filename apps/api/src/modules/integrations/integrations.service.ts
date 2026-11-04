@@ -41,6 +41,7 @@ import {
 } from '@sendmast/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueueService } from '../../common/queue/queue.service';
+import { SiteTrackingService } from '../tracking/site-tracking.service';
 
 /**
  * Webhook events we subscribe the store to. `eventId` is the shopyy event id
@@ -190,6 +191,7 @@ export class IntegrationsService {
     private readonly config: ConfigService,
     private readonly ch: ClickHouseService,
     private readonly queue: QueueService,
+    private readonly siteTracking: SiteTrackingService,
   ) {}
 
   /** Whether the partnership app secret is present (gates the connect flow). */
@@ -357,6 +359,19 @@ export class IntegrationsService {
     // merchant to visit the automation page would create a window where early
     // store events have no flow configuration to resolve.
     await this.provisionAutomations(accountId, conn.id);
+
+    // Storefront behaviour tracking: inject our loader through the custom
+    // script API. Best-effort — a missing script permission must not fail the
+    // bind; the merchant can still install it manually from the settings page.
+    try {
+      await this.siteTracking.installViaApi(accountId, conn.id, { onlyIfNotInstalled: true });
+    } catch (e) {
+      this.logger.warn(
+        `storefront script auto-install failed for store ${externalStoreId}: ${
+          e instanceof Error ? e.message : e
+        }`,
+      );
+    }
 
     // Kick off the initial full sync in the background: pull every store
     // customer into the list, and every paid order into shop_orders (used to
@@ -1116,12 +1131,16 @@ export class IntegrationsService {
     });
     if (!conn) throw new NotFoundException('店铺连接不存在');
     await this.uninstallWebhooks(conn);
+    // Turn our storefront loader off while the token is still valid.
+    await this.siteTracking.disableViaApi(conn.id);
     // Soft-revoke: keep the row, orders, and automation configuration for
     // history/reconnect, but disable every automation so queued jobs also stop.
     await this.prisma.$transaction([
       this.prisma.shopConnection.update({
         where: { id },
-        data: { status: 'revoked', webhookIds: [] },
+        // siteTrackingInstall → null so a re-bind re-enables the (disabled)
+        // loader via its stored script id instead of skipping it.
+        data: { status: 'revoked', webhookIds: [], siteTrackingInstall: null },
       }),
       this.prisma.shopAutomation.updateMany({
         where: { shopConnectionId: id, enabled: true },

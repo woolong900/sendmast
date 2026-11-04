@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ShopyyAuthError, ShopyyClient, ShopyyError } from '@sendmast/shopyy';
 import { ConfigService } from '@nestjs/config';
 import {
   QUEUE_NAMES,
@@ -22,6 +23,8 @@ const KEY_CACHE_MAX = 5000;
 const LAST_SEEN_WRITE_INTERVAL_MS = 5 * 60_000;
 /** Client clocks are untrusted: accept event timestamps within this window. */
 const MAX_CLOCK_SKEW_MS = 10 * 60_000;
+/** Name of our loader in the store's custom scripts (also the dedupe key). */
+export const SHOPYY_SCRIPT_NAME = 'sendmast_site_tracking';
 
 /**
  * Storefront (landing-page) behaviour tracking: serves the embed script,
@@ -143,39 +146,177 @@ export class SiteTrackingService {
       where: { id: connectionId, accountId },
       select: {
         id: true,
-        siteTrackingKey: true,
         siteTrackingInstall: true,
         siteTrackingLastSeenAt: true,
       },
     });
     if (!conn) throw new NotFoundException('店铺连接不存在');
-    let key = conn.siteTrackingKey;
-    if (!key) {
-      key = `sk_${randomBytes(18).toString('base64url')}`;
-      // Conditional write so two concurrent first loads can't hand out
-      // different keys; the loser re-reads the winner's key.
-      const res = await this.prisma.shopConnection.updateMany({
-        where: { id: conn.id, siteTrackingKey: null },
-        data: { siteTrackingKey: key, siteTrackingInstall: 'manual' },
-      });
-      if (res.count === 0) {
-        const again = await this.prisma.shopConnection.findUnique({
-          where: { id: conn.id },
-          select: { siteTrackingKey: true },
-        });
-        key = again?.siteTrackingKey ?? key;
-      }
-    }
+    const key = await this.ensureKey(conn.id);
     return {
       connectionId: conn.id,
       siteKey: key,
       scriptUrl: this.scriptUrl(key),
       snippet: this.snippet(key),
-      install: (conn.siteTrackingInstall as 'api' | 'manual' | null) ?? 'manual',
+      install: (conn.siteTrackingInstall as 'api' | 'manual' | null) ?? null,
       lastSeenAt: conn.siteTrackingLastSeenAt?.toISOString() ?? null,
-      // Flip on once the Shopyy OpenAPI script-injection endpoint is wired up
-      // (ShopyyClient + install call at bind time). Until then: manual paste.
-      apiInstallSupported: false,
+      apiInstallSupported: true,
     };
+  }
+
+  /** The connection's site key, generated on first use. */
+  private async ensureKey(connectionId: string): Promise<string> {
+    const conn = await this.prisma.shopConnection.findUnique({
+      where: { id: connectionId },
+      select: { siteTrackingKey: true },
+    });
+    if (conn?.siteTrackingKey) return conn.siteTrackingKey;
+    const key = `sk_${randomBytes(18).toString('base64url')}`;
+    // Conditional write so two concurrent first loads can't hand out
+    // different keys; the loser re-reads the winner's key.
+    const res = await this.prisma.shopConnection.updateMany({
+      where: { id: connectionId, siteTrackingKey: null },
+      data: { siteTrackingKey: key },
+    });
+    if (res.count > 0) return key;
+    const again = await this.prisma.shopConnection.findUnique({
+      where: { id: connectionId },
+      select: { siteTrackingKey: true },
+    });
+    return again?.siteTrackingKey ?? key;
+  }
+
+  /**
+   * `detail` for POST /scripts/batchsave. The docs say the content is
+   * "usually wrapped in <script>…</script>" (HTML injected into the page),
+   * while their examples show bare JS. Default to the HTML tag form — if the
+   * platform treats it as JS it fails silently in the console instead of
+   * printing text on the storefront — and allow switching per deployment.
+   */
+  private loaderDetail(key: string): string {
+    const src = this.scriptUrl(key);
+    if (process.env.SHOPYY_SCRIPT_DETAIL_FORMAT === 'js') {
+      return (
+        `(function(){var s=document.createElement('script');s.async=true;` +
+        `s.src=${JSON.stringify(src)};document.head.appendChild(s);})();`
+      );
+    }
+    return `<script async src="${src}"></script>`;
+  }
+
+  /**
+   * Install (or re-install) the loader into the store through the Shopyy
+   * OpenAPI custom-script endpoint. Loads on every page incl. checkout.
+   * batchsave doesn't return the new id, so we try to recover it from the
+   * (undocumented) list endpoint to update instead of duplicate next time.
+   * A duplicate would still be harmless — the script guards against running
+   * twice on a page.
+   */
+  async installViaApi(
+    accountId: string,
+    connectionId: string,
+    opts: { onlyIfNotInstalled?: boolean } = {},
+  ): Promise<SiteTrackingStatus> {
+    const conn = await this.prisma.shopConnection.findFirst({
+      where: { id: connectionId, accountId },
+      select: {
+        id: true,
+        status: true,
+        openapiDomain: true,
+        devToken: true,
+        siteTrackingInstall: true,
+        siteTrackingScriptId: true,
+      },
+    });
+    if (!conn) throw new NotFoundException('店铺连接不存在');
+    if (conn.status !== 'active') throw new BadRequestException('店铺连接已失效,请重新授权');
+    if (
+      opts.onlyIfNotInstalled &&
+      conn.siteTrackingInstall === 'api' &&
+      conn.siteTrackingScriptId
+    ) {
+      return this.getStatus(accountId, connectionId);
+    }
+
+    const key = await this.ensureKey(conn.id);
+    const client = new ShopyyClient({
+      openapiDomain: conn.openapiDomain,
+      token: conn.devToken,
+      partnerId: this.config.get<string>('SHOPYY_PARTNER_ID'),
+    });
+
+    let scriptId = conn.siteTrackingScriptId ?? (await this.findScriptId(client));
+    try {
+      await client.batchSaveScripts([
+        {
+          ...(scriptId != null ? { id: scriptId } : {}),
+          scriptName: SHOPYY_SCRIPT_NAME,
+          displayRoutes: 'all',
+          displayCheckout: true,
+          detail: this.loaderDetail(key),
+          enabled: true,
+        },
+      ]);
+    } catch (err) {
+      throw new BadRequestException(this.describeShopyyError(err));
+    }
+    scriptId = scriptId ?? (await this.findScriptId(client));
+
+    await this.prisma.shopConnection.update({
+      where: { id: conn.id },
+      data: { siteTrackingInstall: 'api', siteTrackingScriptId: scriptId ?? null },
+    });
+    return this.getStatus(accountId, connectionId);
+  }
+
+  /** Disable our loader in the store (on disconnect). Best-effort. */
+  async disableViaApi(connectionId: string): Promise<void> {
+    const conn = await this.prisma.shopConnection.findUnique({
+      where: { id: connectionId },
+      select: {
+        openapiDomain: true,
+        devToken: true,
+        siteTrackingKey: true,
+        siteTrackingScriptId: true,
+      },
+    });
+    if (!conn?.siteTrackingScriptId || !conn.siteTrackingKey) return;
+    try {
+      const client = new ShopyyClient({
+        openapiDomain: conn.openapiDomain,
+        token: conn.devToken,
+        partnerId: this.config.get<string>('SHOPYY_PARTNER_ID'),
+      });
+      await client.batchSaveScripts([
+        {
+          id: conn.siteTrackingScriptId,
+          scriptName: SHOPYY_SCRIPT_NAME,
+          displayRoutes: 'all',
+          displayCheckout: true,
+          detail: this.loaderDetail(conn.siteTrackingKey),
+          enabled: false,
+        },
+      ]);
+    } catch (err) {
+      // The script serves a no-op for revoked stores anyway.
+      this.logger.warn(`disable storefront script for ${connectionId} failed: ${String(err)}`);
+    }
+  }
+
+  private async findScriptId(client: ShopyyClient): Promise<number | null> {
+    try {
+      const rows = await client.listScripts();
+      const mine = rows.find((r) => r.script_name === SHOPYY_SCRIPT_NAME && r.id != null);
+      return mine?.id ?? null;
+    } catch {
+      return null; // list endpoint unavailable — fall back to create
+    }
+  }
+
+  private describeShopyyError(err: unknown): string {
+    if (err instanceof ShopyyError && (err.code === 401 || err instanceof ShopyyAuthError)) {
+      return '店铺应用没有「自定义脚本」接口权限(或授权已失效),请在 Shopyy 开发者后台为应用开通脚本权限后重新授权,或复制下方代码手动安装。';
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return `自动安装失败:${msg}。可复制下方代码手动安装。`;
   }
 }

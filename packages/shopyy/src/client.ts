@@ -236,6 +236,41 @@ export class ShopyyClient {
     return this.post('/webhooks/batchdelete', { ids });
   }
 
+  /**
+   * Create or update storefront custom scripts (`POST /scripts/batchsave`).
+   * Items without `id` are created, items with `id` update that script. The
+   * gateway only answers `data: true` — it does NOT return the new id.
+   * A missing app permission comes back as code 401 "No permission".
+   */
+  batchSaveScripts(items: ShopyyScriptUpsert[]): Promise<unknown> {
+    return this.post('/scripts/batchsave', {
+      data: items.map((s) => ({
+        ...(s.id != null ? { id: s.id } : {}),
+        script_name: s.scriptName,
+        display_routes: s.displayRoutes ?? 'all',
+        display_scope: s.displayScope ?? 0,
+        display_position: s.displayPosition ?? 1,
+        display_checkout: s.displayCheckout ? 1 : 0,
+        detail: s.detail,
+        position: s.position ?? 0,
+        status: s.enabled === false ? 0 : 1,
+      })),
+    });
+  }
+
+  /**
+   * List the store's custom scripts (`GET /scripts`). NOT in the published
+   * docs — used best-effort to recover a script id after creation (batchsave
+   * doesn't return it) and to avoid duplicates. Callers must tolerate errors.
+   */
+  async listScripts(): Promise<ShopyyScript[]> {
+    const data = await this.get<ShopyyScript[] | { list?: ShopyyScript[] }>('/scripts', {
+      limit: 250,
+    });
+    if (Array.isArray(data)) return data;
+    return Array.isArray(data?.list) ? data.list : [];
+  }
+
   /** Fetch a single order's full detail by the store's order id. */
   getOrder(externalOrderId: string): Promise<ShopyyRawOrder> {
     return this.get<ShopyyRawOrder>(`/orders/${encodeURIComponent(externalOrderId)}`);
@@ -366,6 +401,30 @@ export interface ShopyyWebhook {
 }
 
 /** Create (no `id`) or edit (with `id`) payload for `POST /webhooks/batchsave`. */
+export interface ShopyyScriptUpsert {
+  /** Existing script id → update; omitted → create. */
+  id?: number;
+  scriptName: string;
+  /** Load routes; `all` = every page (default). */
+  displayRoutes?: string;
+  displayScope?: number;
+  /** Insert position (docs: usually 1). */
+  displayPosition?: number;
+  /** Also load on checkout pages. */
+  displayCheckout?: boolean;
+  /** Script content (docs: ≤ 1024 chars, usually wrapped in <script>…</script>). */
+  detail: string;
+  position?: number;
+  enabled?: boolean;
+}
+
+/** A custom script row (shape best-effort; only fields we rely on). */
+export interface ShopyyScript {
+  id?: number;
+  script_name?: string;
+  status?: number;
+}
+
 export interface ShopyyWebhookUpsert {
   id?: number;
   webhookName: string;

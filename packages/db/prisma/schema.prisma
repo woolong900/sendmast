@@ -1197,6 +1197,9 @@ model ShopConnection {
   siteTrackingLastSeenAt DateTime? @map("site_tracking_last_seen_at")
   /// How the script was installed: 'api' (Shopyy OpenAPI) | 'manual'.
   siteTrackingInstall    String?   @map("site_tracking_install")
+  /// Shopyy custom-script id of our loader (POST /scripts/batchsave), when
+  /// known — needed to update/disable it instead of creating duplicates.
+  siteTrackingScriptId   Int?      @map("site_tracking_script_id")
   createdAt       DateTime             @default(now()) @map("created_at")
   updatedAt       DateTime             @updatedAt @map("updated_at")
 

@@ -1,5 +1,29 @@
 import { compileSegment } from '@sendmast/audience';
+import { ShopyyError } from '@sendmast/shopyy';
 import { SiteTrackingService } from './site-tracking.service';
+
+const shopyyCalls: { saved: unknown[][]; listResults: unknown[][]; saveError: Error | null } = {
+  saved: [],
+  // successive GET /scripts responses (one array per call)
+  listResults: [],
+  saveError: null,
+};
+jest.mock('@sendmast/shopyy', () => {
+  const actual = jest.requireActual('@sendmast/shopyy');
+  return {
+    ...actual,
+    ShopyyClient: class {
+      async batchSaveScripts(items: unknown[]) {
+        if (shopyyCalls.saveError) throw shopyyCalls.saveError;
+        shopyyCalls.saved.push(items);
+        return true;
+      }
+      async listScripts() {
+        return shopyyCalls.listResults.shift() ?? [];
+      }
+    },
+  };
+});
 
 // @sendmast/shared ships ESM, which this CJS jest setup can't load; map the
 // two runtime modules the service uses to their (dependency-free) TS sources.
@@ -60,6 +84,78 @@ describe('SiteTrackingService.ingest', () => {
       `<script async src="https://app.example.com/t/s/sdk.js?k=${KEY}"></script>`,
     );
     expect(svc.renderScript(KEY)).toContain('"https://app.example.com/t/s/e"');
+  });
+});
+
+describe('SiteTrackingService.installViaApi', () => {
+  function installSetup(initial: { siteTrackingScriptId: number | null }) {
+    const row: Record<string, unknown> = {
+      id: 'shop-1',
+      accountId: 'acc-1',
+      status: 'active',
+      openapiDomain: 'https://openapi.example.com',
+      devToken: 'tok',
+      siteTrackingKey: KEY,
+      siteTrackingInstall: null,
+      siteTrackingLastSeenAt: null,
+      ...initial,
+    };
+    const prisma = {
+      shopConnection: {
+        findFirst: jest.fn(async () => row),
+        findUnique: jest.fn(async () => row),
+        updateMany: jest.fn(async () => ({ count: 0 })),
+        update: jest.fn(async ({ data }: { data: Record<string, unknown> }) =>
+          Object.assign(row, data),
+        ),
+      },
+    };
+    const config = { getOrThrow: () => 'https://app.example.com', get: () => undefined };
+    const svc = new SiteTrackingService(prisma as never, {} as never, config as never);
+    return { svc, row };
+  }
+
+  beforeEach(() => {
+    shopyyCalls.saved = [];
+    shopyyCalls.listResults = [];
+    shopyyCalls.saveError = null;
+  });
+
+  it('creates the loader on all pages incl. checkout and recovers its id', async () => {
+    const { svc, row } = installSetup({ siteTrackingScriptId: null });
+    // before the save the store has only someone else's script; after it, ours
+    shopyyCalls.listResults = [
+      [{ id: 5, script_name: 'site_whatsapp_contact' }],
+      [
+        { id: 5, script_name: 'site_whatsapp_contact' },
+        { id: 77, script_name: 'sendmast_site_tracking' },
+      ],
+    ];
+    const status = await svc.installViaApi('acc-1', 'shop-1');
+    const item = shopyyCalls.saved[0][0] as Record<string, unknown>;
+    expect(item).toMatchObject({
+      scriptName: 'sendmast_site_tracking',
+      displayRoutes: 'all',
+      displayCheckout: true,
+      enabled: true,
+      detail: `<script async src="https://app.example.com/t/s/sdk.js?k=${KEY}"></script>`,
+    });
+    expect(item.id).toBeUndefined();
+    expect(row.siteTrackingInstall).toBe('api');
+    expect(row.siteTrackingScriptId).toBe(77);
+    expect(status.install).toBe('api');
+  });
+
+  it('updates in place when the script id is known', async () => {
+    const { svc } = installSetup({ siteTrackingScriptId: 4497066 });
+    await svc.installViaApi('acc-1', 'shop-1');
+    expect((shopyyCalls.saved[0][0] as { id: number }).id).toBe(4497066);
+  });
+
+  it('turns a missing script permission into an actionable error', async () => {
+    const { svc } = installSetup({ siteTrackingScriptId: null });
+    shopyyCalls.saveError = new ShopyyError('No permission', 401);
+    await expect(svc.installViaApi('acc-1', 'shop-1')).rejects.toThrow('自定义脚本');
   });
 });
 
