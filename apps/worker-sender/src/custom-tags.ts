@@ -3,9 +3,13 @@
  *
  * Placeholder syntax: `{{tag:<name>}}` (e.g. `{{tag:greeting}}`).
  * Names are case-insensitive on lookup; values are picked uniformly at
- * random from the tag's `values` array, independently per render call —
- * so two recipients in the same campaign typically receive different
- * variants.
+ * random from the tag's `values` array ONCE PER EMAIL: every occurrence of
+ * the same tag in one message (subject, preheader and body alike) resolves
+ * to the same value, while different recipients still get independent
+ * picks. This matters for tags like `{{tag:domain}}` that appear in many
+ * links — a single email must not send its logo, product and coupon
+ * buttons to different shop domains. Callers share one `picks` map across
+ * all fields of one message.
  *
  * Two render contexts:
  *   - `subject` / `preheader` are PLAIN TEXT in the email envelope; values
@@ -27,8 +31,9 @@ export interface CustomTagDef {
 const TAG_RE = /\{\{tag:([a-z0-9_-]+)\}\}/gi;
 
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
   );
 }
 
@@ -51,18 +56,29 @@ function pickRandom(values: string[]): string {
   return values[Math.floor(Math.random() * values.length)];
 }
 
+/**
+ * @param picks per-message memo (tag name → chosen value). Pass the SAME map
+ *   for the subject, preheader and body of one email; create a new one per
+ *   recipient.
+ */
 export function applyCustomTags(
   template: string,
   tags: Map<string, string[]>,
   ctx: 'text' | 'html',
+  picks: Map<string, string>,
 ): string {
   // Empty fast path — most accounts won't have tags configured, and even
   // when they do, a particular field may not reference any.
   if (tags.size === 0) return template;
   return template.replace(TAG_RE, (match, name: string) => {
-    const values = tags.get(name.toLowerCase());
+    const key = name.toLowerCase();
+    const values = tags.get(key);
     if (!values) return match; // leave undefined tags visible
-    const picked = pickRandom(values);
+    let picked = picks.get(key);
+    if (picked === undefined) {
+      picked = pickRandom(values);
+      picks.set(key, picked);
+    }
     return ctx === 'html' ? escapeHtml(picked) : picked;
   });
 }

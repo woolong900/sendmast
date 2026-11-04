@@ -708,7 +708,7 @@ async function runTick(_job: Job): Promise<void> {
 /**
  * Load the account's custom tags (name → candidate values) for tag
  * substitution. Only the candidate lists are cached (short TTL); the random
- * pick in applyCustomTags still happens per recipient, per placeholder.
+ * pick in applyCustomTags still happens per recipient (once per tag per email).
  */
 const customTagCache = new Map<string, { index: Map<string, string[]>; loadedAt: number }>();
 
@@ -975,15 +975,17 @@ async function runSend(job: Job<SendJobData>) {
   // (Azure reports this as "Invalid unicode characters in the email subject").
   // Normalise after tag expansion because contact/custom-tag values can also
   // introduce those characters at send time.
-  const subject = sanitizeEmailSubject(applyCustomTags(subjectSys, tagIndex, 'text'));
-  let bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
+  // One random pick per tag for this whole email (subject + preheader + body).
+  const tagPicks = new Map<string, string>();
+  const subject = sanitizeEmailSubject(applyCustomTags(subjectSys, tagIndex, 'text', tagPicks));
+  let bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html', tagPicks);
 
   // Inbox preview text (preheader): resolve tags, then inject a hidden span at
   // the top of the body so clients show it as the preview snippet — same as the
   // automation send path (runFlowSend).
   const preheaderRaw = (c.preheader ?? '').trim();
   if (preheaderRaw) {
-    const ph = applyCustomTags(applySystemTags(preheaderRaw, sysCtx, 'text'), tagIndex, 'text');
+    const ph = applyCustomTags(applySystemTags(preheaderRaw, sysCtx, 'text'), tagIndex, 'text', tagPicks);
     bodyHtml = injectPreheader(bodyHtml, ph);
   }
 
@@ -1315,20 +1317,22 @@ async function runFlowSend(job: Job<SendJobData>) {
   };
 
   const tagIndex = await loadCustomTagIndex(send.accountId);
+  // One random pick per tag for this whole email (subject + preheader + body).
+  const tagPicks = new Map<string, string>();
   const subjectOut = sanitizeEmailSubject(
-    applyCustomTags(applySystemTags(subject, sysCtx, 'text'), tagIndex, 'text'),
+    applyCustomTags(applySystemTags(subject, sysCtx, 'text'), tagIndex, 'text', tagPicks),
   );
   // Marketing emails get the unsubscribe footer; transactional ones never do.
   const bodyBase = transactional ? bodyHtmlRaw : ensureUnsubscribeFooter(bodyHtmlRaw);
   const bodyHtmlSys = applySystemTags(bodyBase, sysCtx, 'html');
-  let bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html');
+  let bodyHtml = applyCustomTags(bodyHtmlSys, tagIndex, 'html', tagPicks);
   let preheaderOut: string | null = null;
 
   // Inbox preview text (preheader): resolve tags, then inject a hidden span at
   // the top of the body so clients show it as the preview snippet.
   const preheaderRaw = (send.preheader ?? automation.preheader ?? '').trim();
   if (preheaderRaw) {
-    const ph = applyCustomTags(applySystemTags(preheaderRaw, sysCtx, 'text'), tagIndex, 'text');
+    const ph = applyCustomTags(applySystemTags(preheaderRaw, sysCtx, 'text'), tagIndex, 'text', tagPicks);
     preheaderOut = ph;
     bodyHtml = injectPreheader(bodyHtml, ph);
   }
