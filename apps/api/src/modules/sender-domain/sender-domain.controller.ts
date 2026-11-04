@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   UseGuards,
   BadRequestException,
@@ -14,7 +15,11 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { SenderDomainService } from './sender-domain.service';
-import { CreateSenderDomainSchema, CreateSenderUsernameSchema } from '@sendmast/shared';
+import {
+  CreateSenderDomainSchema,
+  CreateSenderUsernameSchema,
+  UpdateSenderUsernameSchema,
+} from '@sendmast/shared';
 import { firstZodError } from '../../common/zod-error';
 
 @ApiTags('sender-domains')
@@ -70,6 +75,19 @@ export class SenderDomainController {
     const r = CreateSenderUsernameSchema.safeParse(body);
     if (!r.success) throw new BadRequestException(firstZodError(r.error));
     return this.svc.addSenderUsername(user.accountId, id, r.data.username, r.data.displayName);
+  }
+
+  /** Change a sender address's display name (synced to ACS when applicable). */
+  @Patch(':id/usernames/:usernameId')
+  updateUsername(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('usernameId', new ParseUUIDPipe()) usernameId: string,
+    @Body() body: unknown,
+  ) {
+    const r = UpdateSenderUsernameSchema.safeParse(body);
+    if (!r.success) throw new BadRequestException(firstZodError(r.error));
+    return this.svc.updateSenderUsername(user.accountId, id, usernameId, r.data.displayName);
   }
 
   @Delete(':id/usernames/:usernameId')

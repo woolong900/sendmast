@@ -4,7 +4,7 @@ import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { Prisma, PrismaClient, type Campaign, type EmailChannel } from '@prisma/client';
 import { rewriteHtml, signTrackingToken } from '@sendmast/email-tracking';
-import { QUEUE_NAMES } from '@sendmast/shared';
+import { QUEUE_NAMES, isImpersonatingDisplayName } from '@sendmast/shared';
 import { buildClickHouseClient } from '@sendmast/clickhouse';
 import { getTransportForAccount } from './transport';
 import { isPlatformSideFailure } from './quota-refund';
@@ -797,6 +797,33 @@ async function getCampaignContent(ref: {
   return content;
 }
 
+// Sender address → configured display name ('' = none), 30s cache.
+// `null` caches "no sender record" so legacy addresses don't re-query.
+const senderNameCache = new Map<string, { name: string | null; at: number }>();
+const SENDER_NAME_TTL_MS = 30_000;
+
+async function configuredSenderName(
+  accountId: string,
+  fromEmail: string,
+): Promise<string | undefined> {
+  const key = `${accountId}|${fromEmail.toLowerCase()}`;
+  const now = Date.now();
+  const hit = senderNameCache.get(key);
+  if (hit && now - hit.at < SENDER_NAME_TTL_MS) return hit.name ?? undefined;
+  const [local, domain] = fromEmail.toLowerCase().split('@');
+  let name: string | null = null;
+  if (local && domain) {
+    const row = await prisma.senderUsername.findFirst({
+      where: { username: local, senderDomain: { accountId, domain } },
+      select: { displayName: true },
+    });
+    name = row ? (row.displayName?.trim() ?? '') : null;
+  }
+  if (senderNameCache.size > 5000) senderNameCache.clear();
+  senderNameCache.set(key, { name, at: now });
+  return name ?? undefined;
+}
+
 /** First 12 hex chars of a UUID — compact, stable id fragment for headers. */
 function shortId(uuid: string): string {
   return uuid.replace(/-/g, '').slice(0, 12);
@@ -873,7 +900,19 @@ async function runSend(job: Job<SendJobData>) {
   // campaigns; NULL on single-sender campaigns (and all pre-feature rows),
   // where we fall back to the campaign's primary from address.
   const fromEmail = r.fromEmail ?? c.fromEmail;
-  const fromName = r.fromName ?? c.fromName;
+  // Configured display name of the sender address wins (it is what ACS shows
+  // regardless, and keeps every provider consistent after a rename); the
+  // stored name is only a fallback for addresses without a sender record.
+  const fromName =
+    (await configuredSenderName(r.accountId, fromEmail)) ?? r.fromName ?? c.fromName;
+  if (fromName && isImpersonatingDisplayName(fromName)) {
+    await failCampaignRecipient(
+      c.id,
+      r.id,
+      `寄件人名称「${fromName}」冒用第三方名义,请在发件域名中修改后重新发送`,
+    );
+    return;
+  }
 
   if (campaignStatus === 'paused') {
     await prisma.campaignRecipient.update({
@@ -1237,7 +1276,16 @@ async function runFlowSend(job: Job<SendJobData>) {
   // Legacy linked template, used only when no inline content was snapshotted.
   const templateId = send.templateId ?? automation.templateId;
   const fromEmail = send.fromEmail ?? automation.fromEmail;
-  const fromName = send.fromName ?? automation.fromName ?? fromEmail?.split('@')[0] ?? 'Store';
+  const fromName =
+    (fromEmail ? await configuredSenderName(send.accountId, fromEmail) : undefined) ??
+    send.fromName ??
+    automation.fromName ??
+    fromEmail?.split('@')[0] ??
+    'Store';
+  if (isImpersonatingDisplayName(fromName)) {
+    await fail(`寄件人名称「${fromName}」冒用第三方名义,请在发件域名中修改`);
+    return;
+  }
   if (!fromEmail) {
     await fail('自动化未配置发件邮箱');
     return;

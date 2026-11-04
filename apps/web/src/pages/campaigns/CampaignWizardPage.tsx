@@ -409,17 +409,14 @@ export function CampaignWizardPage() {
     [verifiedDomains, multiChannel],
   );
 
-  // Resolve the sender username record matching the chosen address so we can
-  // derive a from-name from its configured displayName. Falls back to the
-  // local-part if the address isn't (yet) in the verified options list — this
-  // keeps the preview and the API payload non-empty during edit-mode prefill
-  // before the domains query has settled.
+  // The from-name is the display name configured on the sender address (the
+  // server enforces the same; on ACS it is the only name recipients can see).
+  // No display name → recipients see the bare address, so return ''.
   const nameForEmail = useCallback(
     (email: string) => {
       if (!email) return '';
       const opt = senderOptions.find((o) => o.value === email);
-      const name = opt?.displayName?.trim() || opt?.username || email.split('@')[0] || '';
-      return name.trim();
+      return opt?.displayName?.trim() ?? '';
     },
     [senderOptions],
   );
@@ -832,11 +829,20 @@ export function CampaignWizardPage() {
                         </Link>
                       </div>
                     ) : (
-                      <SenderEmailSelect
-                        values={fromEmails}
-                        onChange={setFromEmails}
-                        options={senderOptions}
-                      />
+                      <>
+                        <SenderEmailSelect
+                          values={fromEmails}
+                          onChange={setFromEmails}
+                          options={senderOptions}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          收件人看到的发件人名称取自寄件地址的显示名称,如需修改请到{' '}
+                          <Link to="/settings/domains" className="text-primary hover:underline">
+                            发件域名
+                          </Link>{' '}
+                          中编辑。
+                        </p>
+                      </>
                     )}
                   </div>
                   <div className="space-y-1.5">
@@ -858,7 +864,11 @@ export function CampaignWizardPage() {
 
             <div>
               <div className="mb-3 text-sm font-semibold text-foreground">收件箱预览</div>
-              <InboxPreview fromName={derivedFromName} subject={subject} preheader={preheader} />
+              <InboxPreview
+                fromName={derivedFromName || fromEmail}
+                subject={subject}
+                preheader={preheader}
+              />
             </div>
           </CardContent>
         </Card>

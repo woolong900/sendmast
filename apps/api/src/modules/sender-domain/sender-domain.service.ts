@@ -444,6 +444,70 @@ export class SenderDomainService {
     return this.toUsernameView(created, row.domain);
   }
 
+  /**
+   * Change the display name of an existing sender address. On ACS the name
+   * lives on the Azure sender username (ACS has no per-message display name),
+   * so it is written there first; the DB row is the source of truth for every
+   * other provider. Unsent campaigns using the address are re-labelled so the
+   * wizard, send logs and non-ACS sends all show the same name.
+   */
+  async updateSenderUsername(
+    accountId: string,
+    domainId: string,
+    usernameId: string,
+    displayName: string,
+  ): Promise<SenderUsernameView> {
+    const row = await this.prisma.senderDomain.findFirst({
+      where: { id: domainId, accountId },
+      include: { emailChannel: true },
+    });
+    if (!row) throw new NotFoundException('域名不存在');
+    const u = await this.prisma.senderUsername.findFirst({
+      where: { id: usernameId, senderDomainId: row.id },
+    });
+    if (!u) throw new NotFoundException('寄件人地址不存在');
+
+    const name = displayName.trim();
+    if (row.emailChannel.provider === 'acs') {
+      try {
+        await this.azure.createSenderUsername(
+          row.emailChannel,
+          row.domain,
+          u.username,
+          name || undefined,
+        );
+      } catch (err) {
+        throw new BadRequestException(
+          `同步到 Azure 失败:${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    const fullAddress = `${u.username}@${row.domain}`;
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.senderUsername.update({
+        where: { id: u.id },
+        data: { displayName: name || null },
+      }),
+      this.prisma.campaign.updateMany({
+        where: {
+          accountId,
+          fromEmail: { equals: fullAddress, mode: 'insensitive' },
+          status: { in: ['draft', 'scheduled', 'sending', 'paused'] },
+        },
+        data: { fromName: name },
+      }),
+      this.prisma.campaignSender.updateMany({
+        where: {
+          fromEmail: { equals: fullAddress, mode: 'insensitive' },
+          campaign: { accountId, status: { in: ['draft', 'scheduled', 'sending', 'paused'] } },
+        },
+        data: { fromName: name },
+      }),
+    ]);
+    return this.toUsernameView(updated, row.domain);
+  }
+
   async removeSenderUsername(
     accountId: string,
     domainId: string,

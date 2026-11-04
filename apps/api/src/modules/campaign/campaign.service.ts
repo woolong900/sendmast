@@ -16,6 +16,7 @@ import { TrackingDomainService } from '../tracking-domain/tracking-domain.servic
 import { renderMjml } from '../template/mjml-renderer';
 import {
   QUEUE_NAMES,
+  isImpersonatingDisplayName,
   type CreateCampaignInput,
   type ListCampaignsQuery,
   type ListRecipientsQuery,
@@ -1194,8 +1195,9 @@ export class CampaignService {
     await this.assertTargetsExist(accountId, input.listIds, input.segmentIds);
 
     const status = input.scheduledAt ? 'scheduled' : 'draft';
-    const senders = this.senderRoster(input);
-    await this.resolveCampaignSenders(accountId, senders, 'validate');
+    // The from-name is not free text: it is the display name configured on the
+    // sender address (on ACS that is the only name recipients can ever see).
+    const senders = await this.withConfiguredNames(accountId, this.senderRoster(input));
 
     const created = await this.prisma.campaign.create({
       data: {
@@ -1259,16 +1261,28 @@ export class CampaignService {
     return out;
   }
 
+  /** Validate the roster and replace each from-name with the configured one. */
+  private async withConfiguredNames(
+    accountId: string,
+    roster: Array<{ fromEmail: string; fromName: string; position: number }>,
+  ): Promise<Array<{ fromEmail: string; fromName: string; position: number }>> {
+    const resolved = await this.resolveCampaignSenders(accountId, roster, 'validate');
+    return roster.map((s, i) => ({ ...s, fromName: resolved[i]!.fromName }));
+  }
+
   private async resolveCampaignSenders(
     accountId: string,
     senders: Array<{ fromEmail: string; fromName: string }>,
     mode: 'validate' | 'send',
   ): Promise<Array<{ fromEmail: string; fromName: string; emailChannelId: string }>> {
     const domainEmailChannel = new Map<string, string>();
+    const domainRowId = new Map<string, string>();
     const enriched: Array<{ fromEmail: string; fromName: string; emailChannelId: string }> = [];
     for (const s of senders) {
-      const domain = s.fromEmail.split('@')[1]?.toLowerCase();
-      if (!domain) throw new BadRequestException(`寄件邮箱 ${s.fromEmail} 格式不正确`);
+      const [localRaw, domainRaw] = s.fromEmail.split('@');
+      const domain = domainRaw?.toLowerCase();
+      const local = localRaw?.trim().toLowerCase();
+      if (!domain || !local) throw new BadRequestException(`寄件邮箱 ${s.fromEmail} 格式不正确`);
       let channelId = domainEmailChannel.get(domain);
       if (!channelId) {
         const verified = await this.prisma.senderDomain.findFirst({
@@ -1303,8 +1317,30 @@ export class CampaignService {
         }
         channelId = verified.emailChannel.id;
         domainEmailChannel.set(domain, channelId);
+        domainRowId.set(domain, verified.id);
       }
-      enriched.push({ ...s, emailChannelId: channelId });
+      // The address must be a configured sender (ACS rejects anything else),
+      // and its configured display name is the from-name — on ACS it is the
+      // only name recipients can see, so we use it for every provider.
+      const configured = await this.prisma.senderUsername.findFirst({
+        where: { senderDomainId: domainRowId.get(domain)!, username: local },
+        select: { displayName: true },
+      });
+      if (!configured) {
+        throw new BadRequestException(
+          `寄件地址 ${s.fromEmail} 尚未添加,请先在「发件域名」中为 ${domain} 添加该寄件人`,
+        );
+      }
+      if (configured.displayName && isImpersonatingDisplayName(configured.displayName)) {
+        throw new BadRequestException(
+          `寄件地址 ${s.fromEmail} 的显示名「${configured.displayName}」冒用了第三方名义,请先在「发件域名」中修改`,
+        );
+      }
+      enriched.push({
+        ...s,
+        fromName: configured.displayName?.trim() ?? '',
+        emailChannelId: channelId,
+      });
     }
     return enriched;
   }
@@ -1390,13 +1426,15 @@ export class CampaignService {
     const touchedSenders =
       input.senders !== undefined || input.fromEmail !== undefined || input.fromName !== undefined;
     const senders = touchedSenders
-      ? this.senderRoster({
-          fromEmail: input.fromEmail ?? c.fromEmail,
-          fromName: input.fromName ?? c.fromName,
-          senders: input.senders,
-        })
+      ? await this.withConfiguredNames(
+          accountId,
+          this.senderRoster({
+            fromEmail: input.fromEmail ?? c.fromEmail,
+            fromName: input.fromName ?? c.fromName,
+            senders: input.senders,
+          }),
+        )
       : null;
-    if (senders) await this.resolveCampaignSenders(accountId, senders, 'validate');
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (input.listIds) {

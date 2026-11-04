@@ -226,7 +226,8 @@ function FlowList({
       d.senderUsernames.map((u) => ({
         value: u.fullAddress,
         label: u.displayName ? `${u.displayName} <${u.fullAddress}>` : u.fullAddress,
-        name: u.displayName?.trim() || u.username || u.fullAddress.split('@')[0],
+        // Configured display name only — what recipients actually see.
+        name: u.displayName?.trim() ?? '',
       })),
     );
   }, [domains.data]);

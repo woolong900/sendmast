@@ -91,6 +91,31 @@ export interface SenderUsernameView {
   createdAt: string;
 }
 
+/**
+ * Display names that pass a message off as coming from a postal/courier
+ * service, a tax/customs/benefits agency or similar third party are refused:
+ * mail "from" them is indistinguishable from phishing. Not exhaustive —
+ * a guard against obvious misuse and copy-pasted test values.
+ */
+const IMPERSONATION_RE =
+  /(u\.?\s?s\.?\s?postal|\busps\b|postal\s+service|post\s+office|royal\s+mail|canada\s+post|australia\s+post|\bfedex\b|\bdhl\b|\birs\b|internal\s+revenue|social\s+security|\bcustoms\b|邮政|海关|税务局|社保)/i;
+
+// "UPS" only as the all-caps carrier name, so "Ups and Downs" stays allowed.
+const UPS_RE = /\bUPS\b/;
+
+export function isImpersonatingDisplayName(name: string): boolean {
+  return IMPERSONATION_RE.test(name) || UPS_RE.test(name);
+}
+
+/** Sender display name shown in the recipient's inbox. */
+export const SenderDisplayNameSchema = z
+  .string()
+  .trim()
+  .max(120)
+  .refine((v) => !isImpersonatingDisplayName(v), {
+    message: '发件人名称不能使用邮政、快递或政府机构等第三方名义',
+  });
+
 export const CreateSenderUsernameSchema = z.object({
   // Local-part of the email; Azure rejects most special chars and uppercase.
   username: z
@@ -98,9 +123,15 @@ export const CreateSenderUsernameSchema = z.object({
     .min(1)
     .max(64)
     .regex(/^[a-z0-9._-]+$/i, 'Invalid username'),
-  displayName: z.string().max(120).optional(),
+  displayName: SenderDisplayNameSchema.optional(),
 });
 export type CreateSenderUsernameInput = z.infer<typeof CreateSenderUsernameSchema>;
+
+/** Change a sender address's display name (synced to the provider). Empty = none. */
+export const UpdateSenderUsernameSchema = z.object({
+  displayName: SenderDisplayNameSchema,
+});
+export type UpdateSenderUsernameInput = z.infer<typeof UpdateSenderUsernameSchema>;
 
 export interface SenderDomainView {
   id: string;

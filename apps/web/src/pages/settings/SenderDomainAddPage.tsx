@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, Copy, Loader2, Mail, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Loader2, Mail, Pencil, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { FilterSelect } from '@/components/ui/filter-select';
@@ -310,6 +310,22 @@ function SenderUsernamesStepCard({
     },
   });
 
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const renameMut = useMutation({
+    mutationFn: (v: { id: string; displayName: string }) =>
+      api.patch<SenderUsernameView>(`/api/sender-domains/${view.id}/usernames/${v.id}`, {
+        displayName: v.displayName.trim(),
+      }),
+    onError: (err) => toast(`保存失败:${apiErrMessage(err)}`, 'error'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sender-domains', view.id] });
+      qc.invalidateQueries({ queryKey: ['sender-domains'] });
+      setEditingId(null);
+      toast('显示名已更新,未发完的活动将使用新名称', 'success');
+    },
+  });
+
   const removeMut = useMutation({
     mutationFn: (usernameId: string) =>
       api.delete(`/api/sender-domains/${view.id}/usernames/${usernameId}`),
@@ -353,7 +369,7 @@ function SenderUsernamesStepCard({
             <Input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="SendMast"
+              placeholder="你的品牌名"
             />
           </div>
           <Button onClick={() => addMut.mutate()} disabled={!username.trim() || addMut.isPending}>
@@ -386,7 +402,59 @@ function SenderUsernamesStepCard({
               {view.senderUsernames.map((u) => (
                 <tr key={u.id} className="border-b last:border-0">
                   <td className="px-4 py-2 font-mono">{u.fullAddress}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{u.displayName || '—'}</td>
+                  <td className="px-4 py-2 text-muted-foreground">
+                    {editingId === u.id ? (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          className="h-8"
+                          value={editName}
+                          autoFocus
+                          placeholder="留空 = 只显示邮箱地址"
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') renameMut.mutate({ id: u.id, displayName: editName });
+                            if (e.key === 'Escape') setEditingId(null);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          title="保存"
+                          className="rounded p-1.5 hover:bg-muted disabled:opacity-50"
+                          disabled={renameMut.isPending}
+                          onClick={() => renameMut.mutate({ id: u.id, displayName: editName })}
+                        >
+                          {renameMut.isPending ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Check className="size-4" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          title="取消"
+                          className="rounded p-1.5 hover:bg-muted"
+                          onClick={() => setEditingId(null)}
+                        >
+                          <X className="size-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center gap-1">
+                        {u.displayName || '—'}
+                        <button
+                          type="button"
+                          title="修改显示名"
+                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          onClick={() => {
+                            setEditingId(u.id);
+                            setEditName(u.displayName ?? '');
+                          }}
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-right">
                     <button
                       type="button"
