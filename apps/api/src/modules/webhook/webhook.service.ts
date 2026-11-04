@@ -103,6 +103,7 @@ export class WebhookService {
 
     const vars = normaliseVariables(eventData['user-variables']);
     const messageId =
+      vars.oid ??
       vars.sendmast_operation_id ??
       stringValue(eventData.message?.headers?.['message-id']) ??
       stringValue(eventData.message?.headers?.['Message-Id']) ??
@@ -110,8 +111,8 @@ export class WebhookService {
 
     await this.queue.add(QUEUE_NAMES.EVENTS_INGEST, 'event', {
       kind: mapped.kind,
-      recipientId: vars.sendmast_recipient_id,
-      source: vars.sendmast_source === 'a' ? 'a' : undefined,
+      recipientId: vars.rid ?? vars.sendmast_recipient_id,
+      source: (vars.src ?? vars.sendmast_source) === 'a' ? 'a' : undefined,
       externalRecipient: stringValue(eventData.recipient),
       messageId,
       linkUrl: mapped.kind === 'c' ? stringValue(eventData.url) : undefined,
@@ -145,12 +146,15 @@ export class WebhookService {
     const data = payload.data ?? {};
     const tags = normaliseVariables(data.tags);
     const messageId =
-      tags.sendmast_operation_id ?? stringValue(data.email_id) ?? stringValue(data.message_id);
+      tags.oid ??
+      tags.sendmast_operation_id ??
+      stringValue(data.email_id) ??
+      stringValue(data.message_id);
 
     await this.queue.add(QUEUE_NAMES.EVENTS_INGEST, 'event', {
       kind: mapped.kind,
-      recipientId: tags.sendmast_recipient_id,
-      source: tags.sendmast_source === 'a' ? 'a' : undefined,
+      recipientId: tags.rid ?? tags.sendmast_recipient_id,
+      source: (tags.src ?? tags.sendmast_source) === 'a' ? 'a' : undefined,
       externalRecipient: firstString(data.to),
       messageId,
       linkUrl: mapped.kind === 'c' ? stringValue(data.click?.link) : undefined,
@@ -196,14 +200,15 @@ export class WebhookService {
 
       const vars = normaliseVariables(event);
       const messageId =
+        vars.oid ??
         vars.sendmast_operation_id ??
         stringValue(event.sg_message_id) ??
         stringValue(event['smtp-id']);
 
       await this.queue.add(QUEUE_NAMES.EVENTS_INGEST, 'event', {
         kind: mapped.kind,
-        recipientId: vars.sendmast_recipient_id,
-        source: vars.sendmast_source === 'a' ? 'a' : undefined,
+        recipientId: vars.rid ?? vars.sendmast_recipient_id,
+        source: (vars.src ?? vars.sendmast_source) === 'a' ? 'a' : undefined,
         externalRecipient: stringValue(event.email),
         messageId,
         linkUrl: mapped.kind === 'c' ? stringValue(event.url) : undefined,
@@ -469,13 +474,7 @@ function resendBounceKind(bounce: ResendWebhookData['bounce']): 'hard' | 'soft' 
 }
 
 function sendGridBounceKind(event: SendGridWebhookEvent): 'hard' | 'soft' {
-  const type = [
-    event.type,
-    event.reason,
-    event.status,
-    event.response,
-    event.bounce_classification,
-  ]
+  const type = [event.type, event.reason, event.status, event.response, event.bounce_classification]
     .map((v) => String(v ?? '').toLowerCase())
     .join(' ');
   if (
@@ -541,7 +540,11 @@ function sendGridTimestampMs(value: unknown): number {
 function toPemPublicKey(key: string): string {
   const trimmed = key.trim();
   if (trimmed.includes('BEGIN PUBLIC KEY')) return trimmed;
-  const body = trimmed.replace(/\s+/g, '').match(/.{1,64}/g)?.join('\n') ?? trimmed;
+  const body =
+    trimmed
+      .replace(/\s+/g, '')
+      .match(/.{1,64}/g)
+      ?.join('\n') ?? trimmed;
   return `-----BEGIN PUBLIC KEY-----\n${body}\n-----END PUBLIC KEY-----`;
 }
 

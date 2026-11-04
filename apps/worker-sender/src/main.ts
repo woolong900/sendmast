@@ -729,6 +729,8 @@ async function loadCustomTagIndex(accountId: string): Promise<Map<string, string
 type CampaignContent = Pick<
   Campaign,
   | 'id'
+  | 'accountId'
+  | 'replyTo'
   | 'name'
   | 'subject'
   | 'preheader'
@@ -767,6 +769,8 @@ async function getCampaignContent(ref: {
     where: { id: ref.id },
     select: {
       id: true,
+      accountId: true,
+      replyTo: true,
       name: true,
       subject: true,
       preheader: true,
@@ -791,6 +795,45 @@ async function getCampaignContent(ref: {
   }
   campaignContentCache.set(ref.id, { content, updatedAt: version, loadedAt: now });
   return content;
+}
+
+/** First 12 hex chars of a UUID — compact, stable id fragment for headers. */
+function shortId(uuid: string): string {
+  return uuid.replace(/-/g, '').slice(0, 12);
+}
+
+/**
+ * Standard bulk-mail headers, identical in shape across every provider
+ * (transports drop what a provider forbids, e.g. Feedback-ID on Cloudflare):
+ *   - List-Unsubscribe (+ RFC 8058 one-click) for marketing mail;
+ *   - List-Id: stable per tenant + sending domain (RFC 2919), so mailbox
+ *     providers and user filters see one consistent list identity;
+ *   - Feedback-ID (Gmail FBL): `<campaign|flow>:<tenant>:<type>:<channel>` —
+ *     lets Postmaster Tools break complaint rates down per campaign, tenant
+ *     and sending channel.
+ * Transactional flows (order confirmations) get no unsubscribe / List-Id.
+ */
+function bulkHeaders(o: {
+  accountId: string;
+  fromEmail: string;
+  emailChannelId: string;
+  /** `c<campaign>` or `f<automation>` */
+  feedbackPrimary: string;
+  kind: 'campaign' | 'flow' | 'txn';
+  unsubscribeUrl?: string;
+}): Record<string, string> {
+  const domain = o.fromEmail.split('@')[1]?.toLowerCase() ?? '';
+  const h: Record<string, string> = {};
+  if (o.unsubscribeUrl) {
+    h['List-Unsubscribe'] = domain
+      ? `<${o.unsubscribeUrl}>, <mailto:unsubscribe@${domain}>`
+      : `<${o.unsubscribeUrl}>`;
+    h['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
+  }
+  if (o.kind !== 'txn' && domain) h['List-Id'] = `<t${shortId(o.accountId)}.${domain}>`;
+  h['Feedback-ID'] =
+    `${o.feedbackPrimary}:t${shortId(o.accountId)}:${o.kind}:e${shortId(o.emailChannelId)}`;
+  return h;
 }
 
 /** Give back one unit of tenant prepaid quota reserved for a send. */
@@ -1027,12 +1070,16 @@ async function runSend(job: Job<SendJobData>) {
       subject,
       html,
       operationId,
-      headers: {
-        'List-Unsubscribe': `<${unsubUrl}>, <mailto:unsubscribe@${fromEmail.split('@')[1]}>`,
-        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-        'X-SendMast-Recipient': r.id,
-        'X-SendMast-Campaign': c.id,
-      },
+      replyTo: c.replyTo?.trim() || undefined,
+      headers: bulkHeaders({
+        accountId: r.accountId,
+        fromEmail,
+        emailChannelId: acct.id,
+        feedbackPrimary: `c${shortId(c.id)}`,
+        kind: 'campaign',
+        unsubscribeUrl: unsubUrl,
+      }),
+      meta: { recipientId: r.id, campaignId: c.id },
     });
   } catch (err) {
     // Nothing reached the provider (transports resolve, never reject, once
@@ -1341,14 +1388,14 @@ async function runFlowSend(job: Job<SendJobData>) {
     }
   }
 
-  const headers: Record<string, string> = {
-    'X-SendMast-FlowSend': send.id,
-    'X-SendMast-Automation': automation.id,
-  };
-  if (!transactional && unsubUrl) {
-    headers['List-Unsubscribe'] = `<${unsubUrl}>, <mailto:unsubscribe@${fromEmail.split('@')[1]}>`;
-    headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
-  }
+  const headers = bulkHeaders({
+    accountId: send.accountId,
+    fromEmail,
+    emailChannelId: acct.id,
+    feedbackPrimary: `f${shortId(automation.id)}`,
+    kind: transactional ? 'txn' : 'flow',
+    unsubscribeUrl: !transactional && unsubUrl ? unsubUrl : undefined,
+  });
 
   let result;
   try {
@@ -1359,6 +1406,7 @@ async function runFlowSend(job: Job<SendJobData>) {
       html,
       operationId,
       headers,
+      meta: { flowSendId: send.id, automationId: automation.id },
     });
   } catch (err) {
     await refundTenantQuota(send.accountId, `flow send ${send.id} threw before provider result`);

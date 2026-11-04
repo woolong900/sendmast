@@ -9,7 +9,21 @@ export interface MailMessage {
   to: string;
   subject: string;
   html: string;
+  /**
+   * Standard RFC headers written into the message (List-Unsubscribe,
+   * List-Unsubscribe-Post, List-Id, Feedback-ID). Provider-specific limits
+   * are applied per transport (see {@link headersFor}).
+   */
   headers?: Record<string, string>;
+  /** Reply-To address (campaign setting); omitted = replies go to From. */
+  replyTo?: string;
+  /**
+   * Internal correlation ids. Carried ONLY in provider-side metadata (Mailgun
+   * variables, Resend tags, SendGrid custom_args, SES tags) for webhook
+   * matching — never as message headers, so outgoing mail carries no
+   * platform-identifying fingerprint shared by every tenant.
+   */
+  meta?: MailMeta;
   /**
    * Client-supplied ACS operation id. ACS echoes it back as `result.id` AND as
    * the `messageId` in delivery reports, so we pre-assign it (and persist it on
@@ -36,6 +50,31 @@ export interface SendResult {
   errorMessage?: string;
   /** Raw response body or sanitised error object — written into JSONB. */
   providerResponse?: unknown;
+}
+
+export interface MailMeta {
+  /** campaign_recipients.id (campaign sends). */
+  recipientId?: string;
+  campaignId?: string;
+  /** shop_automation_sends.id (flow sends). */
+  flowSendId?: string;
+  automationId?: string;
+}
+
+/**
+ * Provider header rules:
+ *   - Cloudflare rejects the whole request if Feedback-ID is set
+ *     (platform-controlled, E_HEADER_NOT_ALLOWED).
+ *   - SES adds its own Feedback-ID; a second one would duplicate a
+ *     single-occurrence header, so we leave it to SES.
+ */
+function headersFor(
+  provider: 'acs' | 'mailgun' | 'resend' | 'cloudflare' | 'sendgrid' | 'ses',
+  headers: Record<string, string> | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = { ...(headers ?? {}) };
+  if (provider === 'cloudflare' || provider === 'ses') delete out['Feedback-ID'];
+  return out;
 }
 
 export interface MailTransport {
@@ -166,7 +205,8 @@ async function buildEmailChannelTransport(acct: EmailChannel): Promise<MailTrans
               senderAddress: msg.from.address,
               recipients: { to: [{ address: msg.to }] },
               content: { subject: msg.subject, html: msg.html },
-              headers: msg.headers,
+              headers: headersFor('acs', msg.headers),
+              ...(msg.replyTo ? { replyTo: [{ address: msg.replyTo }] } : {}),
             },
             msg.operationId ? { operationId: msg.operationId } : undefined,
           ),
@@ -234,11 +274,11 @@ function buildMailgunTransport(acct: EmailChannel): MailTransport {
           subject: msg.subject,
           html: msg.html,
         });
-        for (const [key, value] of Object.entries(msg.headers ?? {})) {
+        for (const [key, value] of Object.entries(headersFor('mailgun', msg.headers))) {
           body.set(`h:${key}`, value);
         }
-        if (msg.operationId) body.set('h:X-SendMast-Operation-Id', msg.operationId);
-        const variables = mailgunVariables(msg.headers ?? {}, msg.operationId);
+        if (msg.replyTo) body.set('h:Reply-To', msg.replyTo);
+        const variables = mailgunVariables(msg.meta, msg.operationId);
         for (const [key, value] of Object.entries(variables)) {
           body.set(`v:${key}`, value);
         }
@@ -304,8 +344,7 @@ function buildResendTransport(acct: EmailChannel): MailTransport {
     async send(msg) {
       const startedAt = Date.now();
       try {
-        const headers = { ...(msg.headers ?? {}) };
-        if (msg.operationId) headers['X-SendMast-Operation-Id'] = msg.operationId;
+        const headers = headersFor('resend', msg.headers);
         const res = await withTimeout(
           fetch(`${base}/emails`, {
             method: 'POST',
@@ -321,7 +360,8 @@ function buildResendTransport(acct: EmailChannel): MailTransport {
               subject: msg.subject,
               html: msg.html,
               headers,
-              tags: resendTags(msg.headers ?? {}, msg.operationId),
+              ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
+              tags: resendTags(msg.meta, msg.operationId),
             }),
           }),
           SEND_TIMEOUT_MS,
@@ -397,6 +437,8 @@ function buildCloudflareTransport(acct: EmailChannel): MailTransport {
                 subject: msg.subject,
                 html: msg.html,
                 text: htmlToText(msg.html),
+                headers: headersFor('cloudflare', msg.headers),
+                ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
               }),
             },
           ),
@@ -461,13 +503,12 @@ function buildSendGridTransport(acct: EmailChannel): MailTransport {
               personalizations: [
                 {
                   to: [{ email: msg.to }],
-                  custom_args: sendgridCustomArgs(msg.headers ?? {}, msg.operationId),
-                  headers: msg.operationId
-                    ? { 'X-SendMast-Operation-Id': msg.operationId }
-                    : undefined,
+                  custom_args: sendgridCustomArgs(msg.meta, msg.operationId),
+                  headers: headersFor('sendgrid', msg.headers),
                 },
               ],
               from: { email: msg.from.address, name: msg.from.name || undefined },
+              ...(msg.replyTo ? { reply_to: { email: msg.replyTo } } : {}),
               subject: msg.subject,
               content: [
                 { type: 'text/plain', value: htmlToText(msg.html) },
@@ -536,6 +577,7 @@ function buildSesTransport(acct: EmailChannel): MailTransport {
         const body = JSON.stringify({
           FromEmailAddress: formatFrom(msg.from.name, msg.from.address),
           Destination: { ToAddresses: [msg.to] },
+          ...(msg.replyTo ? { ReplyToAddresses: [msg.replyTo] } : {}),
           Content: {
             Simple: {
               Subject: { Data: msg.subject, Charset: 'UTF-8' },
@@ -543,9 +585,14 @@ function buildSesTransport(acct: EmailChannel): MailTransport {
                 Text: { Data: htmlToText(msg.html), Charset: 'UTF-8' },
                 Html: { Data: msg.html, Charset: 'UTF-8' },
               },
+              // SES v2 custom headers on Simple content (List-Unsubscribe etc.).
+              Headers: Object.entries(headersFor('ses', msg.headers)).map(([Name, Value]) => ({
+                Name,
+                Value,
+              })),
             },
           },
-          EmailTags: sesTags(msg.headers ?? {}, msg.operationId),
+          EmailTags: sesTags(msg.meta, msg.operationId),
         });
         const headers = signAwsRequest({
           accessKeyId: acct.sesAccessKeyId!,
@@ -600,28 +647,31 @@ function buildSesTransport(acct: EmailChannel): MailTransport {
   };
 }
 
-function mailgunVariables(
-  headers: Record<string, string>,
-  operationId?: string,
-): Record<string, string> {
+/**
+ * Correlation ids sent as provider metadata. Keys are deliberately short and
+ * neutral: Mailgun copies variables into an `X-Mailgun-Variables` header of
+ * the delivered message, so platform-named keys would fingerprint every
+ * tenant's mail. Webhook parsing accepts these and the legacy `sendmast_*`
+ * keys (mail sent before this change).
+ */
+function mailgunVariables(meta: MailMeta | undefined, operationId?: string): Record<string, string> {
   const out: Record<string, string> = {};
-  if (headers['X-SendMast-Recipient']) out.sendmast_recipient_id = headers['X-SendMast-Recipient'];
-  if (headers['X-SendMast-Campaign']) out.sendmast_campaign_id = headers['X-SendMast-Campaign'];
-  if (headers['X-SendMast-FlowSend']) {
-    out.sendmast_recipient_id = headers['X-SendMast-FlowSend'];
-    out.sendmast_source = 'a';
+  if (meta?.recipientId) out.rid = meta.recipientId;
+  if (meta?.campaignId) out.cid = meta.campaignId;
+  if (meta?.flowSendId) {
+    out.rid = meta.flowSendId;
+    out.src = 'a';
   }
-  if (headers['X-SendMast-Automation'])
-    out.sendmast_automation_id = headers['X-SendMast-Automation'];
-  if (operationId) out.sendmast_operation_id = operationId;
+  if (meta?.automationId) out.aid = meta.automationId;
+  if (operationId) out.oid = operationId;
   return out;
 }
 
 function resendTags(
-  headers: Record<string, string>,
+  meta: MailMeta | undefined,
   operationId?: string,
 ): Array<{ name: string; value: string }> {
-  return Object.entries(mailgunVariables(headers, operationId))
+  return Object.entries(mailgunVariables(meta, operationId))
     .map(([name, value]) => ({
       name: sanitiseResendTagPart(name),
       value: sanitiseResendTagPart(value),
@@ -630,11 +680,11 @@ function resendTags(
 }
 
 function sendgridCustomArgs(
-  headers: Record<string, string>,
+  meta: MailMeta | undefined,
   operationId?: string,
 ): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(mailgunVariables(headers, operationId)).map(([key, value]) => [
+    Object.entries(mailgunVariables(meta, operationId)).map(([key, value]) => [
       sanitiseResendTagPart(key),
       value.slice(0, 500),
     ]),
@@ -642,10 +692,10 @@ function sendgridCustomArgs(
 }
 
 function sesTags(
-  headers: Record<string, string>,
+  meta: MailMeta | undefined,
   operationId?: string,
 ): Array<{ Name: string; Value: string }> {
-  return Object.entries(mailgunVariables(headers, operationId))
+  return Object.entries(mailgunVariables(meta, operationId))
     .map(([name, value]) => ({
       Name: sanitiseSesTagPart(name),
       Value: sanitiseSesTagPart(value),
