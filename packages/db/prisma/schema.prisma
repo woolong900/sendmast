@@ -328,6 +328,7 @@ model Account {
   shopAutomations        ShopAutomation[]
   shopAbandonedCheckouts ShopAbandonedCheckout[]
   trackingLinks          TrackingLink[]
+  trackingLinkUrls       TrackingLinkUrl[]
 
   referredByChannel ReferralChannel? @relation(fields: [referredByChannelId], references: [id], onDelete: SetNull)
 
@@ -1007,6 +1008,26 @@ model TrackingLink {
   @@unique([automationSendId, linkIndex])
   @@index([accountId, createdAt])
   @@map("tracking_links")
+}
+
+/// Click destinations, de-duplicated per campaign / automation. Click tokens
+/// carry the row id (`l`), so a send no longer writes one tracking_links row
+/// per link per recipient. `scopeId` = campaign id or automation id.
+/// tracking_links stays read-only for tokens already in delivered inboxes.
+model TrackingLinkUrl {
+  id        Int      @id @default(autoincrement())
+  accountId String   @map("account_id") @db.Uuid
+  scopeId   String   @map("scope_id") @db.Uuid
+  /// sha256(url) hex — unique key without indexing the full URL text.
+  urlHash   String   @map("url_hash")
+  url       String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([scopeId, urlHash])
+  @@index([accountId])
+  @@map("tracking_link_urls")
 }
 
 // ============================================================================

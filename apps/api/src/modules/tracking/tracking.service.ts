@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { verifyTrackingToken, type TrackingPayload } from '@sendmast/email-tracking';
+import { applySmMid, verifyTrackingToken, type TrackingPayload } from '@sendmast/email-tracking';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { QueueService } from '../../common/queue/queue.service';
 import { QUEUE_NAMES } from '@sendmast/shared';
@@ -34,9 +34,7 @@ export class TrackingService {
     // ClickHouse email_events.raw_meta — same place ACS bounce reasons live.
     // The recipients API parses it back out for the 退订原因 column.
     const rawMeta =
-      input.reason && input.reason.trim().length > 0
-        ? { reason: input.reason.trim() }
-        : undefined;
+      input.reason && input.reason.trim().length > 0 ? { reason: input.reason.trim() } : undefined;
     await this.queue.add(QUEUE_NAMES.EVENTS_INGEST, 'event', {
       kind: input.payload.k,
       recipientId: input.payload.r,
@@ -56,8 +54,21 @@ export class TrackingService {
     payload: TrackingPayload,
     legacyTarget?: string,
   ): Promise<string | null> {
-    if (payload.k !== 'c' || payload.i == null) return null;
+    if (payload.k !== 'c') return null;
 
+    // Current tokens: shared destination row + re-append this recipient's
+    // sm_mid (stripped before storage so all recipients share one row).
+    if (payload.l != null) {
+      const shared = await this.prisma.trackingLinkUrl.findUnique({
+        where: { id: payload.l },
+        select: { url: true },
+      });
+      if (shared?.url && /^https?:\/\//i.test(shared.url)) return applySmMid(shared.url, payload.r);
+      return null;
+    }
+
+    // Older tokens: per-recipient tracking_links rows.
+    if (payload.i == null) return null;
     const link =
       payload.s === 'a'
         ? await this.prisma.trackingLink.findUnique({

@@ -12,6 +12,12 @@ export interface TrackingPayload {
   /** optional click target index (which link) */
   i?: number;
   /**
+   * Click destination id in `tracking_link_urls` (campaign/flow-scoped,
+   * de-duplicated). Newer tokens carry it; older ones resolve through the
+   * per-recipient `tracking_links` rows via (r, i).
+   */
+  l?: number;
+  /**
    * Source discriminator. Absent = campaign recipient (backward compatible
    * with tokens already embedded in delivered inboxes). 'a' = automation /
    * flow send.
@@ -36,10 +42,7 @@ export function signTrackingToken(payload: TrackingPayload, secret: string): str
   return `${body}${SEP}${sig}`;
 }
 
-export function verifyTrackingToken(
-  token: string,
-  secret: string,
-): TrackingPayload | null {
+export function verifyTrackingToken(token: string, secret: string): TrackingPayload | null {
   const [body, sig] = token.split(SEP);
   if (!body || !sig) return null;
   const expected = b64url(createHmac('sha256', secret).update(body).digest());
@@ -52,4 +55,3 @@ export function verifyTrackingToken(
     return null;
   }
 }
-

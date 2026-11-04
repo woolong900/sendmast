@@ -1,9 +1,14 @@
 import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { Prisma, PrismaClient, type Campaign, type EmailChannel } from '@prisma/client';
-import { rewriteHtml, signTrackingToken } from '@sendmast/email-tracking';
+import {
+  collectTrackedUrls,
+  rewriteHtml,
+  signTrackingToken,
+  type RewriteOptions,
+} from '@sendmast/email-tracking';
 import { QUEUE_NAMES, isImpersonatingDisplayName } from '@sendmast/shared';
 import { buildClickHouseClient } from '@sendmast/clickhouse';
 import { getTransportForAccount } from './transport';
@@ -206,42 +211,44 @@ async function resolveEmailChannelIdForDomain(domain: string): Promise<string | 
   return value;
 }
 
-async function persistCampaignTrackingLinks(
-  accountId: string,
-  recipientId: string,
-  links: Array<{ index: number; url: string }>,
-) {
-  await prisma.$transaction(async (tx) => {
-    await tx.trackingLink.deleteMany({ where: { recipientId } });
-    if (links.length === 0) return;
-    await tx.trackingLink.createMany({
-      data: links.map((l) => ({
-        accountId,
-        recipientId,
-        linkIndex: l.index,
-        url: l.url,
-      })),
-    });
-  });
-}
+// Click destinations: one tracking_link_urls row per distinct (scope, URL),
+// shared by every recipient — replaces the per-recipient tracking_links rows
+// (N links × N recipients rows + a delete/insert transaction per send).
+const linkIdCache = new Map<string, number>();
+const LINK_ID_CACHE_MAX = 50_000;
 
-async function persistAutomationTrackingLinks(
+async function resolveLinkIds(
   accountId: string,
-  automationSendId: string,
-  links: Array<{ index: number; url: string }>,
-) {
-  await prisma.$transaction(async (tx) => {
-    await tx.trackingLink.deleteMany({ where: { automationSendId } });
-    if (links.length === 0) return;
-    await tx.trackingLink.createMany({
-      data: links.map((l) => ({
-        accountId,
-        automationSendId,
-        linkIndex: l.index,
-        url: l.url,
-      })),
-    });
+  scopeId: string,
+  urls: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const missing: Array<{ url: string; hash: string }> = [];
+  for (const url of urls) {
+    const hash = createHash('sha256').update(url).digest('hex');
+    const id = linkIdCache.get(`${scopeId}|${hash}`);
+    if (id !== undefined) out.set(url, id);
+    else missing.push({ url, hash });
+  }
+  if (missing.length === 0) return out;
+
+  await prisma.trackingLinkUrl.createMany({
+    data: missing.map((m) => ({ accountId, scopeId, urlHash: m.hash, url: m.url })),
+    skipDuplicates: true,
   });
+  const rows = await prisma.trackingLinkUrl.findMany({
+    where: { scopeId, urlHash: { in: missing.map((m) => m.hash) } },
+    select: { id: true, urlHash: true },
+  });
+  const byHash = new Map(rows.map((r) => [r.urlHash, r.id]));
+  if (linkIdCache.size + missing.length > LINK_ID_CACHE_MAX) linkIdCache.clear();
+  for (const m of missing) {
+    const id = byHash.get(m.hash);
+    if (id === undefined) continue;
+    linkIdCache.set(`${scopeId}|${m.hash}`, id);
+    out.set(m.url, id);
+  }
+  return out;
 }
 
 // ============================================================================
@@ -832,7 +839,7 @@ function shortId(uuid: string): string {
 /**
  * Standard bulk-mail headers, identical in shape across every provider
  * (transports drop what a provider forbids, e.g. Feedback-ID on Cloudflare):
- *   - List-Unsubscribe (+ RFC 8058 one-click) for marketing mail;
+ *   - List-Unsubscribe (HTTPS, + RFC 8058 one-click) for marketing mail;
  *   - List-Id: stable per tenant + sending domain (RFC 2919), so mailbox
  *     providers and user filters see one consistent list identity;
  *   - Feedback-ID (Gmail FBL): `<campaign|flow>:<tenant>:<type>:<channel>` —
@@ -852,9 +859,10 @@ function bulkHeaders(o: {
   const domain = o.fromEmail.split('@')[1]?.toLowerCase() ?? '';
   const h: Record<string, string> = {};
   if (o.unsubscribeUrl) {
-    h['List-Unsubscribe'] = domain
-      ? `<${o.unsubscribeUrl}>, <mailto:unsubscribe@${domain}>`
-      : `<${o.unsubscribeUrl}>`;
+    // HTTPS one-click only. A mailto: target needs a mailbox that actually
+    // processes requests; we have none, so mail-based unsubscribes (used by
+    // some clients) would silently go nowhere.
+    h['List-Unsubscribe'] = `<${o.unsubscribeUrl}>`;
     h['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
   }
   if (o.kind !== 'txn' && domain) h['List-Id'] = `<t${shortId(o.accountId)}.${domain}>`;
@@ -1028,7 +1036,7 @@ async function runSend(job: Job<SendJobData>) {
     bodyHtml = injectPreheader(bodyHtml, ph);
   }
 
-  const { html, links } = rewriteHtml(bodyHtml, {
+  const rewriteOpts: RewriteOptions = {
     baseUrl: trackingBaseUrl,
     secret: TRACKING_SECRET!,
     recipientId: r.id,
@@ -1049,15 +1057,17 @@ async function runSend(job: Job<SendJobData>) {
     // landing_page, letting the order webhook attribute the conversion to this
     // exact recipient regardless of click tracking or checkout email.
     smMid: r.id,
-  });
+  };
 
+  let linkIds: Map<string, number>;
   try {
-    await persistCampaignTrackingLinks(r.accountId, r.id, links);
+    linkIds = await resolveLinkIds(r.accountId, c.id, collectTrackedUrls(bodyHtml, rewriteOpts));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await failCampaignRecipient(c.id, r.id, `追踪链接保存失败: ${msg}`);
     throw err;
   }
+  const { html } = rewriteHtml(bodyHtml, { ...rewriteOpts, linkIds });
 
   let transport;
   try {
@@ -1385,7 +1395,7 @@ async function runFlowSend(job: Job<SendJobData>) {
     bodyHtml = injectPreheader(bodyHtml, ph);
   }
 
-  const { html, links } = rewriteHtml(bodyHtml, {
+  const rewriteOpts: RewriteOptions = {
     baseUrl: trackingBaseUrl,
     secret: TRACKING_SECRET!,
     recipientId: send.id,
@@ -1401,14 +1411,20 @@ async function runFlowSend(job: Job<SendJobData>) {
     // Keep flow sends attributable in the same way as campaign recipients:
     // the store echoes sm_mid from the landing URL back in the order webhook.
     smMid: send.id,
-  });
+  };
 
+  let linkIds: Map<string, number>;
   try {
-    await persistAutomationTrackingLinks(send.accountId, send.id, links);
+    linkIds = await resolveLinkIds(
+      send.accountId,
+      automation.id,
+      collectTrackedUrls(bodyHtml, rewriteOpts),
+    );
   } catch (err) {
     await fail(`追踪链接保存失败: ${err instanceof Error ? err.message : String(err)}`);
     throw err;
   }
+  const { html } = rewriteHtml(bodyHtml, { ...rewriteOpts, linkIds });
 
   let transport;
   try {

@@ -43,6 +43,14 @@ export interface RewriteOptions {
    * (lives on the destination URL, so it survives the /t/c 302 inside `?u=`).
    */
   smMid?: string;
+  /**
+   * Shared destination → `tracking_link_urls.id`. Keys are destinations
+   * WITHOUT `sm_mid` (UTM applied), so all recipients of a campaign share
+   * rows; the click endpoint re-appends `sm_mid=<token r>` on redirect. When
+   * a link is in the map its token carries `l` and no per-recipient row is
+   * needed. Build it with {@link collectTrackedUrls} before rewriting.
+   */
+  linkIds?: Map<string, number>;
 }
 
 export interface RewriteResult {
@@ -94,7 +102,7 @@ function applyUtm(url: string, utm?: UtmParams): string {
   }
 }
 
-function applySmMid(url: string, smMid?: string): string {
+export function applySmMid(url: string, smMid?: string): string {
   if (!smMid) return url;
   try {
     const u = new URL(url);
@@ -137,6 +145,32 @@ function absoluteAssetSrc(
   }
 }
 
+/**
+ * Shared (recipient-independent) destination of a tracked href — UTM applied,
+ * no sm_mid — or null when the href isn't rewritten. Shared by
+ * collectTrackedUrls and rewriteHtml so both agree on the stored URL.
+ */
+function sharedDestination(rawUrl: string, opts: RewriteOptions): string | null {
+  const url = decodeHtmlAttribute(rawUrl);
+  if (!/^https?:\/\//i.test(url)) return null;
+  if (url.includes('{{unsubscribe_url}}')) return null;
+  return applyUtm(url, opts.utm);
+}
+
+/**
+ * Distinct click-tracked shared destinations of `html`, in document order.
+ * [] when click tracking is off. Call before rewriteHtml to resolve ids.
+ */
+export function collectTrackedUrls(html: string, opts: RewriteOptions): string[] {
+  if (opts.trackClicks === false) return [];
+  const out = new Set<string>();
+  for (const m of html.matchAll(HREF_REGEX)) {
+    const dest = sharedDestination(m[2]!, opts);
+    if (dest) out.add(dest);
+  }
+  return [...out];
+}
+
 /** Wrap http(s) hrefs in /t/c/{token}. Adds {pixel} at the body end. */
 export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
   const links: Array<{ index: number; url: string }> = [];
@@ -164,7 +198,14 @@ export function rewriteHtml(html: string, opts: RewriteOptions): RewriteResult {
     }
     const idx = i++;
     links.push({ index: idx, url: finalUrl });
-    const token = signTrackingToken({ r: opts.recipientId, k: 'c', i: idx, ...src }, opts.secret);
+    // Shared-row tokens rely on the click endpoint re-appending
+    // `sm_mid=<r>`, so they're only used when sm_mid IS the recipient id.
+    const linkId =
+      opts.smMid === opts.recipientId ? opts.linkIds?.get(applyUtm(url, opts.utm)) : undefined;
+    const token = signTrackingToken(
+      { r: opts.recipientId, k: 'c', i: idx, ...(linkId != null ? { l: linkId } : {}), ...src },
+      opts.secret,
+    );
     const wrapped = `${opts.baseUrl.replace(/\/$/, '')}/t/c/${token}`;
     return `href=${q1}${encodeHtmlAttribute(wrapped)}${q1}`;
   });
