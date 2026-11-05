@@ -450,7 +450,15 @@ export class CampaignService {
       },
     });
     if (!c) throw new NotFoundException('活动不存在');
-    return c;
+    // Large audiences are materialised in batches. `totalRecipients` remains
+    // zero until that process finishes because the sender uses the final value
+    // to decide when a campaign is drained. Expose the rows created so far so
+    // the detail page can show progress instead of a misleading zero.
+    const materializedRecipients =
+      c.totalRecipients === 0 && (c.status === 'sending' || c.status === 'scheduled')
+        ? await this.prisma.campaignRecipient.count({ where: { campaignId: c.id } })
+        : c.totalRecipients;
+    return { ...c, materializedRecipients };
   }
 
   /**

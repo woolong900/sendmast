@@ -20,6 +20,7 @@ interface CampaignDetail {
   replyTo: string | null;
   status: string;
   totalRecipients: number;
+  materializedRecipients: number;
   scheduledAt: string | null;
   sentAt: string | null;
   createdAt: string;
@@ -236,7 +237,14 @@ export function CampaignDetailPage() {
                 }
               />
               <Field label="回复地址" value={data.replyTo} />
-              <Field label="收件人数量" value={formatNumber(data.totalRecipients)} />
+              <Field
+                label="收件人数量"
+                value={
+                  data.totalRecipients === 0 && data.materializedRecipients > 0
+                    ? `${formatNumber(data.materializedRecipients)}（生成中）`
+                    : formatNumber(data.totalRecipients)
+                }
+              />
               <Field
                 label="收件列表"
                 value={
