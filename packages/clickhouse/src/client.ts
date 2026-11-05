@@ -84,6 +84,8 @@ export interface EmailEventRow {
   source_type?: 'campaign' | 'flow';
   /** Automation/flow id for flow events; null for campaign events. */
   source_id?: string | null;
+  /** 1 = automated client (scanner / preview / crawler); excluded from segments. */
+  is_bot?: 0 | 1;
 }
 
 export async function insertEmailEvents(
@@ -117,6 +119,8 @@ export interface SiteEventRow {
   value?: number | null;
   currency?: string;
   origin?: 'script' | 'webhook';
+  /** 1 = automated client (scanner / preview / crawler); excluded from segments. */
+  is_bot?: 0 | 1;
   ip?: string | null;
   user_agent?: string | null;
   raw_meta?: string | null;

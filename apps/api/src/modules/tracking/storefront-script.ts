@@ -20,6 +20,18 @@
  * `purchase` is also written server-side from order webhooks, so the
  * thank-you page detection is a best-effort extra, not the source of truth.
  *
+ * Bot filtering (mail security scanners often open email links in a
+ * headless browser, carrying the recipient's sm_mid):
+ *   - automation (navigator.webdriver) / headless or bot user agents → the
+ *     script stays silent;
+ *   - page-load events (views, checkout/thank-you page visits) are held back
+ *     until a human signal — scroll, pointer/mouse movement, touch, key —
+ *     and dropped if the page is left without one. The signal is remembered
+ *     for the browser session. Action events (add_to_cart, add_payment_info)
+ *     imply a user action and go out immediately.
+ *   - the server additionally flags bot user agents (is_bot) and segments
+ *     ignore flagged rows.
+ *
  * Kept as dependency-free ES5 so it runs on any theme without a build step.
  */
 export function buildStorefrontScript(opts: { endpoint: string; key: string }): string {
@@ -70,12 +82,57 @@ export function buildStorefrontScript(opts: { endpoint: string; key: string }): 
     window.SendMast = { track: function () {} };
     return; // not an email visitor — stay silent
   }
+  var ua = navigator.userAgent || '';
+  if (navigator.webdriver ||
+      /HeadlessChrome|PhantomJS|Puppeteer|Playwright|Lighthouse|bot\b|crawl|spider|preview/i.test(ua)) {
+    window.SendMast = { track: function () {} };
+    return; // automated browser (mail security scanner, crawler) — never report
+  }
 
   var sid = null;
   try { sid = window.sessionStorage.getItem(SID); } catch (e) {}
   if (!sid) {
     sid = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
     try { window.sessionStorage.setItem(SID, sid); } catch (e) {}
+  }
+
+  // ---- human gate ----
+  var HUMAN = '_sm_h';
+  var human = false;
+  try { human = window.sessionStorage.getItem(HUMAN) === '1'; } catch (e) {}
+  var pending = [];
+  var ACTION_TYPES = { add_to_cart: 1, add_payment_info: 1 };
+  function markHuman() {
+    if (human) return;
+    human = true;
+    try { window.sessionStorage.setItem(HUMAN, '1'); } catch (e) {}
+    for (var i = 0; i < SIGNALS.length; i++) {
+      window.removeEventListener(SIGNALS[i], onSignal, true);
+    }
+    if (pending.length) {
+      queue = queue.concat(pending);
+      pending = [];
+      if (!timer) timer = setTimeout(flush, 1000);
+    }
+  }
+  var SIGNALS = ['scroll', 'wheel', 'mousemove', 'pointerdown', 'touchstart', 'keydown'];
+  var moved = 0;
+  function onSignal(e) {
+    if (!e || e.isTrusted === false) return; // ignore script-dispatched events
+    if (e.type === 'mousemove') {
+      // Browsers fire a trusted zero-movement mousemove on load/layout
+      // changes; require real pointer travel.
+      moved += Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0);
+      if (moved < 10) return;
+    } else if (e.type === 'scroll') {
+      if ((window.scrollY || window.pageYOffset || 0) < 20) return; // scroll restoration / anchoring
+    }
+    markHuman();
+  }
+  if (!human) {
+    for (var si = 0; si < SIGNALS.length; si++) {
+      window.addEventListener(SIGNALS[si], onSignal, { capture: true, passive: true });
+    }
   }
 
   // ---- batching transport ----
@@ -115,6 +172,11 @@ export function buildStorefrontScript(opts: { endpoint: string; key: string }): 
     if (v !== undefined) ev.v = v;
     if (data.currency) ev.c = String(data.currency).slice(0, 10);
     if (data.orderId) ev.m = { order: String(data.orderId).slice(0, 200) };
+    if (ACTION_TYPES[type]) markHuman(); // a cart/payment action is a human signal
+    if (!human) {
+      pending.push(ev); // held until a human signal; dropped if the page is left
+      return;
+    }
     queue.push(ev);
     if (queue.length >= 10) flush();
     else if (!timer) timer = setTimeout(flush, 1000);

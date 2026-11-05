@@ -14,11 +14,24 @@ import {
   type EmailEventRow,
   type EmailEventType,
 } from '@sendmast/clickhouse';
-import { QUEUE_NAMES, type SiteEventsJobData } from '@sendmast/shared';
+import { QUEUE_NAMES, isBotUserAgent, type SiteEventsJobData } from '@sendmast/shared';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 const FLUSH_BATCH = Number(process.env.EVENTS_FLUSH_BATCH ?? '500');
 const FLUSH_INTERVAL_MS = Number(process.env.EVENTS_FLUSH_INTERVAL_MS ?? '1000');
+// Clicks this soon after the provider accepted the send are almost always
+// mail security scanners following links on delivery, not readers.
+const BOT_CLICK_WINDOW_MS = Number(process.env.BOT_CLICK_WINDOW_SECONDS ?? '30') * 1000;
+
+/** Flag a click as automated (kept, but excluded from segments). */
+function isBotClick(data: EventJobData, recipient: ResolvedSend): boolean {
+  if (isBotUserAgent(data.userAgent)) return true;
+  if (recipient.sentAt) {
+    const delta = data.receivedAt - recipient.sentAt.getTime();
+    if (delta >= 0 && delta < BOT_CLICK_WINDOW_MS) return true;
+  }
+  return false;
+}
 
 const prisma = new PrismaClient();
 const connection = new IORedis(REDIS_URL, { maxRetriesPerRequest: null });
@@ -59,6 +72,8 @@ interface ResolvedSend {
   sourceId: string | null;
   /** Present only for the hot campaign-recipient path. */
   status?: string;
+  /** When the provider accepted the send (hot rows only) — click-timing heuristic. */
+  sentAt?: Date | null;
 }
 
 const KIND_MAP: Record<string, EmailEventType> = {
@@ -97,11 +112,11 @@ async function resolveFlowSend(
     'id' in where
       ? await prisma.shopAutomationSend.findUnique({
           where: { id: where.id },
-          select: { id: true, accountId: true, contactId: true, automationId: true, status: true },
+          select: { id: true, accountId: true, contactId: true, automationId: true, status: true, sentAt: true },
         })
       : await prisma.shopAutomationSend.findFirst({
           where: { messageId: where.messageId },
-          select: { id: true, accountId: true, contactId: true, automationId: true, status: true },
+          select: { id: true, accountId: true, contactId: true, automationId: true, status: true, sentAt: true },
         });
   if (!send) return null;
   return {
@@ -112,6 +127,7 @@ async function resolveFlowSend(
     campaignId: ZERO_UUID,
     sourceId: send.automationId,
     status: send.status,
+    sentAt: send.sentAt,
   };
 }
 
@@ -130,6 +146,7 @@ async function resolveRecipient(data: EventJobData): Promise<ResolvedSend | null
         campaignId: true,
         contactId: true,
         status: true,
+        sentAt: true,
       },
     });
     if (hot) {
@@ -141,6 +158,7 @@ async function resolveRecipient(data: EventJobData): Promise<ResolvedSend | null
         campaignId: hot.campaignId,
         sourceId: null,
         status: hot.status,
+        sentAt: hot.sentAt,
       };
     }
     // PG miss → try the ClickHouse cold archive. This is the normal path for
@@ -298,6 +316,9 @@ async function runEventJob(job: Job<EventJobData>) {
     user_agent: data.userAgent ?? null,
     link_url: data.linkUrl ?? null,
     raw_meta: data.rawMeta ? JSON.stringify(data.rawMeta) : null,
+    // Only clicks are classified: opens via Gmail/Yahoo image proxies are
+    // real reads, and delivery/bounce events come from the provider.
+    is_bot: eventType === 'click' && isBotClick(data, recipient) ? 1 : 0,
     bounce_kind: data.bounceKind ?? '',
   });
 
@@ -419,6 +440,7 @@ async function runSiteEventsJob(job: Job<SiteEventsJobData>) {
       value: e.v ?? null,
       currency: e.c ?? '',
       origin: data.origin,
+      is_bot: data.origin === 'script' && isBotUserAgent(data.userAgent) ? 1 : 0,
       ip: data.ip ?? null,
       user_agent: data.userAgent ?? null,
       raw_meta: e.m ? JSON.stringify(e.m) : null,

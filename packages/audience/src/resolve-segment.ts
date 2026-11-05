@@ -192,6 +192,7 @@ async function contactIdsFromEvent(
        WHERE account_id = {acc:UUID}
          AND event_type = {et:String}
          AND event_time >= parseDateTime64BestEffort({since:String}, 3)
+         AND is_bot = 0
          ${extraFilter}`,
       params,
     );
@@ -256,6 +257,7 @@ async function contactIdsFromSiteEvent(
      WHERE account_id = {acc:UUID}
        AND event_type = {et:String}
        AND event_time >= parseDateTime64BestEffort({since:String}, 3)
+       AND is_bot = 0
        ${extraFilter}
      GROUP BY contact_id
      HAVING count() >= {n:UInt32}

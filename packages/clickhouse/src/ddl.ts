@@ -33,6 +33,9 @@ export const DDL_STATEMENTS: string[] = [
   // flow rows so the existing ORDER BY prefix is unaffected.
   `ALTER TABLE sendmast.email_events ADD COLUMN IF NOT EXISTS source_type LowCardinality(String) DEFAULT 'campaign'`,
   `ALTER TABLE sendmast.email_events ADD COLUMN IF NOT EXISTS source_id Nullable(UUID)`,
+  // 1 = event from an automated client (security scanner, link preview,
+  // crawler) — kept for diagnostics, excluded from segment evaluation.
+  `ALTER TABLE sendmast.email_events ADD COLUMN IF NOT EXISTS is_bot UInt8 DEFAULT 0`,
 
   `CREATE TABLE IF NOT EXISTS sendmast.orders (
       account_id              UUID,
@@ -126,4 +129,5 @@ export const DDL_STATEMENTS: string[] = [
    ORDER BY (account_id, event_type, event_time, contact_id)
    TTL toDateTime(event_time) + INTERVAL 24 MONTH DELETE
    SETTINGS index_granularity = 8192`,
+  `ALTER TABLE sendmast.site_events ADD COLUMN IF NOT EXISTS is_bot UInt8 DEFAULT 0`,
 ];

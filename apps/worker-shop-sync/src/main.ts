@@ -378,6 +378,7 @@ async function recordWebhookPurchase(o: {
               FROM sendmast.site_events
               WHERE account_id = {acc:UUID}
                 AND event_type = 'purchase'
+                AND is_bot = 0
                 AND contact_id = {cid:UUID}
                 AND event_time >= parseDateTime64BestEffort({from:String}, 3)`,
       query_params: {
