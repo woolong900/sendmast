@@ -22,6 +22,7 @@ import { resolveSegmentContactIds } from '@sendmast/audience';
 @Injectable()
 export class SegmentService {
   private readonly logger = new Logger(SegmentService.name);
+  private readonly inFlightEvaluations = new Map<string, Promise<Set<string>>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -143,14 +144,26 @@ export class SegmentService {
    *   - Campaign send (turns ids into CampaignRecipient rows)
    */
   async resolveContactIds(accountId: string, def: SegmentDefinition): Promise<Set<string>> {
+    const key = `${accountId}:${JSON.stringify(def)}`;
+    const existing = this.inFlightEvaluations.get(key);
+    if (existing) return existing;
+
     // Evaluation lives in @sendmast/audience so worker-sender (campaign
     // materialisation) and the API (preview / refresh) can never disagree on
     // who is in a segment.
-    return resolveSegmentContactIds(
+    const evaluation = resolveSegmentContactIds(
       { prisma: this.prisma, ch: this.ch, logger: this.logger },
       accountId,
       def,
     );
+    this.inFlightEvaluations.set(key, evaluation);
+    const cleanup = () => {
+      if (this.inFlightEvaluations.get(key) === evaluation) {
+        this.inFlightEvaluations.delete(key);
+      }
+    };
+    void evaluation.then(cleanup, cleanup);
+    return evaluation;
   }
 
   // ---------------------------------------------------------------------------

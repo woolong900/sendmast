@@ -880,8 +880,8 @@ function PreviewPanel({
 
   const preview = useQuery<SegmentPreviewResult>({
     queryKey: ['segment-preview', debounced],
-    queryFn: async () =>
-      (await api.post('/api/segments/preview', { definition: debounced })).data,
+    queryFn: async ({ signal }) =>
+      (await api.post('/api/segments/preview', { definition: debounced }, { signal })).data,
     enabled: debounced !== null,
   });
 

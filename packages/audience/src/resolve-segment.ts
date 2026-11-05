@@ -35,9 +35,6 @@ const DERIVED_CONSTRAINT_HARD_CAP = 1_000_000;
  * accountId and other rule predicates are included.
  */
 const PRISMA_IN_BIND_SAFE_LIMIT = 25_000;
-/** Keep event-recipient lookups small enough to avoid large PG shared-memory plans. */
-const EVENT_RECIPIENT_LOOKUP_CHUNK = 2_000;
-
 const consoleLogger: AudienceLogger = { warn: (m) => console.warn(`[audience] ${m}`) };
 
 /**
@@ -184,15 +181,19 @@ async function contactIdsFromEvent(
     params.cid = ec.campaignId;
   }
 
-  let rows: { recipient_id: string }[];
+  let rows: { contact_id: string }[];
   try {
-    rows = await ctx.ch.query<{ recipient_id: string }>(
-      `SELECT DISTINCT toString(recipient_id) AS recipient_id
+    // email_events already stores contact_id. Reading it directly avoids
+    // mapping every recipient_id back through the hot Postgres recipient
+    // table in thousands of bind parameters, and keeps archived events usable.
+    rows = await ctx.ch.query<{ contact_id: string }>(
+      `SELECT DISTINCT toString(contact_id) AS contact_id
        FROM sendmast.email_events
        WHERE account_id = {acc:UUID}
          AND event_type = {et:String}
          AND event_time >= parseDateTime64BestEffort({since:String}, 3)
          AND is_bot = 0
+         AND contact_id != toUUID('00000000-0000-0000-0000-000000000000')
          ${extraFilter}`,
       params,
     );
@@ -213,18 +214,7 @@ async function contactIdsFromEvent(
     rows = rows.slice(0, DERIVED_CONSTRAINT_HARD_CAP);
   }
 
-  // recipientId → contactId via PG (archived/cold rows are not included,
-  // acceptable for "last N days" lookups since N << the 90d archive age).
-  const recipientIds = rows.map((r) => r.recipient_id);
-  const contactIds = new Set<string>();
-  for (let i = 0; i < recipientIds.length; i += EVENT_RECIPIENT_LOOKUP_CHUNK) {
-    const links = await ctx.prisma.campaignRecipient.findMany({
-      where: { accountId, id: { in: recipientIds.slice(i, i + EVENT_RECIPIENT_LOOKUP_CHUNK) } },
-      select: { contactId: true },
-    });
-    for (const l of links) contactIds.add(l.contactId);
-  }
-  return contactIds;
+  return new Set(rows.map((r) => r.contact_id));
 }
 
 /**
