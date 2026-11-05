@@ -185,6 +185,7 @@ export function AdminAccountsPage() {
     primaryEmailChannelId: string | null,
     remaining: number,
     role: AccountRole,
+    senderNameReviewApproved: boolean,
   ) {
     if (!editingAccount) return;
     setSavingEdit(true);
@@ -196,6 +197,11 @@ export function AdminAccountsPage() {
       await api.patch(`/api/admin/accounts/${editingAccount.id}/quota`, { remaining });
       if (role !== editingAccount.role) {
         await api.patch(`/api/admin/accounts/${editingAccount.id}/role`, { role });
+      }
+      if (senderNameReviewApproved !== editingAccount.senderNameReviewApproved) {
+        await api.patch(`/api/admin/accounts/${editingAccount.id}/sender-name-review`, {
+          approved: senderNameReviewApproved,
+        });
       }
       toast('已更新', 'success');
       setEditingAccount(null);
@@ -368,6 +374,7 @@ function AccountEditModal({
     primaryEmailChannelId: string | null,
     remaining: number,
     role: AccountRole,
+    senderNameReviewApproved: boolean,
   ) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
@@ -378,6 +385,9 @@ function AccountEditModal({
   );
   const [quota, setQuota] = useState<string>(() => String(account.sendQuotaRemaining));
   const [role, setRole] = useState<AccountRole>(() => account.role);
+  const [senderNameReviewApproved, setSenderNameReviewApproved] = useState(
+    account.senderNameReviewApproved,
+  );
   const [usage, setUsage] = useState<
     Record<string, { allowMarketing: boolean; allowTransactional: boolean }>
   >(() =>
@@ -574,12 +584,31 @@ function AccountEditModal({
             )}
           </div>
 
+          <div>
+            <div className="mb-1.5 text-sm font-medium">发件人名称审核</div>
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 has-[:checked]:border-primary has-[:checked]:bg-muted/40">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={senderNameReviewApproved}
+                disabled={pending}
+                onChange={(e) => setSenderNameReviewApproved(e.target.checked)}
+              />
+              <span className="min-w-0">
+                <span className="text-sm font-medium">已人工审核，跳过第三方名称检测</span>
+                <span className="block text-xs text-muted-foreground">
+                  仅在确认该租户的发件身份与品牌授权后开启；其他发件域名和通道校验仍然有效。
+                </span>
+              </span>
+            </label>
+          </div>
+
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={onClose} disabled={pending}>
               取消
             </Button>
             <Button
-              onClick={() => onSave(assignments, primary, quotaNum, role)}
+              onClick={() => onSave(assignments, primary, quotaNum, role, senderNameReviewApproved)}
               disabled={pending || !valid}
             >
               {pending ? '保存中…' : '保存'}

@@ -227,6 +227,8 @@ export interface AdminAccountView {
   emailChannels: AssignedEmailChannelView[];
   senderDomainCount: number;
   sendQuotaRemaining: number;
+  /** Admin-confirmed tenant: bypass the generic sender-name impersonation check. */
+  senderNameReviewApproved: boolean;
   status: 'pending_activation' | 'active' | 'suspended';
   activatedAt: string | null;
   suspendedAt: string | null;
@@ -262,6 +264,11 @@ export const SetTenantQuotaSchema = z.object({
   remaining: z.coerce.number().int().min(0).max(2_000_000_000),
 });
 export type SetTenantQuotaInput = z.infer<typeof SetTenantQuotaSchema>;
+
+export const SetSenderNameReviewSchema = z.object({
+  approved: z.boolean(),
+});
+export type SetSenderNameReviewInput = z.infer<typeof SetSenderNameReviewSchema>;
 
 export interface TenantQuotaView {
   remaining: number;

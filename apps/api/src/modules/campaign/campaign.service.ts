@@ -1275,6 +1275,11 @@ export class CampaignService {
     senders: Array<{ fromEmail: string; fromName: string }>,
     mode: 'validate' | 'send',
   ): Promise<Array<{ fromEmail: string; fromName: string; emailChannelId: string }>> {
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      select: { senderNameReviewApproved: true },
+    });
+    const enforceSenderNameCheck = !account?.senderNameReviewApproved;
     const domainEmailChannel = new Map<string, string>();
     const domainRowId = new Map<string, string>();
     const enriched: Array<{ fromEmail: string; fromName: string; emailChannelId: string }> = [];
@@ -1331,7 +1336,11 @@ export class CampaignService {
           `寄件地址 ${s.fromEmail} 尚未添加,请先在「发件域名」中为 ${domain} 添加该寄件人`,
         );
       }
-      if (configured.displayName && isImpersonatingDisplayName(configured.displayName)) {
+      if (
+        enforceSenderNameCheck &&
+        configured.displayName &&
+        isImpersonatingDisplayName(configured.displayName)
+      ) {
         throw new BadRequestException(
           `寄件地址 ${s.fromEmail} 的显示名「${configured.displayName}」冒用了第三方名义,请先在「发件域名」中修改`,
         );

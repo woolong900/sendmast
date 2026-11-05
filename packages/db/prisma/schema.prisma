@@ -304,6 +304,9 @@ model Account {
   /// (true) are trusted partners who see the real, unmodified deliverability
   /// data (including the true bounce rate). Toggled by admin in 租户管理.
   isCollaborator      Boolean       @default(false) @map("is_collaborator")
+  /// Platform-admin approval that lets this tenant use manually reviewed
+  /// sender display names without the generic third-party-name check.
+  senderNameReviewApproved Boolean  @default(false) @map("sender_name_review_approved")
   createdAt           DateTime      @default(now()) @map("created_at")
   updatedAt           DateTime      @updatedAt @map("updated_at")
 

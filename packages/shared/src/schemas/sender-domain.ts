@@ -108,13 +108,7 @@ export function isImpersonatingDisplayName(name: string): boolean {
 }
 
 /** Sender display name shown in the recipient's inbox. */
-export const SenderDisplayNameSchema = z
-  .string()
-  .trim()
-  .max(120)
-  .refine((v) => !isImpersonatingDisplayName(v), {
-    message: '发件人名称不能使用邮政、快递或政府机构等第三方名义',
-  });
+export const SenderDisplayNameSchema = z.string().trim().max(120);
 
 export const CreateSenderUsernameSchema = z.object({
   // Local-part of the email; Azure rejects most special chars and uppercase.

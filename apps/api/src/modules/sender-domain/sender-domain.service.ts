@@ -8,7 +8,7 @@ import { ResendService } from './resend.service';
 import { SendGridService } from './sendgrid.service';
 import { SesService } from './ses.service';
 import { ensureDmarcRecord, applyDmarcDnsVerification } from './dmarc-record';
-import { normalizeSenderDomain } from '@sendmast/shared';
+import { isImpersonatingDisplayName, normalizeSenderDomain } from '@sendmast/shared';
 import type {
   SenderDomainDnsRecord,
   SenderDomainRecordKind,
@@ -406,6 +406,7 @@ export class SenderDomainService {
     username: string,
     displayName?: string,
   ): Promise<SenderUsernameView> {
+    await this.assertDisplayNameAllowed(accountId, displayName);
     const row = await this.prisma.senderDomain.findFirst({
       where: { id, accountId },
       include: { emailChannel: true },
@@ -457,6 +458,7 @@ export class SenderDomainService {
     usernameId: string,
     displayName: string,
   ): Promise<SenderUsernameView> {
+    await this.assertDisplayNameAllowed(accountId, displayName);
     const row = await this.prisma.senderDomain.findFirst({
       where: { id: domainId, accountId },
       include: { emailChannel: true },
@@ -506,6 +508,18 @@ export class SenderDomainService {
       }),
     ]);
     return this.toUsernameView(updated, row.domain);
+  }
+
+  private async assertDisplayNameAllowed(accountId: string, displayName?: string): Promise<void> {
+    const name = displayName?.trim();
+    if (!name || !isImpersonatingDisplayName(name)) return;
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      select: { senderNameReviewApproved: true },
+    });
+    if (!account?.senderNameReviewApproved) {
+      throw new BadRequestException('发件人名称不能使用邮政、快递或政府机构等第三方名义');
+    }
   }
 
   async removeSenderUsername(

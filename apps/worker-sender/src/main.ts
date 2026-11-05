@@ -34,6 +34,22 @@ const TRACKING_SECRET = process.env.TRACKING_TOKEN_SECRET;
 // future). Pool empty = send fails — see the recipient-fail path below.
 const SEND_CONCURRENCY = Number(process.env.SEND_CONCURRENCY ?? '8');
 const PUBLIC_ASSET_BASE_URL = publicAssetBaseUrl();
+const senderNameReviewCache = new Map<string, { approved: boolean; loadedAt: number }>();
+const SENDER_NAME_REVIEW_TTL_MS = 30_000;
+
+async function senderNameReviewApproved(accountId: string): Promise<boolean> {
+  const now = Date.now();
+  const cached = senderNameReviewCache.get(accountId);
+  if (cached && cached.loadedAt + SENDER_NAME_REVIEW_TTL_MS > now) return cached.approved;
+  const account = await prisma.account.findUnique({
+    where: { id: accountId },
+    select: { senderNameReviewApproved: true },
+  });
+  const approved = account?.senderNameReviewApproved ?? false;
+  if (senderNameReviewCache.size >= 10_000) senderNameReviewCache.clear();
+  senderNameReviewCache.set(accountId, { approved, loadedAt: now });
+  return approved;
+}
 
 // Fairness cap: max recipients kept in-flight (queued but not yet sent) per channel
 // account. Sends drain through ONE shared FIFO queue, so without this cap an
@@ -913,7 +929,11 @@ async function runSend(job: Job<SendJobData>) {
   // stored name is only a fallback for addresses without a sender record.
   const fromName =
     (await configuredSenderName(r.accountId, fromEmail)) ?? r.fromName ?? c.fromName;
-  if (fromName && isImpersonatingDisplayName(fromName)) {
+  if (
+    fromName &&
+    isImpersonatingDisplayName(fromName) &&
+    !(await senderNameReviewApproved(r.accountId))
+  ) {
     await failCampaignRecipient(
       c.id,
       r.id,
@@ -1292,7 +1312,7 @@ async function runFlowSend(job: Job<SendJobData>) {
     automation.fromName ??
     fromEmail?.split('@')[0] ??
     'Store';
-  if (isImpersonatingDisplayName(fromName)) {
+  if (isImpersonatingDisplayName(fromName) && !(await senderNameReviewApproved(send.accountId))) {
     await fail(`寄件人名称「${fromName}」冒用第三方名义,请在发件域名中修改`);
     return;
   }

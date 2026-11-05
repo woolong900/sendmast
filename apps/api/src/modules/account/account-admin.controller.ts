@@ -23,6 +23,7 @@ import {
   AssignEmailChannelsSchema,
   SetAccountRoleSchema,
   SetAccountStatusSchema,
+  SetSenderNameReviewSchema,
   SetTenantQuotaSchema,
 } from '@sendmast/shared';
 import type { AccountRole, AdminAccountView, AssignedEmailChannelView } from '@sendmast/shared';
@@ -78,6 +79,7 @@ export class AccountAdminController {
       ),
       senderDomainCount: r._count.senderDomains,
       sendQuotaRemaining: r.sendQuotaRemaining,
+      senderNameReviewApproved: r.senderNameReviewApproved,
       status: r.status,
       activatedAt: r.activatedAt ? r.activatedAt.toISOString() : null,
       suspendedAt: r.suspendedAt ? r.suspendedAt.toISOString() : null,
@@ -145,6 +147,17 @@ export class AccountAdminController {
       data: { sendQuotaRemaining: r.data.remaining },
     });
     return { ok: true, remaining: r.data.remaining };
+  }
+
+  @Patch(':id/sender-name-review')
+  async setSenderNameReview(@Param('id', new ParseUUIDPipe()) id: string, @Body() body: unknown) {
+    const r = SetSenderNameReviewSchema.safeParse(body);
+    if (!r.success) throw new BadRequestException(firstZodError(r.error));
+    await this.prisma.account.update({
+      where: { id },
+      data: { senderNameReviewApproved: r.data.approved },
+    });
+    return { ok: true, approved: r.data.approved };
   }
 
   /**
