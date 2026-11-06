@@ -70,6 +70,14 @@ const SEND_LOG_SETTINGS_TTL_MS = 30_000;
 const STALE_QUEUED_MS = Number(process.env.STALE_QUEUED_MS ?? String(15 * 60_000));
 const STALE_SWEEP_INTERVAL_MS = 60_000;
 const STALE_SWEEP_BATCH = 500;
+// Audience materialisation can take several minutes for million-row segments.
+// If its BullMQ job is lost after the campaign enters `sending`, periodically
+// republish it. Inserts are idempotent, so a retry resumes from existing rows.
+const STRANDED_DISPATCH_AGE_MS = Number(
+  process.env.STRANDED_DISPATCH_AGE_MS ?? String(5 * 60_000),
+);
+const DISPATCH_RECOVERY_INTERVAL_MS = 60_000;
+const DISPATCH_RECOVERY_BATCH = 100;
 // Campaign content is immutable while sending/paused (the API only allows
 // edits in draft/scheduled), so it is cached per process and revalidated
 // against campaign.updatedAt, which is read fresh with every recipient.
@@ -102,6 +110,15 @@ const sendEmailQueue = new Queue(QUEUE_NAMES.SEND_EMAIL, {
 
 const sendTickQueue = new Queue(QUEUE_NAMES.SEND_TICK, { connection });
 const archiveQueue = new Queue(QUEUE_NAMES.ARCHIVE_RECIPIENTS, { connection });
+const sendCampaignQueue = new Queue<DispatchJobData>(QUEUE_NAMES.SEND_CAMPAIGN, {
+  connection,
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: { type: 'exponential', delay: 30_000 },
+    removeOnComplete: true,
+    removeOnFail: { age: 86400 * 7 },
+  },
+});
 
 // ClickHouse client for the archive job. Created lazily here (not in archive.ts)
 // so unit tests can swap it; in prod it's always the env-derived singleton.
@@ -403,6 +420,57 @@ async function materialiseRecipients(
       `(total ${total}, ${suppressed} suppressed address(es) skipped)`,
   );
   return total;
+}
+
+let dispatchRecoveryRunning = false;
+
+async function recoverStrandedDispatches(): Promise<void> {
+  if (dispatchRecoveryRunning) return;
+  dispatchRecoveryRunning = true;
+  try {
+    const now = Date.now();
+    const cutoff = new Date(now - STRANDED_DISPATCH_AGE_MS);
+    const stranded = await prisma.campaign.findMany({
+      where: {
+        totalRecipients: 0,
+        OR: [
+          { status: 'sending', sendingStartedAt: { lt: cutoff } },
+          { status: 'scheduled', scheduledAt: { lt: cutoff } },
+        ],
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: DISPATCH_RECOVERY_BATCH,
+      select: { id: true, accountId: true },
+    });
+    if (stranded.length === 0) return;
+
+    const liveJobs = await sendCampaignQueue.getJobs(
+      ['waiting', 'active', 'delayed', 'prioritized', 'waiting-children'],
+      0,
+      999,
+      true,
+    );
+    const liveCampaignIds = new Set(liveJobs.map((job) => job.data.campaignId));
+    let recovered = 0;
+    const recoveryWindow = Math.floor(now / DISPATCH_RECOVERY_INTERVAL_MS);
+
+    for (const campaign of stranded) {
+      if (liveCampaignIds.has(campaign.id)) continue;
+      await sendCampaignQueue.add(
+        'dispatch-recovery',
+        { campaignId: campaign.id, accountId: campaign.accountId },
+        { jobId: `recover-${campaign.id}-${recoveryWindow}` },
+      );
+      recovered++;
+    }
+    if (recovered > 0) {
+      console.warn(`[dispatch-recovery] requeued ${recovered} stranded campaign(s)`);
+    }
+  } catch (err) {
+    console.error('[dispatch-recovery] scan failed:', err);
+  } finally {
+    dispatchRecoveryRunning = false;
+  }
 }
 
 // ============================================================================
@@ -1566,6 +1634,8 @@ async function runFlowSend(job: Job<SendJobData>) {
 new Worker<DispatchJobData>(QUEUE_NAMES.SEND_CAMPAIGN, runDispatch, {
   connection,
   concurrency: 4,
+  lockDuration: 120_000,
+  maxStalledCount: 5,
 });
 
 new Worker<SendJobData>(
@@ -1655,11 +1725,19 @@ bootstrapArchiveJob().catch((err) => {
   console.error('Failed to bootstrap recipient-archive:', err);
 });
 
+const dispatchRecoveryTimer = setInterval(
+  () => void recoverStrandedDispatches(),
+  DISPATCH_RECOVERY_INTERVAL_MS,
+);
+void recoverStrandedDispatches();
+
 console.log(`worker-sender started; concurrency=${SEND_CONCURRENCY}; tick scheduler enabled`);
 
 async function shutdown() {
   console.log('Shutting down worker-sender...');
   await sendEmailQueue.close();
+  clearInterval(dispatchRecoveryTimer);
+  await sendCampaignQueue.close();
   await sendTickQueue.close();
   await archiveQueue.close();
   await ch.close();

@@ -361,9 +361,27 @@ export class CampaignService {
       this.prisma.campaign.count({ where }),
     ]);
 
-    const stats = await this.collectListStats(
-      accountId,
-      rows.map((r) => r.id),
+    const materializingIds = rows
+      .filter(
+        (r) =>
+          r.totalRecipients === 0 && (r.status === 'sending' || r.status === 'scheduled'),
+      )
+      .map((r) => r.id);
+    const [stats, materializedGroups] = await Promise.all([
+      this.collectListStats(
+        accountId,
+        rows.map((r) => r.id),
+      ),
+      materializingIds.length > 0
+        ? this.prisma.campaignRecipient.groupBy({
+            by: ['campaignId'],
+            where: { accountId, campaignId: { in: materializingIds } },
+            _count: { _all: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const materializedCounts = new Map(
+      materializedGroups.map((row) => [row.campaignId, row._count._all] as const),
     );
     const items = rows.map((r) => ({
       ...r,
@@ -372,7 +390,10 @@ export class CampaignService {
       // 发送 = 总投放(totalRecipients),与活动详情口径一致;opened/clicked 来自 CH。
       stats: {
         ...(stats[r.id] ?? { sent: 0, opened: 0, clicked: 0 }),
-        sent: r.totalRecipients,
+        sent:
+          r.totalRecipients > 0
+            ? r.totalRecipients
+            : (materializedCounts.get(r.id) ?? r.totalRecipients),
       },
     }));
 
@@ -1686,7 +1707,12 @@ export class CampaignService {
       QUEUE_NAMES.SEND_CAMPAIGN,
       'dispatch',
       { campaignId: c.id, accountId },
-      { delay, removeOnComplete: true },
+      {
+        delay,
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 30_000 },
+        removeOnComplete: true,
+      },
     );
 
     return { ok: true };
@@ -1753,7 +1779,11 @@ export class CampaignService {
       QUEUE_NAMES.SEND_CAMPAIGN,
       'dispatch',
       { campaignId: id, accountId },
-      { removeOnComplete: true },
+      {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 30_000 },
+        removeOnComplete: true,
+      },
     );
     return { ok: true };
   }
