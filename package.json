@@ -19,10 +19,10 @@
     "infra:up": "docker compose -f docker/docker-compose.yml up -d",
     "infra:down": "docker compose -f docker/docker-compose.yml down",
     "infra:logs": "docker compose -f docker/docker-compose.yml logs -f",
-    "db:migrate": "pnpm --filter @sendwalk/db migrate",
-    "db:generate": "pnpm --filter @sendwalk/db generate",
-    "db:seed": "pnpm --filter @sendwalk/db seed",
-    "ch:migrate": "pnpm --filter @sendwalk/clickhouse migrate"
+    "db:migrate": "pnpm --filter @sendmast/db migrate",
+    "db:generate": "pnpm --filter @sendmast/db generate",
+    "db:seed": "pnpm --filter @sendmast/db seed",
+    "ch:migrate": "pnpm --filter @sendmast/clickhouse migrate"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
