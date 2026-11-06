@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import axios from 'axios';
 import { Loader2, Plus, ShieldBan, ShieldCheck, Trash2 } from 'lucide-react';
 import type { SendingRuleMode, SendingRuleView } from '@sendmast/shared';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +15,20 @@ import { useToast } from '@/components/ui/toast';
 import { api, apiErrMessage } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
+type CreateSendingRuleInput = {
+  mode: SendingRuleMode;
+  senderDomainPattern: string;
+  recipientPattern: string;
+};
+
+function sameRule(rule: SendingRuleView, input: CreateSendingRuleInput) {
+  return (
+    rule.mode === input.mode &&
+    rule.senderDomainPattern.toLowerCase() === input.senderDomainPattern.toLowerCase() &&
+    rule.recipientPattern.toLowerCase() === input.recipientPattern.toLowerCase()
+  );
+}
+
 export function SendingRulesPage() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -27,16 +42,33 @@ export function SendingRulesPage() {
     queryFn: async () => (await api.get('/api/sending-rules')).data,
   });
 
+  const completeCreate = (nextRules?: SendingRuleView[]) => {
+    if (nextRules) qc.setQueryData(['sending-rules'], nextRules);
+    else qc.invalidateQueries({ queryKey: ['sending-rules'] });
+    setSenderDomainPattern('');
+    setRecipientPattern('');
+    toast('发送规则已添加', 'success');
+  };
+
   const createMut = useMutation({
-    mutationFn: () =>
-      api.post('/api/sending-rules', { mode, senderDomainPattern, recipientPattern }),
+    mutationFn: (input: CreateSendingRuleInput) => api.post('/api/sending-rules', input),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sending-rules'] });
-      setSenderDomainPattern('');
-      setRecipientPattern('');
-      toast('发送规则已添加', 'success');
+      completeCreate();
     },
-    onError: (error) => toast(apiErrMessage(error), 'error'),
+    onError: async (error, input) => {
+      if (axios.isAxiosError(error) && !error.response) {
+        try {
+          const nextRules = (await api.get<SendingRuleView[]>('/api/sending-rules')).data;
+          if (nextRules.some((rule) => sameRule(rule, input))) {
+            completeCreate(nextRules);
+            return;
+          }
+        } catch {
+          // Keep the original network error when the reconciliation request also fails.
+        }
+      }
+      toast(apiErrMessage(error), 'error');
+    },
   });
 
   const deleteMut = useMutation({
@@ -65,7 +97,13 @@ export function SendingRulesPage() {
             className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)_auto] xl:items-end"
             onSubmit={(event) => {
               event.preventDefault();
-              if (canCreate) createMut.mutate();
+              if (canCreate) {
+                createMut.mutate({
+                  mode,
+                  senderDomainPattern: senderDomainPattern.trim(),
+                  recipientPattern: recipientPattern.trim(),
+                });
+              }
             }}
           >
             <div className="space-y-2">
@@ -78,9 +116,7 @@ export function SendingRulesPage() {
                 className="font-mono"
                 autoComplete="off"
               />
-              <p className="text-xs text-muted-foreground">
-                支持 example.com、*.example.com 或 *
-              </p>
+              <p className="text-xs text-muted-foreground">支持 example.com、*.example.com 或 *</p>
             </div>
             <div className="space-y-2">
               <Label>规则类型</Label>
@@ -95,9 +131,11 @@ export function SendingRulesPage() {
                       onClick={() => setMode(value)}
                       className={cn(
                         'flex items-center justify-center gap-1 rounded-sm px-2 text-sm font-medium transition-colors',
-                        selected && value === 'allow' &&
+                        selected &&
+                          value === 'allow' &&
                           'bg-emerald-600 text-white shadow-sm hover:bg-emerald-600',
-                        selected && value === 'block' &&
+                        selected &&
+                          value === 'block' &&
                           'bg-red-600 text-white shadow-sm hover:bg-red-600',
                         !selected &&
                           'bg-background text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground',
