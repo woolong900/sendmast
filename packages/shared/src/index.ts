@@ -3,6 +3,7 @@ export * from './schemas/contact.js';
 export * from './schemas/campaign.js';
 export * from './schemas/template.js';
 export * from './schemas/sender-domain.js';
+export * from './schemas/sending-rule.js';
 export * from './schemas/email-channel.js';
 export * from './schemas/send-log.js';
 export * from './schemas/system-mail.js';

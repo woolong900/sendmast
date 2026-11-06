@@ -21,6 +21,7 @@ import {
   Store,
   Workflow,
   ListTree,
+  ShieldBan,
 } from 'lucide-react';
 import { BrandLogo } from '@/components/BrandLogo';
 import { cn } from '@/lib/utils';
@@ -56,6 +57,11 @@ const BASE_NAV: NavGroup[] = [
     label: '设置',
     items: [
       { to: '/settings/domains', label: '发件域名', icon: <Globe className="size-4" /> },
+      {
+        to: '/settings/sending-rules',
+        label: '发送规则',
+        icon: <ShieldBan className="size-4" />,
+      },
       { to: '/settings/quota', label: '发送额度', icon: <Wallet className="size-4" /> },
       { to: '/settings/orders', label: '我的订单', icon: <Receipt className="size-4" /> },
       { to: '/settings/custom-tags', label: '自定义标签', icon: <Tags className="size-4" /> },

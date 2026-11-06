@@ -84,6 +84,11 @@ const SenderDomainsPage = lazy(() =>
 const SenderDomainAddPage = lazy(() =>
   import('@/pages/settings/SenderDomainAddPage').then((m) => ({ default: m.SenderDomainAddPage })),
 );
+const SendingRulesPage = lazy(() =>
+  import('@/pages/settings/SendingRulesPage').then((m) => ({
+    default: m.SendingRulesPage,
+  })),
+);
 const QuotaPage = lazy(() =>
   import('@/pages/settings/QuotaPage').then((m) => ({ default: m.QuotaPage })),
 );
@@ -211,6 +216,7 @@ export default function App() {
 
               <Route path="settings/domains" element={<SenderDomainsPage />} />
               <Route path="settings/domains/new" element={<SenderDomainAddPage />} />
+              <Route path="settings/sending-rules" element={<SendingRulesPage />} />
               <Route path="settings/quota" element={<QuotaPage />} />
               <Route path="settings/orders" element={<OrdersPage />} />
               <Route path="settings/custom-tags" element={<CustomTagsPage />} />

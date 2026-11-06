@@ -1,14 +1,14 @@
 import type { SegmentDefinition } from '@sendmast/shared';
 import { planSegment, scanSegment, type AudienceContext } from './resolve-segment';
 import { filterSuppressed } from './suppression';
-import { isRecipientBlocked } from './recipient-block';
+import { isRecipientBlockedBySendingRules, type RecipientSendingRule } from './recipient-block';
 
 export interface AudienceSender {
   fromEmail: string;
   fromName: string;
   /** Channel the sender's domain routes to; null = dispatcher resolves later. */
   emailChannelId: string | null;
-  recipientBlockPatterns?: string[];
+  recipientRules?: RecipientSendingRule[];
 }
 
 export interface MaterialiseAudienceInput {
@@ -79,7 +79,9 @@ export async function materialiseCampaignAudience(
       for (let offset = 0; offset < senders.length; offset++) {
         const index = (positioned + offset) % senders.length;
         const candidate = senders[index];
-        if (!isRecipientBlocked(c.email, candidate.recipientBlockPatterns ?? [])) {
+        if (
+          !isRecipientBlockedBySendingRules(c.email, candidate.recipientRules ?? [])
+        ) {
           selected = candidate;
           selectedIndex = index;
           break;

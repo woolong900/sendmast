@@ -21,7 +21,8 @@ import { getActiveTrackingDomains, pickTrackingHost } from './tracking-pool';
 import {
   isSuppressed,
   materialiseCampaignAudience,
-  isRecipientBlocked,
+  isRecipientBlockedBySendingRules,
+  matchesSenderDomainPattern,
   refreshSegmentCounts,
   type AudienceContext,
   type AudienceSender,
@@ -230,7 +231,11 @@ async function shouldLogAutomationFinalHtml(): Promise<boolean> {
 
 const routingCache = new Map<
   string,
-  { emailChannelId: string | null; recipientBlockPatterns: string[]; until: number }
+  {
+    emailChannelId: string | null;
+    recipientRules: Array<{ mode: 'allow' | 'block'; recipientPattern: string }>;
+    until: number;
+  }
 >();
 const ROUTING_TTL_MS = 5_000;
 
@@ -240,13 +245,22 @@ async function resolveSenderDomainRouting(accountId: string, domain: string) {
   const cached = routingCache.get(key);
   if (cached && cached.until > now) return cached;
 
-  const sd = await prisma.senderDomain.findFirst({
-    where: { accountId, domain },
-    select: { emailChannelId: true, recipientBlockPatterns: true },
-  });
+  const [sd, sendingRules] = await Promise.all([
+    prisma.senderDomain.findFirst({
+      where: { accountId, domain },
+      select: { emailChannelId: true },
+    }),
+    prisma.sendingRule.findMany({
+      where: { accountId },
+      select: { mode: true, senderDomainPattern: true, recipientPattern: true },
+    }),
+  ]);
+  const recipientRules = sendingRules
+    .filter((rule) => matchesSenderDomainPattern(domain, rule.senderDomainPattern))
+    .map((rule) => ({ mode: rule.mode, recipientPattern: rule.recipientPattern }));
   const value = {
     emailChannelId: sd?.emailChannelId ?? null,
-    recipientBlockPatterns: sd?.recipientBlockPatterns ?? [],
+    recipientRules,
     until: now + ROUTING_TTL_MS,
   };
   routingCache.set(key, value);
@@ -405,7 +419,7 @@ async function materialiseRecipients(
       fromEmail: s.fromEmail,
       fromName: s.fromName,
       emailChannelId: routing?.emailChannelId ?? null,
-      recipientBlockPatterns: routing?.recipientBlockPatterns ?? [],
+      recipientRules: routing?.recipientRules ?? [],
     });
   }
 
@@ -996,7 +1010,14 @@ async function rerouteBlockedCampaignRecipient(
   const currentDomain = currentFromEmail.split('@')[1]?.toLowerCase();
   if (!currentDomain) return false;
   const currentRouting = await resolveSenderDomainRouting(recipient.accountId, currentDomain);
-  if (!isRecipientBlocked(recipient.email, currentRouting.recipientBlockPatterns)) return false;
+  if (
+    !isRecipientBlockedBySendingRules(
+      recipient.email,
+      currentRouting.recipientRules,
+    )
+  ) {
+    return false;
+  }
 
   const configured = await prisma.campaignSender.findMany({
     where: { campaignId: recipient.campaignId },
@@ -1015,7 +1036,14 @@ async function rerouteBlockedCampaignRecipient(
     if (!domain) continue;
     const routing = await resolveSenderDomainRouting(recipient.accountId, domain);
     if (!routing.emailChannelId) continue;
-    if (isRecipientBlocked(recipient.email, routing.recipientBlockPatterns)) continue;
+    if (
+      isRecipientBlockedBySendingRules(
+        recipient.email,
+        routing.recipientRules,
+      )
+    ) {
+      continue;
+    }
     await prisma.campaignRecipient.updateMany({
       where: { id: recipient.id, status: 'queued' },
       data: {
@@ -1463,9 +1491,14 @@ async function runFlowSend(job: Job<SendJobData>) {
   const flowSenderDomain = fromEmail.split('@')[1]?.toLowerCase();
   if (flowSenderDomain) {
     const routing = await resolveSenderDomainRouting(send.accountId, flowSenderDomain);
-    if (isRecipientBlocked(send.email, routing.recipientBlockPatterns)) {
-      await fail('发件域名禁止向该类型邮箱发送', 'skipped');
-      console.warn(`[flow send ${send.id}] skipped: ${flowSenderDomain} blocks ${send.email}`);
+    if (
+      isRecipientBlockedBySendingRules(
+        send.email,
+        routing.recipientRules,
+      )
+    ) {
+      await fail('发送规则不允许向该类型邮箱发送', 'skipped');
+      console.warn(`[flow send ${send.id}] skipped by sending rule: ${flowSenderDomain} -> ${send.email}`);
       return;
     }
   }

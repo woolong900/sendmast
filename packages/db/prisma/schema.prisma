@@ -312,6 +312,7 @@ model Account {
 
   members                AccountUser[]
   senderDomains          SenderDomain[]
+  sendingRules           SendingRule[]
   contactLists           ContactList[]
   contacts               Contact[]
   suppressions           SuppressionEntry[]
@@ -493,8 +494,6 @@ model SenderDomain {
   // CommunicationService.linkedDomains array. Without this, sending from
   // the domain returns 401 from ACS Email even if DNS is verified.
   linkedAt              DateTime?          @map("linked_at")
-  /// Recipient address/domain globs this sender domain must not send to.
-  recipientBlockPatterns String[]          @default([]) @map("recipient_block_patterns")
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @updatedAt @map("updated_at")
 
@@ -507,6 +506,30 @@ model SenderDomain {
   @@index([emailChannelId])
   @@index([sendgridDomainId])
   @@map("sender_domains")
+}
+
+enum SendingRuleMode {
+  allow
+  block
+
+  @@map("sending_rule_mode")
+}
+
+/// Account-level allow/block rule for a sender-domain glob and recipient glob.
+model SendingRule {
+  id                    String   @id @default(uuid()) @db.Uuid
+  accountId             String   @map("account_id") @db.Uuid
+  mode                   SendingRuleMode
+  senderDomainPattern   String   @map("sender_domain_pattern")
+  recipientPattern      String   @map("recipient_pattern")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, mode, senderDomainPattern, recipientPattern])
+  @@index([accountId])
+  @@map("sending_rules")
 }
 
 model SenderUsername {

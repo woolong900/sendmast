@@ -109,13 +109,16 @@ describe('audience materialisation', () => {
             fromEmail: 's1@d.com',
             fromName: 'S1',
             emailChannelId: 'ch1',
-            recipientBlockPatterns: ['gmail.com', '*.edu'],
+            recipientRules: [
+              { mode: 'block', recipientPattern: 'gmail.com' },
+              { mode: 'block', recipientPattern: '*.edu' },
+            ],
           },
           {
             fromEmail: 's2@e.com',
             fromName: 'S2',
             emailChannelId: 'ch2',
-            recipientBlockPatterns: ['*.edu'],
+            recipientRules: [{ mode: 'block', recipientPattern: '*.edu' }],
           },
         ],
       },
@@ -125,6 +128,68 @@ describe('audience materialisation', () => {
       ['a@gmail.com', 's2@e.com'],
       ['b@yahoo.com', 's1@d.com'],
     ]);
+  });
+
+  it('treats allow rules as an allowlist and routes to another eligible sender', async () => {
+    const { prisma, inserted } = fakePrisma({
+      contacts: [
+        { id: '1', email: 'a@gmail.com', listIds: ['L1'] },
+        { id: '2', email: 'b@school.edu', listIds: ['L1'] },
+      ],
+      suppressed: [],
+    });
+    const res = await materialiseCampaignAudience(
+      { prisma, ch: { query: async () => [] } },
+      {
+        campaignId: 'cmp',
+        accountId: 'acc',
+        listIds: ['L1'],
+        segmentIds: [],
+        senders: [
+          {
+            fromEmail: 's1@news.example.com',
+            fromName: 'S1',
+            emailChannelId: 'ch1',
+            recipientRules: [{ mode: 'allow', recipientPattern: '*.edu' }],
+          },
+          { fromEmail: 's2@other.com', fromName: 'S2', emailChannelId: 'ch2' },
+        ],
+      },
+    );
+    expect(res).toEqual({ inserted: 2, suppressed: 0, blocked: 0 });
+    expect(inserted.map((row) => [row.email, row.fromEmail])).toEqual([
+      ['a@gmail.com', 's2@other.com'],
+      ['b@school.edu', 's1@news.example.com'],
+    ]);
+  });
+
+  it('gives block rules priority over matching allow rules', async () => {
+    const { prisma, inserted } = fakePrisma({
+      contacts: [{ id: '1', email: 'blocked@school.edu', listIds: ['L1'] }],
+      suppressed: [],
+    });
+    const res = await materialiseCampaignAudience(
+      { prisma, ch: { query: async () => [] } },
+      {
+        campaignId: 'cmp',
+        accountId: 'acc',
+        listIds: ['L1'],
+        segmentIds: [],
+        senders: [
+          {
+            fromEmail: 's1@news.example.com',
+            fromName: 'S1',
+            emailChannelId: 'ch1',
+            recipientRules: [
+              { mode: 'allow', recipientPattern: '*.edu' },
+              { mode: 'block', recipientPattern: 'blocked@school.edu' },
+            ],
+          },
+        ],
+      },
+    );
+    expect(res).toEqual({ inserted: 0, suppressed: 0, blocked: 1 });
+    expect(inserted).toEqual([]);
   });
 
   it('single sender leaves from-columns null and stamps the primary channel', async () => {

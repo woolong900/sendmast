@@ -33,6 +33,7 @@ import { TrackingDomainModule } from './modules/tracking-domain/tracking-domain.
 import { ReferralModule } from './modules/referral/referral.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { QueueAdminModule } from './modules/queue-admin/queue-admin.module';
+import { SendingRuleModule } from './modules/sending-rule/sending-rule.module';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { QueueAdminModule } from './modules/queue-admin/queue-admin.module';
     TrackingDomainModule,
     QueueAdminModule,
     IntegrationsModule,
+    SendingRuleModule,
   ],
   providers: [
     // Global IP-level rate limit (default 240 req/min, see ThrottlerModule
