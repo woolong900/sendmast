@@ -213,12 +213,16 @@ async function contactIdsFromEvent(
     params.cid = ec.campaignId;
   }
 
-  let directRows: { contact_id: string }[];
-  let recipientRows: { recipient_id: string }[];
+  // Result aliases must NOT reuse the column names: ClickHouse resolves a
+  // SELECT alias inside WHERE, so `toString(contact_id) AS contact_id` turned
+  // `contact_id != toUUID(...)` into a String-vs-UUID comparison and every
+  // open/click rule failed ("no supertype for types String, UUID") → 0.
+  let directRows: { cid: string }[];
+  let recipientRows: { rid: string }[];
   try {
     [directRows, recipientRows] = await Promise.all([
-      ctx.ch.query<{ contact_id: string }>(
-        `SELECT DISTINCT toString(contact_id) AS contact_id
+      ctx.ch.query<{ cid: string }>(
+        `SELECT DISTINCT toString(contact_id) AS cid
          FROM sendmast.email_events
          WHERE account_id = {acc:UUID}
            AND event_type = {et:String}
@@ -229,8 +233,8 @@ async function contactIdsFromEvent(
          LIMIT ${DERIVED_CONSTRAINT_HARD_CAP + 1}`,
         params,
       ),
-      ctx.ch.query<{ recipient_id: string }>(
-        `SELECT DISTINCT toString(recipient_id) AS recipient_id
+      ctx.ch.query<{ rid: string }>(
+        `SELECT DISTINCT toString(recipient_id) AS rid
          FROM sendmast.email_events
          WHERE account_id = {acc:UUID}
            AND event_type = {et:String}
@@ -256,9 +260,7 @@ async function contactIdsFromEvent(
       `event constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} direct contacts; truncating`,
     );
   }
-  const contactIds = new Set(
-    directRows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.contact_id),
-  );
+  const contactIds = new Set(directRows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.cid));
 
   if (recipientRows.length === 0 || contactIds.size >= DERIVED_CONSTRAINT_HARD_CAP) {
     return contactIds;
@@ -277,7 +279,7 @@ async function contactIdsFromEvent(
         where: {
           accountId,
           id: {
-            in: recipientRows.slice(i, i + EVENT_RECIPIENT_LOOKUP_CHUNK).map((r) => r.recipient_id),
+            in: recipientRows.slice(i, i + EVENT_RECIPIENT_LOOKUP_CHUNK).map((r) => r.rid),
           },
         },
         select: { contactId: true },
@@ -292,8 +294,8 @@ async function contactIdsFromEvent(
   // those contacts are not silently omitted.
   const mapArchivedRecipients = async (): Promise<string[]> => {
     try {
-      const rows = await ctx.ch.query<{ contact_id: string }>(
-        `SELECT DISTINCT toString(a.contact_id) AS contact_id
+      const rows = await ctx.ch.query<{ cid: string }>(
+        `SELECT DISTINCT toString(a.contact_id) AS cid
          FROM sendmast.email_events AS e
          INNER JOIN (
            SELECT id, contact_id
@@ -313,7 +315,7 @@ async function contactIdsFromEvent(
           `event constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} archived contacts; truncating`,
         );
       }
-      return rows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.contact_id);
+      return rows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.cid);
     } catch (err) {
       // The hot-table mapping is still useful if the archive is temporarily
       // unavailable or an older installation has not created it yet.
@@ -364,8 +366,8 @@ async function contactIdsFromSiteEvent(
     extraFilter = "AND source_type = 'campaign' AND source_id = {cid:UUID}";
     params.cid = sc.campaignId;
   }
-  const rows = await ctx.ch.query<{ contact_id: string }>(
-    `SELECT toString(contact_id) AS contact_id
+  const rows = await ctx.ch.query<{ cid: string }>(
+    `SELECT toString(contact_id) AS cid
      FROM sendmast.site_events
      WHERE account_id = {acc:UUID}
        AND event_type = {et:String}
@@ -382,7 +384,7 @@ async function contactIdsFromSiteEvent(
       `site event constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} contacts; truncating`,
     );
   }
-  return new Set(rows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.contact_id));
+  return new Set(rows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.cid));
 }
 
 /** Resolve contacts with a paid/shipped order inside a fixed date range. */

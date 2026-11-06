@@ -842,22 +842,27 @@ export class CampaignService {
     let total: number | null = null;
     try {
       [rows, total] = await Promise.all([
-        this.ch.query<{
-          external_order_id: string;
-          customer_email: string;
-          value: string;
-          currency: string;
-          order_time: string;
-        }>(
-          `SELECT external_order_id, customer_email, toString(value) AS value,
-                  currency, toString(order_time) AS order_time
-           FROM sendmast.orders FINAL
-           WHERE account_id = {acc:UUID} AND attributed_campaign_id = {cid:UUID}
-           ${cursorClause}
-           ORDER BY order_time DESC, external_order_id DESC
-           LIMIT {lim:UInt32}`,
-          params,
-        ),
+        this.ch
+          .query<{
+            external_order_id: string;
+            customer_email: string;
+            value: string;
+            currency: string;
+            order_time_str: string;
+          }>(
+            // Alias must NOT be `order_time`: ClickHouse resolves SELECT
+            // aliases inside WHERE, so the cursor's `order_time < …` would
+            // compare the String to a DateTime64 and fail (page 2+ errored).
+            `SELECT external_order_id, customer_email, toString(value) AS value,
+                    currency, toString(order_time) AS order_time_str
+             FROM sendmast.orders FINAL
+             WHERE account_id = {acc:UUID} AND attributed_campaign_id = {cid:UUID}
+             ${cursorClause}
+             ORDER BY order_time DESC, external_order_id DESC
+             LIMIT {lim:UInt32}`,
+            params,
+          )
+          .then((rs) => rs.map(({ order_time_str, ...r }) => ({ ...r, order_time: order_time_str }))),
         q.skipTotal
           ? Promise.resolve(null)
           : this.ch

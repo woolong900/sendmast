@@ -26,8 +26,8 @@ describe('resolveSegmentContactIds event compatibility', () => {
   it('unions enriched contact ids with the recipient compatibility lookup', async () => {
     const prisma = fakePrisma(['contact-direct'], [{ contactId: 'contact-direct' }]);
     const query = jest.fn(async (sql: string) => {
-      if (sql.includes('contact_id != toUUID')) return [{ contact_id: 'contact-direct' }];
-      if (sql.includes('recipient_id != toUUID')) return [{ recipient_id: 'recipient-direct' }];
+      if (sql.includes('contact_id != toUUID')) return [{ cid: 'contact-direct' }];
+      if (sql.includes('recipient_id != toUUID')) return [{ rid: 'recipient-direct' }];
       if (sql.includes('campaign_recipients_archive')) return [];
       throw new Error(`unexpected query: ${sql}`);
     });
@@ -51,10 +51,10 @@ describe('resolveSegmentContactIds event compatibility', () => {
     const query = jest.fn(async (sql: string) => {
       if (sql.includes('contact_id != toUUID')) return [];
       if (sql.includes('recipient_id != toUUID')) {
-        return [{ recipient_id: 'recipient-hot' }, { recipient_id: 'recipient-archived' }];
+        return [{ rid: 'recipient-hot' }, { rid: 'recipient-archived' }];
       }
       if (sql.includes('campaign_recipients_archive')) {
-        return [{ contact_id: 'contact-archived' }];
+        return [{ cid: 'contact-archived' }];
       }
       throw new Error(`unexpected query: ${sql}`);
     });
@@ -81,7 +81,7 @@ describe('resolveSegmentContactIds event compatibility', () => {
     const warn = jest.fn();
     const query = jest.fn(async (sql: string) => {
       if (sql.includes('contact_id != toUUID')) return [];
-      if (sql.includes('recipient_id != toUUID')) return [{ recipient_id: 'recipient-hot' }];
+      if (sql.includes('recipient_id != toUUID')) return [{ rid: 'recipient-hot' }];
       if (sql.includes('campaign_recipients_archive')) throw new Error('archive unavailable');
       throw new Error(`unexpected query: ${sql}`);
     });
@@ -108,7 +108,7 @@ describe('resolveSegmentContactIds event compatibility', () => {
     } as never;
     const query = jest.fn(async (sql: string) => {
       if (sql.includes('contact_id != toUUID')) {
-        return ids.map((contact_id) => ({ contact_id }));
+        return ids.map((cid) => ({ cid }));
       }
       if (sql.includes('recipient_id != toUUID')) return [];
       throw new Error(`unexpected query: ${sql}`);
@@ -125,5 +125,27 @@ describe('resolveSegmentContactIds event compatibility', () => {
     expect(contactFindMany).not.toHaveBeenCalledWith(
       expect.objectContaining({ orderBy: expect.anything() }),
     );
+  });
+});
+
+describe('resolveSegmentContactIds ClickHouse SQL', () => {
+  it('never aliases a result to a column name it filters on (CH resolves aliases in WHERE)', async () => {
+    const sqls: string[] = [];
+    const query = jest.fn(async (sql: string) => {
+      sqls.push(sql);
+      return [];
+    });
+    await resolveSegmentContactIds({ prisma: fakePrisma([]), ch: { query } as never }, ACCOUNT_ID, {
+      v: 1,
+      op: 'AND',
+      rules: [
+        { type: 'event', op: 'has', event: 'open', lastDays: 300 },
+        { type: 'siteEvent', op: 'has', event: 'add_to_cart', lastDays: 30 },
+      ],
+    });
+    expect(sqls.length).toBeGreaterThan(0);
+    for (const sql of sqls) {
+      expect(sql).not.toMatch(/\bAS\s+(contact_id|recipient_id)\b/i);
+    }
   });
 });
