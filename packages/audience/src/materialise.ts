@@ -1,12 +1,14 @@
 import type { SegmentDefinition } from '@sendmast/shared';
 import { planSegment, scanSegment, type AudienceContext } from './resolve-segment';
 import { filterSuppressed } from './suppression';
+import { isRecipientBlocked } from './recipient-block';
 
 export interface AudienceSender {
   fromEmail: string;
   fromName: string;
   /** Channel the sender's domain routes to; null = dispatcher resolves later. */
   emailChannelId: string | null;
+  recipientBlockPatterns?: string[];
 }
 
 export interface MaterialiseAudienceInput {
@@ -35,6 +37,8 @@ export interface MaterialiseAudienceResult {
   inserted: number;
   /** Contacts dropped because their address is on the suppression list. */
   suppressed: number;
+  /** Contacts for which every configured sender was blocked. */
+  blocked: number;
 }
 
 const BATCH = 5000;
@@ -60,6 +64,7 @@ export async function materialiseCampaignAudience(
   let positioned = input.rotationOffset ?? 0;
   let inserted = 0;
   let suppressed = 0;
+  let blocked = 0;
 
   const insertBatch = async (
     rows: Array<{ id: string; email: string; listName?: string | null }>,
@@ -68,10 +73,26 @@ export async function materialiseCampaignAudience(
     const filtered = await filterSuppressed(prisma, accountId, rows);
     suppressed += filtered.suppressed;
     if (filtered.kept.length === 0) return;
-    const res = await prisma.campaignRecipient.createMany({
-      data: filtered.kept.map((c, j) => {
-        const s = rotate ? senders[(positioned + j) % senders.length] : null;
-        return {
+    const data = filtered.kept.flatMap((c) => {
+      let selected: AudienceSender | null = null;
+      let selectedIndex = -1;
+      for (let offset = 0; offset < senders.length; offset++) {
+        const index = (positioned + offset) % senders.length;
+        const candidate = senders[index];
+        if (!isRecipientBlocked(c.email, candidate.recipientBlockPatterns ?? [])) {
+          selected = candidate;
+          selectedIndex = index;
+          break;
+        }
+      }
+      if (!selected) {
+        blocked++;
+        return [];
+      }
+      positioned = selectedIndex + 1;
+      const s = rotate ? selected : null;
+      return [
+        {
           accountId,
           campaignId,
           contactId: c.id,
@@ -80,12 +101,14 @@ export async function materialiseCampaignAudience(
           listName: c.listName ?? null,
           fromEmail: s?.fromEmail ?? null,
           fromName: s?.fromName ?? null,
-          emailChannelId: s ? s.emailChannelId : primaryChannel,
-        };
-      }),
+          emailChannelId: selected.emailChannelId ?? primaryChannel,
+        },
+      ];
+    });
+    const res = await prisma.campaignRecipient.createMany({
+      data,
       skipDuplicates: true,
     });
-    positioned += filtered.kept.length;
     inserted += res.count;
   };
 
@@ -157,5 +180,5 @@ export async function materialiseCampaignAudience(
     }
   }
 
-  return { inserted, suppressed };
+  return { inserted, suppressed, blocked };
 }

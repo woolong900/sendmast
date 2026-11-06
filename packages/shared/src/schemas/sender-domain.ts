@@ -127,6 +127,30 @@ export const UpdateSenderUsernameSchema = z.object({
 });
 export type UpdateSenderUsernameInput = z.infer<typeof UpdateSenderUsernameSchema>;
 
+export function normalizeRecipientBlockPattern(pattern: string): string {
+  return pattern.trim().toLowerCase();
+}
+
+const RecipientBlockPatternSchema = z
+  .string()
+  .transform(normalizeRecipientBlockPattern)
+  .pipe(
+    z
+      .string()
+      .min(1)
+      .max(254)
+      .regex(/^[a-z0-9._%+*@?-]+$/, 'Invalid recipient pattern')
+      .refine((value) => (value.match(/@/g) ?? []).length <= 1, 'Invalid recipient pattern'),
+  );
+
+export const UpdateRecipientBlockPatternsSchema = z.object({
+  patterns: z
+    .array(RecipientBlockPatternSchema)
+    .max(100)
+    .transform((patterns) => [...new Set(patterns)]),
+});
+export type UpdateRecipientBlockPatternsInput = z.infer<typeof UpdateRecipientBlockPatternsSchema>;
+
 export interface SenderDomainView {
   id: string;
   domain: string;
@@ -153,6 +177,8 @@ export interface SenderDomainView {
   verifiedAt: string | null;
   /** Set after the domain has been linked to the EmailChannel's CommunicationService. */
   linkedAt: string | null;
+  /** Recipient address/domain globs excluded from this sender domain. */
+  recipientBlockPatterns: string[];
   /** Sender usernames that exist on this domain. */
   senderUsernames: SenderUsernameView[];
 }

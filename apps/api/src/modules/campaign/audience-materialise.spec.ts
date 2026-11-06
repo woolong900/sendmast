@@ -1,4 +1,8 @@
-import { filterSuppressed, materialiseCampaignAudience } from '@sendmast/audience';
+import {
+  filterSuppressed,
+  materialiseCampaignAudience,
+  matchesRecipientBlockPattern,
+} from '@sendmast/audience';
 
 /** Minimal in-memory Prisma double covering what the audience module touches. */
 function fakePrisma(opts: {
@@ -41,6 +45,13 @@ function fakePrisma(opts: {
 }
 
 describe('audience materialisation', () => {
+  it('matches exact recipient domains and wildcard patterns', () => {
+    expect(matchesRecipientBlockPattern('User@Gmail.com', 'gmail.com')).toBe(true);
+    expect(matchesRecipientBlockPattern('user@school.edu', '*.edu')).toBe(true);
+    expect(matchesRecipientBlockPattern('vip42@example.com', 'vip*@example.com')).toBe(true);
+    expect(matchesRecipientBlockPattern('user@yahoo.com', 'gmail.com')).toBe(false);
+  });
+
   it('filterSuppressed drops suppressed addresses case-insensitively', async () => {
     const { prisma } = fakePrisma({ contacts: [], suppressed: ['b@x.com'] });
     const res = await filterSuppressed(prisma, 'acc', [{ email: 'a@x.com' }, { email: 'B@x.com' }]);
@@ -70,11 +81,50 @@ describe('audience materialisation', () => {
         ],
       },
     );
-    expect(res).toEqual({ inserted: 2, suppressed: 1 });
+    expect(res).toEqual({ inserted: 2, suppressed: 1, blocked: 0 });
     expect(inserted.map((r) => r.email)).toEqual(['a@x.com', 'c@x.com']);
     // contact 3 is in both lists → first by selection order (L1)
     expect(inserted[1].listName).toBe('list-L1');
     expect(inserted.map((r) => r.emailChannelId)).toEqual(['ch1', 'ch2']);
+  });
+
+  it('routes around blocked senders and drops recipients blocked by every sender', async () => {
+    const { prisma, inserted } = fakePrisma({
+      contacts: [
+        { id: '1', email: 'a@gmail.com', listIds: ['L1'] },
+        { id: '2', email: 'b@yahoo.com', listIds: ['L1'] },
+        { id: '3', email: 'c@school.edu', listIds: ['L1'] },
+      ],
+      suppressed: [],
+    });
+    const res = await materialiseCampaignAudience(
+      { prisma, ch: { query: async () => [] } },
+      {
+        campaignId: 'cmp',
+        accountId: 'acc',
+        listIds: ['L1'],
+        segmentIds: [],
+        senders: [
+          {
+            fromEmail: 's1@d.com',
+            fromName: 'S1',
+            emailChannelId: 'ch1',
+            recipientBlockPatterns: ['gmail.com', '*.edu'],
+          },
+          {
+            fromEmail: 's2@e.com',
+            fromName: 'S2',
+            emailChannelId: 'ch2',
+            recipientBlockPatterns: ['*.edu'],
+          },
+        ],
+      },
+    );
+    expect(res).toEqual({ inserted: 2, suppressed: 0, blocked: 1 });
+    expect(inserted.map((r) => [r.email, r.fromEmail])).toEqual([
+      ['a@gmail.com', 's2@e.com'],
+      ['b@yahoo.com', 's1@d.com'],
+    ]);
   });
 
   it('single sender leaves from-columns null and stamps the primary channel', async () => {

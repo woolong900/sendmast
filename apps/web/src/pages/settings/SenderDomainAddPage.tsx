@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Check, Copy, Loader2, Mail, Pencil, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Loader2, Mail, Pencil, Save, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { FilterSelect } from '@/components/ui/filter-select';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useConfirm } from '@/components/ui/confirm-dialog';
@@ -268,6 +269,7 @@ export function SenderDomainAddPage() {
                   <li key={u.id}>{u.fullAddress}</li>
                 ))}
               </ul>
+              <RecipientBlockPatternsCard view={view} />
               <div className="flex items-center gap-2 pt-2">
                 <Button onClick={() => navigate('/settings/domains')}>返回域名列表</Button>
                 <Button variant="outline" onClick={() => setStep(3)}>
@@ -278,6 +280,65 @@ export function SenderDomainAddPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function RecipientBlockPatternsCard({ view }: { view: SenderDomainView }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [value, setValue] = useState(view.recipientBlockPatterns.join('\n'));
+
+  useEffect(() => {
+    setValue(view.recipientBlockPatterns.join('\n'));
+  }, [view.recipientBlockPatterns]);
+
+  const saveMut = useMutation({
+    mutationFn: (patterns: string[]) =>
+      api.patch<SenderDomainView>(`/api/sender-domains/${view.id}/recipient-block-patterns`, {
+        patterns,
+      }),
+    onError: (err) => toast(`保存失败:${apiErrMessage(err)}`, 'error'),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sender-domains', view.id] });
+      qc.invalidateQueries({ queryKey: ['sender-domains'] });
+      toast('收件邮箱黑名单已更新', 'success');
+    },
+  });
+
+  const patterns = value
+    .split(/[\n,]/)
+    .map((pattern) => pattern.trim().toLowerCase())
+    .filter(Boolean);
+
+  return (
+    <div className="space-y-2 rounded-md border p-4">
+      <div>
+        <h3 className="text-sm font-medium">收件邮箱黑名单</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          每行一个规则。可填写 gmail.com、*.edu 或 *@gmail.com；命中后将改用活动中的其他发件域名。
+        </p>
+      </div>
+      <Textarea
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        placeholder={'gmail.com\n*.edu\nuser*@example.com'}
+        rows={5}
+        className="font-mono text-sm"
+      />
+      <Button
+        type="button"
+        size="sm"
+        onClick={() => saveMut.mutate([...new Set(patterns)])}
+        disabled={saveMut.isPending}
+      >
+        {saveMut.isPending ? (
+          <Loader2 className="mr-1 size-4 animate-spin" />
+        ) : (
+          <Save className="mr-1 size-4" />
+        )}
+        保存规则
+      </Button>
     </div>
   );
 }
@@ -412,7 +473,8 @@ function SenderUsernamesStepCard({
                           placeholder="留空 = 只显示邮箱地址"
                           onChange={(e) => setEditName(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') renameMut.mutate({ id: u.id, displayName: editName });
+                            if (e.key === 'Enter')
+                              renameMut.mutate({ id: u.id, displayName: editName });
                             if (e.key === 'Escape') setEditingId(null);
                           }}
                         />

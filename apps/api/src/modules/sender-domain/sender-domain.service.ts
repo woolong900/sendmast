@@ -78,6 +78,19 @@ export class SenderDomainService {
     );
   }
 
+  async updateRecipientBlockPatterns(
+    accountId: string,
+    id: string,
+    patterns: string[],
+  ): Promise<SenderDomainView> {
+    const updated = await this.prisma.senderDomain.updateMany({
+      where: { id, accountId },
+      data: { recipientBlockPatterns: patterns },
+    });
+    if (updated.count === 0) throw new NotFoundException('域名不存在');
+    return this.get(accountId, id);
+  }
+
   /**
    * email channels this tenant may provision domains under. Used by the
    * domain-add wizard to render a channel picker when more than one is assigned.
@@ -648,6 +661,7 @@ export class SenderDomainService {
       lastCheckedAt: Date | null;
       verifiedAt: Date | null;
       linkedAt: Date | null;
+      recipientBlockPatterns: string[];
       provisioningError?: string | null;
     },
     senderUsernames: SenderUsernameRow[] = [],
@@ -695,6 +709,7 @@ export class SenderDomainService {
       lastCheckedAt: row.lastCheckedAt?.toISOString() ?? null,
       verifiedAt: row.verifiedAt?.toISOString() ?? null,
       linkedAt: row.linkedAt?.toISOString() ?? null,
+      recipientBlockPatterns: row.recipientBlockPatterns,
       senderUsernames: senderUsernames.map((u) => this.toUsernameView(u, row.domain)),
     };
   }

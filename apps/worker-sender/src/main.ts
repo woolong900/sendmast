@@ -21,6 +21,7 @@ import { getActiveTrackingDomains, pickTrackingHost } from './tracking-pool';
 import {
   isSuppressed,
   materialiseCampaignAudience,
+  isRecipientBlocked,
   refreshSegmentCounts,
   type AudienceContext,
   type AudienceSender,
@@ -73,9 +74,7 @@ const STALE_SWEEP_BATCH = 500;
 // Audience materialisation can take several minutes for million-row segments.
 // If its BullMQ job is lost after the campaign enters `sending`, periodically
 // republish it. Inserts are idempotent, so a retry resumes from existing rows.
-const STRANDED_DISPATCH_AGE_MS = Number(
-  process.env.STRANDED_DISPATCH_AGE_MS ?? String(5 * 60_000),
-);
+const STRANDED_DISPATCH_AGE_MS = Number(process.env.STRANDED_DISPATCH_AGE_MS ?? String(5 * 60_000));
 const DISPATCH_RECOVERY_INTERVAL_MS = 60_000;
 const DISPATCH_RECOVERY_BATCH = 100;
 // Campaign content is immutable while sending/paused (the API only allows
@@ -225,23 +224,32 @@ async function shouldLogAutomationFinalHtml(): Promise<boolean> {
 }
 
 // ============================================================================
-// Sender domain → email channel lookup (cached for 30s, used by runSend)
+// Sender-domain routing and recipient blocks. A short TTL makes newly saved
+// block rules take effect for an in-flight campaign within a few seconds.
 // ============================================================================
 
-const routingCache = new Map<string, { emailChannelId: string | null; until: number }>();
-const ROUTING_TTL_MS = 30_000;
+const routingCache = new Map<
+  string,
+  { emailChannelId: string | null; recipientBlockPatterns: string[]; until: number }
+>();
+const ROUTING_TTL_MS = 5_000;
 
-async function resolveEmailChannelIdForDomain(domain: string): Promise<string | null> {
+async function resolveSenderDomainRouting(accountId: string, domain: string) {
+  const key = `${accountId}|${domain}`;
   const now = Date.now();
-  const cached = routingCache.get(domain);
-  if (cached && cached.until > now) return cached.emailChannelId;
+  const cached = routingCache.get(key);
+  if (cached && cached.until > now) return cached;
 
   const sd = await prisma.senderDomain.findFirst({
-    where: { domain },
-    select: { emailChannelId: true },
+    where: { accountId, domain },
+    select: { emailChannelId: true, recipientBlockPatterns: true },
   });
-  const value = sd?.emailChannelId ?? null;
-  routingCache.set(domain, { emailChannelId: value, until: now + ROUTING_TTL_MS });
+  const value = {
+    emailChannelId: sd?.emailChannelId ?? null,
+    recipientBlockPatterns: sd?.recipientBlockPatterns ?? [],
+    until: now + ROUTING_TTL_MS,
+  };
+  routingCache.set(key, value);
   return value;
 }
 
@@ -392,10 +400,12 @@ async function materialiseRecipients(
   const senders: AudienceSender[] = [];
   for (const s of roster) {
     const d = s.fromEmail.split('@')[1]?.toLowerCase();
+    const routing = d ? await resolveSenderDomainRouting(accountId, d) : null;
     senders.push({
       fromEmail: s.fromEmail,
       fromName: s.fromName,
-      emailChannelId: d ? await resolveEmailChannelIdForDomain(d) : null,
+      emailChannelId: routing?.emailChannelId ?? null,
+      recipientBlockPatterns: routing?.recipientBlockPatterns ?? [],
     });
   }
 
@@ -403,7 +413,7 @@ async function materialiseRecipients(
   const segmentIds = campaign.segments.map((s) => s.segmentId);
   if (listIds.length === 0 && segmentIds.length === 0) return existing;
 
-  const { inserted, suppressed } = await materialiseCampaignAudience(audienceCtx, {
+  const { inserted, suppressed, blocked } = await materialiseCampaignAudience(audienceCtx, {
     campaignId: campaign.id,
     accountId,
     listIds,
@@ -417,7 +427,7 @@ async function materialiseRecipients(
   const total = await prisma.campaignRecipient.count({ where: { campaignId: campaign.id } });
   console.log(
     `[dispatch ${campaign.id}] materialised ${inserted} new recipient rows ` +
-      `(total ${total}, ${suppressed} suppressed address(es) skipped)`,
+      `(total ${total}, ${suppressed} suppressed, ${blocked} blocked by sender rules)`,
   );
   return total;
 }
@@ -542,7 +552,13 @@ async function recoverPendingFlowSends(): Promise<void> {
  * silently ignores add() for a jobId that still exists.
  */
 let lastStaleSweepAt = 0;
-const LIVE_JOB_STATES = new Set(['waiting', 'active', 'delayed', 'prioritized', 'waiting-children']);
+const LIVE_JOB_STATES = new Set([
+  'waiting',
+  'active',
+  'delayed',
+  'prioritized',
+  'waiting-children',
+]);
 
 async function recoverStaleQueuedRecipients(campaignIds: string[]): Promise<void> {
   const now = Date.now();
@@ -711,7 +727,7 @@ async function runTick(_job: Job): Promise<void> {
       if (!campaignTenant.has(c.id)) continue;
       const domain = c.fromEmail.split('@')[1]?.toLowerCase();
       if (!domain) continue;
-      const channelId = await resolveEmailChannelIdForDomain(domain);
+      const channelId = (await resolveSenderDomainRouting(c.accountId, domain)).emailChannelId;
       if (!channelId) continue;
       await prisma.campaignRecipient.updateMany({
         where: { campaignId: c.id, status: 'pending', emailChannelId: null },
@@ -968,6 +984,64 @@ async function refundTenantQuota(accountId: string, reason: string): Promise<voi
   }
 }
 
+/**
+ * Re-route a queued recipient when its assigned sender domain has since been
+ * blocked for that address. Returns true when the current job must stop.
+ */
+async function rerouteBlockedCampaignRecipient(
+  recipient: { id: string; accountId: string; campaignId: string; email: string },
+  campaign: Pick<CampaignContent, 'fromEmail' | 'fromName'>,
+  currentFromEmail: string,
+): Promise<boolean> {
+  const currentDomain = currentFromEmail.split('@')[1]?.toLowerCase();
+  if (!currentDomain) return false;
+  const currentRouting = await resolveSenderDomainRouting(recipient.accountId, currentDomain);
+  if (!isRecipientBlocked(recipient.email, currentRouting.recipientBlockPatterns)) return false;
+
+  const configured = await prisma.campaignSender.findMany({
+    where: { campaignId: recipient.campaignId },
+    orderBy: { position: 'asc' },
+    select: { fromEmail: true, fromName: true },
+  });
+  const roster = configured.length > 0 ? configured : [campaign];
+  const currentIndex = Math.max(
+    0,
+    roster.findIndex((sender) => sender.fromEmail.toLowerCase() === currentFromEmail.toLowerCase()),
+  );
+
+  for (let offset = 1; offset <= roster.length; offset++) {
+    const candidate = roster[(currentIndex + offset) % roster.length];
+    const domain = candidate.fromEmail.split('@')[1]?.toLowerCase();
+    if (!domain) continue;
+    const routing = await resolveSenderDomainRouting(recipient.accountId, domain);
+    if (!routing.emailChannelId) continue;
+    if (isRecipientBlocked(recipient.email, routing.recipientBlockPatterns)) continue;
+    await prisma.campaignRecipient.updateMany({
+      where: { id: recipient.id, status: 'queued' },
+      data: {
+        status: 'pending',
+        fromEmail: candidate.fromEmail,
+        fromName: candidate.fromName,
+        emailChannelId: routing.emailChannelId,
+      },
+    });
+    console.log(
+      `[send ${recipient.id}] rerouted ${recipient.email} from ${currentDomain} to ${domain}`,
+    );
+    return true;
+  }
+
+  await prisma.campaignRecipient.updateMany({
+    where: { id: recipient.id, status: 'queued' },
+    data: {
+      status: 'skipped',
+      errorMessage: '所有活动发件域名均禁止向该类型邮箱发送',
+    },
+  });
+  console.warn(`[send ${recipient.id}] skipped: every sender blocks ${recipient.email}`);
+  return true;
+}
+
 // ============================================================================
 // Send — actual transport call. Reserves 1 unit of tenant prepaid quota
 // before calling the provider; on success also consumes 1 unit of channel-tier sliding-
@@ -993,11 +1067,11 @@ async function runSend(job: Job<SendJobData>) {
   // campaigns; NULL on single-sender campaigns (and all pre-feature rows),
   // where we fall back to the campaign's primary from address.
   const fromEmail = r.fromEmail ?? c.fromEmail;
+  if (await rerouteBlockedCampaignRecipient(r, c, fromEmail)) return;
   // Configured display name of the sender address wins (it is what ACS shows
   // regardless, and keeps every provider consistent after a rename); the
   // stored name is only a fallback for addresses without a sender record.
-  const fromName =
-    (await configuredSenderName(r.accountId, fromEmail)) ?? r.fromName ?? c.fromName;
+  const fromName = (await configuredSenderName(r.accountId, fromEmail)) ?? r.fromName ?? c.fromName;
   if (
     fromName &&
     isImpersonatingDisplayName(fromName) &&
@@ -1040,11 +1114,7 @@ async function runSend(job: Job<SendJobData>) {
     return;
   }
   if (acct.status !== 'active') {
-    await failCampaignRecipient(
-      c.id,
-      r.id,
-      `邮件通道 ${acct.name} 当前状态为 ${acct.status}`,
-    );
+    await failCampaignRecipient(c.id, r.id, `邮件通道 ${acct.name} 当前状态为 ${acct.status}`);
     return;
   }
 
@@ -1121,7 +1191,12 @@ async function runSend(job: Job<SendJobData>) {
   // automation send path (runFlowSend).
   const preheaderRaw = (c.preheader ?? '').trim();
   if (preheaderRaw) {
-    const ph = applyCustomTags(applySystemTags(preheaderRaw, sysCtx, 'text'), tagIndex, 'text', tagPicks);
+    const ph = applyCustomTags(
+      applySystemTags(preheaderRaw, sysCtx, 'text'),
+      tagIndex,
+      'text',
+      tagPicks,
+    );
     bodyHtml = injectPreheader(bodyHtml, ph);
   }
 
@@ -1292,11 +1367,7 @@ async function runSend(job: Job<SendJobData>) {
   if (isPlatformSideFailure(result)) {
     await refundTenantQuota(r.accountId, `platform-side failure ${result.providerStatus}`);
   }
-  await failCampaignRecipient(
-    c.id,
-    r.id,
-    result.errorMessage ?? '邮件通道发送失败',
-  );
+  await failCampaignRecipient(c.id, r.id, result.errorMessage ?? '邮件通道发送失败');
   // Re-throw so BullMQ records this job as failed (visible in dashboard).
   // The send_logs row already carries the full provider trace.
   throw new Error(result.errorMessage ?? `provider send failed (${result.providerStatus})`);
@@ -1389,6 +1460,15 @@ async function runFlowSend(job: Job<SendJobData>) {
     await fail('自动化未配置发件邮箱');
     return;
   }
+  const flowSenderDomain = fromEmail.split('@')[1]?.toLowerCase();
+  if (flowSenderDomain) {
+    const routing = await resolveSenderDomainRouting(send.accountId, flowSenderDomain);
+    if (isRecipientBlocked(send.email, routing.recipientBlockPatterns)) {
+      await fail('发件域名禁止向该类型邮箱发送', 'skipped');
+      console.warn(`[flow send ${send.id}] skipped: ${flowSenderDomain} blocks ${send.email}`);
+      return;
+    }
+  }
 
   // Marketing flows (registration welcome / abandoned cart) respect opt-out; transactional ones
   // (order paid/shipped) send regardless — order confirmations are exempt.
@@ -1479,7 +1559,12 @@ async function runFlowSend(job: Job<SendJobData>) {
   // the top of the body so clients show it as the preview snippet.
   const preheaderRaw = (send.preheader ?? automation.preheader ?? '').trim();
   if (preheaderRaw) {
-    const ph = applyCustomTags(applySystemTags(preheaderRaw, sysCtx, 'text'), tagIndex, 'text', tagPicks);
+    const ph = applyCustomTags(
+      applySystemTags(preheaderRaw, sysCtx, 'text'),
+      tagIndex,
+      'text',
+      tagPicks,
+    );
     preheaderOut = ph;
     bodyHtml = injectPreheader(bodyHtml, ph);
   }

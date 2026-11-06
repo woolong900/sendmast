@@ -493,6 +493,8 @@ model SenderDomain {
   // CommunicationService.linkedDomains array. Without this, sending from
   // the domain returns 401 from ACS Email even if DNS is verified.
   linkedAt              DateTime?          @map("linked_at")
+  /// Recipient address/domain globs this sender domain must not send to.
+  recipientBlockPatterns String[]          @default([]) @map("recipient_block_patterns")
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @updatedAt @map("updated_at")
 

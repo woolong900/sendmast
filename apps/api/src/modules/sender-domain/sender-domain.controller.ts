@@ -18,6 +18,7 @@ import { SenderDomainService } from './sender-domain.service';
 import {
   CreateSenderDomainSchema,
   CreateSenderUsernameSchema,
+  UpdateRecipientBlockPatternsSchema,
   UpdateSenderUsernameSchema,
 } from '@sendmast/shared';
 import { firstZodError } from '../../common/zod-error';
@@ -56,6 +57,17 @@ export class SenderDomainController {
   @Post(':id/verify')
   verify(@CurrentUser() user: AuthenticatedUser, @Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.verify(user.accountId, id);
+  }
+
+  @Patch(':id/recipient-block-patterns')
+  updateRecipientBlockPatterns(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: unknown,
+  ) {
+    const r = UpdateRecipientBlockPatternsSchema.safeParse(body);
+    if (!r.success) throw new BadRequestException(firstZodError(r.error));
+    return this.svc.updateRecipientBlockPatterns(user.accountId, id, r.data.patterns);
   }
 
   @Get(':id/usernames')
