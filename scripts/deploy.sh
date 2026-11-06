@@ -51,7 +51,14 @@ echo
 
 if (( PULL )); then
   echo "▶ git pull"
+  before=$(git hash-object "${BASH_SOURCE[0]}")
   git pull --ff-only
+  # Bash reads a running script incrementally, so a pull that changed this
+  # file would keep executing the OLD steps. Restart on the new version.
+  if [[ "$(git hash-object "${BASH_SOURCE[0]}")" != "$before" ]]; then
+    echo "▶ deploy.sh changed in this pull; re-running the new version"
+    exec "${BASH_SOURCE[0]}" --no-pull "$@"
+  fi
 fi
 
 # Bind-mount sources must exist before `docker compose up` or it errors with
