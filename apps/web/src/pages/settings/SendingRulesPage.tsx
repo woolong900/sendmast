@@ -62,33 +62,12 @@ export function SendingRulesPage() {
       <Card>
         <CardContent className="p-5">
           <form
-            className="grid gap-4 xl:grid-cols-[180px_minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end"
+            className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)_auto] xl:items-end"
             onSubmit={(event) => {
               event.preventDefault();
               if (canCreate) createMut.mutate();
             }}
           >
-            <div className="space-y-2">
-              <Label>规则类型</Label>
-              <div className="grid h-9 grid-cols-2 rounded-md border bg-muted/30 p-0.5">
-                {(['allow', 'block'] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setMode(value)}
-                    className={cn(
-                      'rounded px-2 text-sm transition-colors',
-                      mode === value
-                        ? 'bg-background font-medium text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {value === 'allow' ? '允许' : '禁止'}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">允许规则的优先级高于禁止规则</p>
-            </div>
             <div className="space-y-2">
               <Label htmlFor="sender-domain-pattern">发件域名规则</Label>
               <Input
@@ -102,6 +81,39 @@ export function SendingRulesPage() {
               <p className="text-xs text-muted-foreground">
                 支持 example.com、*.example.com 或 *
               </p>
+            </div>
+            <div className="space-y-2">
+              <Label>规则类型</Label>
+              <div className="grid h-9 grid-cols-2 gap-1 rounded-md border bg-muted p-1">
+                {(['allow', 'block'] as const).map((value) => {
+                  const selected = mode === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setMode(value)}
+                      className={cn(
+                        'flex items-center justify-center gap-1 rounded-sm px-2 text-sm font-medium transition-colors',
+                        selected && value === 'allow' &&
+                          'bg-emerald-600 text-white shadow-sm hover:bg-emerald-600',
+                        selected && value === 'block' &&
+                          'bg-red-600 text-white shadow-sm hover:bg-red-600',
+                        !selected &&
+                          'bg-background text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground',
+                      )}
+                    >
+                      {value === 'allow' ? (
+                        <ShieldCheck className="size-3.5" />
+                      ) : (
+                        <ShieldBan className="size-3.5" />
+                      )}
+                      {value === 'allow' ? '允许' : '禁止'}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">允许优先于禁止</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="recipient-pattern">收件邮箱规则</Label>
