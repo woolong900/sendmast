@@ -23,6 +23,7 @@ import { countSegment, pageSegment, planSegment, type SegmentPlan } from '@sendm
 export class SegmentService {
   private readonly logger = new Logger(SegmentService.name);
   private readonly inFlightPlans = new Map<string, Promise<SegmentPlan>>();
+  private readonly inFlightCounts = new Map<string, Promise<number>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -160,7 +161,25 @@ export class SegmentService {
 
   /** Number of contacts matching a definition (COUNT queries only). */
   async countContacts(accountId: string, def: SegmentDefinition): Promise<number> {
-    return countSegment(this.audienceCtx(), await this.plan(accountId, def));
+    return this.countPlan(accountId, def);
+  }
+
+  private countPlan(
+    accountId: string,
+    def: SegmentDefinition,
+    plan?: SegmentPlan,
+  ): Promise<number> {
+    const key = `${accountId}:${JSON.stringify(def)}`;
+    const existing = this.inFlightCounts.get(key);
+    if (existing) return existing;
+    const evaluation = (async () =>
+      countSegment(this.audienceCtx(), plan ?? (await this.plan(accountId, def))))();
+    this.inFlightCounts.set(key, evaluation);
+    const cleanup = () => {
+      if (this.inFlightCounts.get(key) === evaluation) this.inFlightCounts.delete(key);
+    };
+    void evaluation.then(cleanup, cleanup);
+    return evaluation;
   }
 
   // ---------------------------------------------------------------------------
@@ -174,7 +193,7 @@ export class SegmentService {
   async preview(accountId: string, def: SegmentDefinition): Promise<SegmentPreviewResult> {
     const plan = await this.plan(accountId, def);
     const [count, sample] = await Promise.all([
-      countSegment(this.audienceCtx(), plan),
+      this.countPlan(accountId, def, plan),
       pageSegment<{ id: string; email: string; firstName: string | null; lastName: string | null }>(
         this.audienceCtx(),
         plan,
@@ -193,6 +212,8 @@ export class SegmentService {
   async refresh(accountId: string, id: string): Promise<SegmentView> {
     const seg = await this.prisma.segment.findFirst({ where: { id, accountId } });
     if (!seg) throw new NotFoundException('分群不存在');
+    const startedAt = Date.now();
+    this.logger.log(`segment refresh started: ${id}`);
     const count = await this.countContacts(
       accountId,
       seg.definition as unknown as SegmentDefinition,
@@ -201,6 +222,9 @@ export class SegmentService {
       where: { id },
       data: { cachedCount: count, cachedAt: new Date() },
     });
+    this.logger.log(
+      `segment refresh complete: ${id}, count=${count}, durationMs=${Date.now() - startedAt}`,
+    );
     return this.toView(updated);
   }
 

@@ -591,6 +591,7 @@ model Contact {
   tags        ContactTag[]
 
   @@unique([accountId, email])
+  @@index([accountId, id])
   @@index([accountId, subscriptionStatus])
   @@index([accountId, lastOrderedAt])
   @@index([accountId, orderCount])
