@@ -94,7 +94,7 @@ export function SendingRulesPage() {
       <Card>
         <CardContent className="p-5">
           <form
-            className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)_auto] xl:items-end"
+            className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)_auto] xl:items-start"
             onSubmit={(event) => {
               event.preventDefault();
               if (canCreate) {
@@ -167,7 +167,11 @@ export function SendingRulesPage() {
                 支持邮箱域名、域名后缀或完整地址通配符
               </p>
             </div>
-            <Button type="submit" disabled={!canCreate || createMut.isPending}>
+            <Button
+              type="submit"
+              className="xl:mt-7"
+              disabled={!canCreate || createMut.isPending}
+            >
               {createMut.isPending ? (
                 <Loader2 className="mr-1 size-4 animate-spin" />
               ) : (
