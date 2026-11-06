@@ -1,5 +1,5 @@
 import type { SegmentDefinition } from '@sendmast/shared';
-import { resolveSegmentContactIds, type AudienceContext } from './resolve-segment';
+import { planSegment, scanSegment, type AudienceContext } from './resolve-segment';
 import { filterSuppressed } from './suppression';
 
 export interface AudienceSender {
@@ -138,30 +138,21 @@ export async function materialiseCampaignAudience(
     }
   }
 
-  // 2. Segments — resolve each to an id set, then chunk-fetch subscribed
-  //    contacts (segments don't apply the subscription filter implicitly).
+  // 2. Segments — stream subscribed matching contacts in id-ordered batches
+  //    (segments don't apply the subscription filter implicitly). Memory is
+  //    one batch regardless of segment size.
   for (const segmentId of segmentIds) {
     const seg = await prisma.segment.findFirst({
       where: { accountId, id: segmentId },
       select: { definition: true },
     });
     if (!seg) continue;
-    const ids = await resolveSegmentContactIds(
-      ctx,
-      accountId,
-      seg.definition as unknown as SegmentDefinition,
-    );
-    if (ids.size === 0) continue;
-    const arr = [...ids];
-    for (let i = 0; i < arr.length; i += BATCH) {
-      const rows = await prisma.contact.findMany({
-        where: {
-          accountId,
-          subscriptionStatus: 'subscribed',
-          id: { in: arr.slice(i, i + BATCH) },
-        },
-        select: { id: true, email: true },
-      });
+    const plan = await planSegment(ctx, accountId, seg.definition as unknown as SegmentDefinition);
+    for await (const rows of scanSegment<{ id: string; email: string }>(ctx, plan, {
+      select: { id: true, email: true },
+      extraWhere: { subscriptionStatus: 'subscribed' },
+      batchSize: BATCH,
+    })) {
       await insertBatch(rows);
     }
   }

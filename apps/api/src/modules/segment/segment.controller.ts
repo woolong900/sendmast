@@ -74,7 +74,7 @@ export class SegmentController {
   /**
    * Non-persisting evaluation. Called by the editor's "实时预览" card with
    * a debounced 500ms delay as the user edits rules — cost equals one full
-   * resolveContactIds run, so the FE must not call it on every keystroke.
+   * plan + COUNT run, so the FE must not call it on every keystroke.
    */
   @Post('preview')
   @HttpCode(200)

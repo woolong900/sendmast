@@ -21,6 +21,7 @@ import { getActiveTrackingDomains, pickTrackingHost } from './tracking-pool';
 import {
   isSuppressed,
   materialiseCampaignAudience,
+  refreshSegmentCounts,
   type AudienceContext,
   type AudienceSender,
 } from '@sendmast/audience';
@@ -1595,6 +1596,22 @@ new Worker(
         `(${stats.campaignsArchived}/${stats.campaignsScanned} campaigns, ` +
         `${stats.recipientsArchived} recipients moved to ClickHouse)`,
     );
+  },
+  { connection, concurrency: 1 },
+);
+
+// Daily segment cachedCount refresh (scheduled by the API at an off-peak
+// hour). COUNT-based via @sendmast/audience, so it no longer loads whole
+// audiences into the API process at noon.
+new Worker(
+  QUEUE_NAMES.SEGMENT_REFRESH,
+  async () => {
+    const started = Date.now();
+    const r = await refreshSegmentCounts(audienceCtx);
+    console.log(
+      `[segment-refresh] ${r.refreshed}/${r.total} refreshed, ${r.failed} failed in ${Date.now() - started}ms`,
+    );
+    return r;
   },
   { connection, concurrency: 1 },
 );

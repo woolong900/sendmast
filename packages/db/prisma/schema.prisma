@@ -595,6 +595,10 @@ model Contact {
   @@index([accountId, lastOrderedAt])
   @@index([accountId, orderCount])
   @@index([accountId, orderAmount])
+  /// Segment attribute rules (国家 / 语言). On large production tables create
+  /// these CONCURRENTLY by hand before deploying — see the migration.
+  @@index([accountId, country])
+  @@index([accountId, language])
   // NOTE: no [accountId, email] non-unique index — the @@unique above already
   // produces a btree on (accountId, email) which PG will use for prefix /
   // equality lookups. Keeping a duplicate non-unique would just double write

@@ -41,148 +41,191 @@ const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 const consoleLogger: AudienceLogger = { warn: (m) => console.warn(`[audience] ${m}`) };
 
 /**
- * Evaluate a segment definition to the set of matching contact ids (no
- * subscription filter applied implicitly). Shared by the API (preview /
- * refresh / contacts page) and worker-sender (campaign materialisation) so
- * both always agree on who is in a segment.
+ * A compiled segment, ready to count / page / stream without ever holding
+ * the whole audience in memory:
+ *   - `where`:   tenant scope + every contact-column rule (one PG predicate);
+ *   - `include`: contacts satisfying ALL derived "has" rules (events, orders,
+ *                storefront), already minus the derived exclusions, sorted by
+ *                id — or null when the segment has no derived "has" rule;
+ *   - `exclude`: derived "notHas" contacts; only used when include is null.
+ * Derived sets come from ClickHouse / shop orders and are capped at
+ * DERIVED_CONSTRAINT_HARD_CAP, so they are the only in-memory id sets.
+ */
+export interface SegmentPlan {
+  where: Prisma.ContactWhereInput;
+  include: string[] | null;
+  exclude: Set<string>;
+}
+
+export async function planSegment(
+  ctx: AudienceContext,
+  accountId: string,
+  def: SegmentDefinition,
+): Promise<SegmentPlan> {
+  const { prisma } = ctx;
+  const logger = ctx.logger ?? consoleLogger;
+  const { pgWhere, eventConstraints, orderConstraints, siteEventConstraints } = compileSegment(def);
+
+  const hasSets: Set<string>[] = [];
+  const exclude = new Set<string>();
+  const add = (mode: 'has' | 'notHas', ids: Set<string>) => {
+    if (mode === 'has') hasSets.push(ids);
+    else for (const id of ids) exclude.add(id);
+  };
+  for (const ec of eventConstraints)
+    add(ec.mode, await contactIdsFromEvent(ctx, logger, accountId, ec));
+  for (const oc of orderConstraints)
+    add(oc.mode, await contactIdsFromOrder(prisma, logger, accountId, oc));
+  // Site events: the query returns contacts that reached minCount; 'notHas'
+  // excludes exactly those (→ "fewer than minCount", 1 = never).
+  for (const sc of siteEventConstraints)
+    add(sc.mode, await contactIdsFromSiteEvent(ctx, logger, accountId, sc));
+
+  const where: Prisma.ContactWhereInput = { accountId, ...pgWhere };
+  if (hasSets.length === 0) return { where, include: null, exclude };
+
+  // Intersect smallest-first so the working set only shrinks.
+  hasSets.sort((a, b) => a.size - b.size);
+  const include: string[] = [];
+  outer: for (const id of hasSets[0]!) {
+    if (exclude.has(id)) continue;
+    for (let i = 1; i < hasSets.length; i++) if (!hasSets[i]!.has(id)) continue outer;
+    include.push(id);
+  }
+  include.sort();
+  return { where, include, exclude: new Set() };
+}
+
+function andWhere(...parts: Array<Prisma.ContactWhereInput | undefined>): Prisma.ContactWhereInput {
+  const list = parts.filter((p): p is Prisma.ContactWhereInput => !!p && Object.keys(p).length > 0);
+  return list.length === 1 ? list[0]! : { AND: list };
+}
+
+function chunks<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Number of contacts in the segment (optionally narrowed by `extraWhere`).
+ * Pure COUNT queries: no rule → one COUNT; derived inclusion → COUNTs over
+ * id chunks; derived exclusion → total minus the excluded ids that match.
+ */
+export async function countSegment(
+  ctx: AudienceContext,
+  plan: SegmentPlan,
+  extraWhere?: Prisma.ContactWhereInput,
+): Promise<number> {
+  const base = andWhere(plan.where, extraWhere);
+  if (plan.include) {
+    let n = 0;
+    for (const chunk of chunks(plan.include, PRISMA_IN_BIND_SAFE_LIMIT)) {
+      n += await ctx.prisma.contact.count({ where: andWhere(base, { id: { in: chunk } }) });
+    }
+    return n;
+  }
+  let n = await ctx.prisma.contact.count({ where: base });
+  if (plan.exclude.size > 0) {
+    for (const chunk of chunks([...plan.exclude], PRISMA_IN_BIND_SAFE_LIMIT)) {
+      n -= await ctx.prisma.contact.count({ where: andWhere(base, { id: { in: chunk } }) });
+    }
+  }
+  return Math.max(0, n);
+}
+
+/**
+ * Stream the segment's contacts in id order, `batchSize` rows at a time.
+ * Memory stays at one batch (plus the capped derived sets) however large
+ * the segment is — keyset pagination on the primary key, no OFFSET.
+ */
+export async function* scanSegment<T extends { id: string } = { id: string }>(
+  ctx: AudienceContext,
+  plan: SegmentPlan,
+  opts: { select: Prisma.ContactSelect; extraWhere?: Prisma.ContactWhereInput; batchSize?: number },
+): AsyncGenerator<T[]> {
+  const batchSize = Math.min(opts.batchSize ?? 5000, PRISMA_IN_BIND_SAFE_LIMIT);
+  const select: Prisma.ContactSelect = { ...opts.select, id: true };
+  const base = andWhere(plan.where, opts.extraWhere);
+
+  if (plan.include) {
+    for (const chunk of chunks(plan.include, batchSize)) {
+      const rows = await ctx.prisma.contact.findMany({
+        where: andWhere(base, { id: { in: chunk } }),
+        select,
+        orderBy: { id: 'asc' },
+      });
+      if (rows.length > 0) yield rows as unknown as T[];
+    }
+    return;
+  }
+
+  let lastId: string | null = null;
+  for (;;) {
+    const rows = (await ctx.prisma.contact.findMany({
+      where: lastId ? andWhere(base, { id: { gt: lastId } }) : base,
+      select,
+      orderBy: { id: 'asc' },
+      take: batchSize,
+    })) as Array<{ id: string }>;
+    if (rows.length === 0) return;
+    lastId = rows[rows.length - 1]!.id;
+    const kept = plan.exclude.size > 0 ? rows.filter((r) => !plan.exclude.has(r.id)) : rows;
+    if (kept.length > 0) yield kept as unknown as T[];
+    if (rows.length < batchSize) return;
+  }
+}
+
+/** One page (1-based) of the segment in id order. */
+export async function pageSegment<T extends { id: string } = { id: string }>(
+  ctx: AudienceContext,
+  plan: SegmentPlan,
+  page: number,
+  pageSize: number,
+  select: Prisma.ContactSelect,
+): Promise<T[]> {
+  const fullSelect: Prisma.ContactSelect = { ...select, id: true };
+  const offset = (page - 1) * pageSize;
+  if (!plan.include && plan.exclude.size === 0) {
+    return (await ctx.prisma.contact.findMany({
+      where: plan.where,
+      select: fullSelect,
+      orderBy: { id: 'asc' },
+      skip: offset,
+      take: pageSize,
+    })) as unknown as T[];
+  }
+  const out: T[] = [];
+  let skip = offset;
+  for await (const batch of scanSegment<T>(ctx, plan, {
+    select: fullSelect,
+    batchSize: Math.max(1000, pageSize),
+  })) {
+    if (skip >= batch.length) {
+      skip -= batch.length;
+      continue;
+    }
+    out.push(...batch.slice(skip, skip + pageSize - out.length));
+    skip = 0;
+    if (out.length >= pageSize) break;
+  }
+  return out;
+}
+
+/**
+ * Full id set of a segment. Prefer countSegment / pageSegment / scanSegment:
+ * this materialises the whole audience in memory and is kept for callers
+ * that genuinely need the set.
  */
 export async function resolveSegmentContactIds(
   ctx: AudienceContext,
   accountId: string,
   def: SegmentDefinition,
 ): Promise<Set<string>> {
-  const { prisma } = ctx;
-  const logger = ctx.logger ?? consoleLogger;
-  const { pgWhere, eventConstraints, orderConstraints, siteEventConstraints } = compileSegment(def);
-
-  // Apply event/order constraints first so we can narrow the contact query.
-  // For 'has' constraints: intersect the event-derived contactId set.
-  // For 'notHas' constraints: collect to exclude later.
-  const hasSets: Set<string>[] = [];
-  const notHasIds: string[] = [];
-
-  for (const ec of eventConstraints) {
-    const ids = await contactIdsFromEvent(ctx, logger, accountId, ec);
-    if (ec.mode === 'has') hasSets.push(ids);
-    else notHasIds.push(...ids);
-  }
-
-  for (const oc of orderConstraints) {
-    const ids = await contactIdsFromOrder(prisma, logger, accountId, oc);
-    if (oc.mode === 'has') hasSets.push(ids);
-    else notHasIds.push(...ids);
-  }
-
-  // Site events: the query always returns contacts that reached minCount;
-  // 'notHas' excludes exactly those (→ "fewer than minCount", 1 = never).
-  for (const sc of siteEventConstraints) {
-    const ids = await contactIdsFromSiteEvent(ctx, logger, accountId, sc);
-    if (sc.mode === 'has') hasSets.push(ids);
-    else notHasIds.push(...ids);
-  }
-
-  // Intersection of all 'has' sets (must satisfy each one).
-  let candidateIds: string[] | undefined;
-  if (hasSets.length > 0) {
-    let intersected = hasSets[0];
-    for (let i = 1; i < hasSets.length; i++) {
-      const next = hasSets[i];
-      const out = new Set<string>();
-      for (const id of intersected) if (next.has(id)) out.add(id);
-      intersected = out;
-    }
-    candidateIds = [...intersected];
-    if (candidateIds.length === 0) return new Set();
-  }
-
-  // Build the final PG query: tenant scope + compiled WHERE + IN-set if
-  // we narrowed via events + NOT-IN-set for 'notHas' events.
-  const where: Prisma.ContactWhereInput = { accountId, ...pgWhere };
-  if (candidateIds) {
-    if (candidateIds.length > PRISMA_IN_BIND_SAFE_LIMIT) {
-      return resolveLarge(prisma, where, candidateIds, notHasIds);
-    }
-    where.AND = [
-      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-      { id: { in: candidateIds } },
-    ];
-  }
-  if (notHasIds.length > 0) {
-    const dedup = [...new Set(notHasIds)];
-    if (dedup.length > PRISMA_IN_BIND_SAFE_LIMIT) {
-      return resolveLarge(prisma, where, candidateIds ?? null, dedup);
-    }
-    where.AND = [
-      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-      { NOT: { id: { in: dedup } } },
-    ];
-  }
-
-  const rows = await prisma.contact.findMany({ where, select: { id: true } });
-  return new Set(rows.map((r) => r.id));
-}
-
-/**
- * Slow path: when the IN list would be too large for one PG query we fall
- * back to scanning Contact in chunks and filtering in-app.
- */
-async function resolveLarge(
-  prisma: PrismaClient,
-  baseWhere: Prisma.ContactWhereInput,
-  onlyIn: string[] | null,
-  notIn: string[],
-): Promise<Set<string>> {
-  const notInSet = new Set(notIn);
+  const plan = await planSegment(ctx, accountId, def);
   const out = new Set<string>();
-
-  // When a derived event/order rule already gave us the candidate ids, query
-  // those ids in bind-safe chunks. Scanning every contact in the account made
-  // large behaviour segments unnecessarily slow (millions of rows for a
-  // six-figure opener set).
-  if (onlyIn) {
-    const ids = [...new Set(onlyIn)].filter((id) => !notInSet.has(id));
-    for (let i = 0; i < ids.length; i += PRISMA_IN_BIND_SAFE_LIMIT) {
-      const chunk = ids.slice(i, i + PRISMA_IN_BIND_SAFE_LIMIT);
-      const rows = await prisma.contact.findMany({
-        where: {
-          ...baseWhere,
-          AND: [
-            ...(Array.isArray(baseWhere.AND)
-              ? baseWhere.AND
-              : baseWhere.AND
-                ? [baseWhere.AND]
-                : []),
-            { id: { in: chunk } },
-          ],
-        },
-        select: { id: true },
-      });
-      for (const row of rows) out.add(row.id);
-    }
-    return out;
-  }
-
-  // A large NOT-IN set without an inclusion set still requires scanning the
-  // tenant's contacts and excluding matches in-app.
-  const where: Prisma.ContactWhereInput = { ...baseWhere };
-  delete (where as Prisma.ContactWhereInput).AND;
-
-  const BATCH = 10_000;
-  let lastId: string | null = null;
-  for (;;) {
-    const rows: { id: string }[] = await prisma.contact.findMany({
-      where: lastId ? { ...where, id: { gt: lastId } } : where,
-      select: { id: true },
-      orderBy: { id: 'asc' },
-      take: BATCH,
-    });
-    if (rows.length === 0) break;
-    for (const r of rows) {
-      if (notInSet.has(r.id)) continue;
-      out.add(r.id);
-    }
-    if (rows.length < BATCH) break;
-    lastId = rows[rows.length - 1].id;
+  for await (const batch of scanSegment(ctx, plan, { select: { id: true }, batchSize: 10_000 })) {
+    for (const r of batch) out.add(r.id);
   }
   return out;
 }

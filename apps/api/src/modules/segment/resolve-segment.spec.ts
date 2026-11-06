@@ -121,10 +121,10 @@ describe('resolveSegmentContactIds event compatibility', () => {
     );
 
     expect(result.size).toBe(25_001);
-    expect(contactFindMany).toHaveBeenCalledTimes(2);
-    expect(contactFindMany).not.toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: expect.anything() }),
-    );
+    // Candidate ids are validated in bounded, bind-safe chunks.
+    for (const [args] of contactFindMany.mock.calls as any[]) {
+      expect(args.where.AND.at(-1).id.in.length).toBeLessThanOrEqual(25_000);
+    }
   });
 });
 

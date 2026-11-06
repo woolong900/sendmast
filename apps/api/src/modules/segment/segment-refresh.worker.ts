@@ -1,63 +1,45 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { Worker } from 'bullmq';
-import IORedis, { type Redis } from 'ioredis';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { QueueService } from '../../common/queue/queue.service';
-import { SegmentService } from './segment.service';
 
+/** Daily cached-count refresh: off-peak, and executed by worker-sender. */
+const REFRESH_JOB_ID = 'segment-refresh-daily';
+const REFRESH_PATTERN = '17 4 * * *';
+const REFRESH_TZ = 'Asia/Shanghai';
+
+/**
+ * Registers the daily segment-count refresh. The job itself runs in
+ * worker-sender (COUNT-based, see @sendmast/audience refreshSegmentCounts):
+ * it used to run inside the API process at 12:00 — peak hours — and
+ * materialise every segment's full id set.
+ */
 @Injectable()
-export class SegmentRefreshWorker implements OnModuleInit, OnModuleDestroy {
+export class SegmentRefreshWorker implements OnModuleInit {
   private readonly logger = new Logger(SegmentRefreshWorker.name);
-  private readonly connection: Redis;
-  private worker: Worker | null = null;
 
-  constructor(
-    config: ConfigService,
-    private readonly queue: QueueService,
-    private readonly segments: SegmentService,
-  ) {
-    this.connection = new IORedis(config.getOrThrow<string>('REDIS_URL'), {
-      maxRetriesPerRequest: null,
-    });
-  }
+  constructor(private readonly queue: QueueService) {}
 
   async onModuleInit(): Promise<void> {
+    const q = this.queue.getQueue(QueueService.names.SEGMENT_REFRESH);
+    // Drop schedules from earlier versions (e.g. the old 12:00 run) so only
+    // the current pattern fires.
+    for (const r of await q.getRepeatableJobs()) {
+      if (r.pattern !== REFRESH_PATTERN || r.tz !== REFRESH_TZ) {
+        await q.removeRepeatableByKey(r.key);
+      }
+    }
     await this.queue.add(
       QueueService.names.SEGMENT_REFRESH,
       'daily',
       {},
       {
-        jobId: 'segment-refresh-daily',
-        repeat: { pattern: '0 12 * * *', tz: 'Asia/Shanghai' },
+        jobId: REFRESH_JOB_ID,
+        repeat: { pattern: REFRESH_PATTERN, tz: REFRESH_TZ },
         removeOnComplete: { age: 3600, count: 30 },
         removeOnFail: { age: 86400 * 7 },
       },
     );
-
-    this.worker = new Worker(
-      QueueService.names.SEGMENT_REFRESH,
-      async () => {
-        const result = await this.segments.refreshAllSegments();
-        this.logger.log(
-          `daily refresh complete: ${result.refreshed}/${result.total} refreshed, ${result.failed} failed`,
-        );
-        return result;
-      },
-      { connection: this.connection, concurrency: 1 },
+    this.logger.log(
+      `Segment refresh scheduled (${REFRESH_PATTERN} ${REFRESH_TZ}, runs in worker-sender)`,
     );
-
-    this.worker.on('failed', (job, err) => {
-      this.logger.error(
-        `daily refresh job ${job?.id ?? '(unknown)'} failed: ${err.message}`,
-        err.stack,
-      );
-    });
-
-    this.logger.log('Segment refresh scheduler registered (daily 12:00 Asia/Shanghai)');
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    await this.worker?.close();
-    await this.connection.quit();
   }
 }
