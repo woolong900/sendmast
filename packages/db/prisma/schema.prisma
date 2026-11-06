@@ -929,6 +929,7 @@ model CampaignRecipient {
   sendLogs SendLog[]
 
   @@unique([campaignId, contactId])
+  @@index([accountId, id])
   @@index([campaignId, status])
   @@index([accountId, status])
   @@index([messageId])
