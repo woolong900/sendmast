@@ -24,4 +24,13 @@ describe('sending rules', () => {
     expect(isRecipientBlockedBySendingRules('person@school.edu', rules)).toBe(false);
     expect(isRecipientBlockedBySendingRules('person@gmail.com', rules)).toBe(true);
   });
+
+  it('lets a matching allow rule override a matching block rule', () => {
+    expect(
+      isRecipientBlockedBySendingRules('person@school.edu', [
+        { mode: 'block', recipientPattern: '*.edu' },
+        { mode: 'allow', recipientPattern: 'person@school.edu' },
+      ]),
+    ).toBe(false);
+  });
 });

@@ -87,7 +87,7 @@ export function SendingRulesPage() {
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">禁止规则的优先级高于允许规则</p>
+              <p className="text-xs text-muted-foreground">允许规则的优先级高于禁止规则</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="sender-domain-pattern">发件域名规则</Label>

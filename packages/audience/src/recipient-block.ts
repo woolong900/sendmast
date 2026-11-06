@@ -32,21 +32,21 @@ export interface RecipientSendingRule {
 }
 
 /**
- * Block rules always win. When one or more allow rules apply to a sender
- * domain, the recipient must match at least one of them; no allow rules means
- * the sender remains unrestricted except for matching block rules.
+ * Allow rules win over block rules. When one or more allow rules apply to a
+ * sender domain, a matching recipient is immediately allowed; a recipient
+ * matching none of them is blocked even when no explicit block rule matches.
  */
 export function isRecipientBlockedBySendingRules(
   email: string,
   rules: readonly RecipientSendingRule[],
 ): boolean {
+  const allowRules = rules.filter((rule) => rule.mode === 'allow');
+  if (allowRules.some((rule) => matchesRecipientBlockPattern(email, rule.recipientPattern))) {
+    return false;
+  }
   const blockRules = rules.filter((rule) => rule.mode === 'block');
   if (blockRules.some((rule) => matchesRecipientBlockPattern(email, rule.recipientPattern))) {
     return true;
   }
-  const allowRules = rules.filter((rule) => rule.mode === 'allow');
-  return (
-    allowRules.length > 0 &&
-    !allowRules.some((rule) => matchesRecipientBlockPattern(email, rule.recipientPattern))
-  );
+  return allowRules.length > 0;
 }

@@ -163,7 +163,7 @@ describe('audience materialisation', () => {
     ]);
   });
 
-  it('gives block rules priority over matching allow rules', async () => {
+  it('gives matching allow rules priority over block rules', async () => {
     const { prisma, inserted } = fakePrisma({
       contacts: [{ id: '1', email: 'blocked@school.edu', listIds: ['L1'] }],
       suppressed: [],
@@ -188,8 +188,8 @@ describe('audience materialisation', () => {
         ],
       },
     );
-    expect(res).toEqual({ inserted: 0, suppressed: 0, blocked: 1 });
-    expect(inserted).toEqual([]);
+    expect(res).toEqual({ inserted: 1, suppressed: 0, blocked: 0 });
+    expect(inserted).toHaveLength(1);
   });
 
   it('single sender leaves from-columns null and stamps the primary channel', async () => {
