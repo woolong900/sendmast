@@ -23,11 +23,12 @@ function fakePrisma(contactIds: string[], legacyLinks: Array<{ contactId: string
 }
 
 describe('resolveSegmentContactIds event compatibility', () => {
-  it('uses enriched contact ids without a Postgres recipient lookup', async () => {
-    const prisma = fakePrisma(['contact-direct']);
+  it('unions enriched contact ids with the recipient compatibility lookup', async () => {
+    const prisma = fakePrisma(['contact-direct'], [{ contactId: 'contact-direct' }]);
     const query = jest.fn(async (sql: string) => {
       if (sql.includes('contact_id != toUUID')) return [{ contact_id: 'contact-direct' }];
-      if (sql.includes('recipient_id != toUUID')) return [];
+      if (sql.includes('recipient_id != toUUID')) return [{ recipient_id: 'recipient-direct' }];
+      if (sql.includes('campaign_recipients_archive')) return [];
       throw new Error(`unexpected query: ${sql}`);
     });
 
@@ -38,11 +39,14 @@ describe('resolveSegmentContactIds event compatibility', () => {
     );
 
     expect([...result]).toEqual(['contact-direct']);
-    expect((prisma as any).campaignRecipient.findMany).not.toHaveBeenCalled();
-    expect(query).toHaveBeenCalledTimes(2);
+    expect((prisma as any).campaignRecipient.findMany).toHaveBeenCalledWith({
+      where: { accountId: ACCOUNT_ID, id: { in: ['recipient-direct'] } },
+      select: { contactId: true },
+    });
+    expect(query).toHaveBeenCalledTimes(3);
   });
 
-  it('maps zero-contact legacy events through both hot and archived recipients', async () => {
+  it('maps event recipients through both hot and archived recipient stores', async () => {
     const prisma = fakePrisma(['contact-hot', 'contact-archived'], [{ contactId: 'contact-hot' }]);
     const query = jest.fn(async (sql: string) => {
       if (sql.includes('contact_id != toUUID')) return [];
@@ -90,5 +94,36 @@ describe('resolveSegmentContactIds event compatibility', () => {
 
     expect([...result]).toEqual(['contact-hot']);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('archived event evaluation failed'));
+  });
+
+  it('validates large event audiences in bind-safe candidate chunks', async () => {
+    const ids = Array.from({ length: 25_001 }, (_, i) => `contact-${i}`);
+    const contactFindMany = jest.fn(async ({ where }: any) => {
+      const idClause = where.AND.at(-1);
+      return idClause.id.in.map((id: string) => ({ id }));
+    });
+    const prisma = {
+      contact: { findMany: contactFindMany },
+      campaignRecipient: { findMany: jest.fn() },
+    } as never;
+    const query = jest.fn(async (sql: string) => {
+      if (sql.includes('contact_id != toUUID')) {
+        return ids.map((contact_id) => ({ contact_id }));
+      }
+      if (sql.includes('recipient_id != toUUID')) return [];
+      throw new Error(`unexpected query: ${sql}`);
+    });
+
+    const result = await resolveSegmentContactIds(
+      { prisma, ch: { query } as never },
+      ACCOUNT_ID,
+      openedDefinition(),
+    );
+
+    expect(result.size).toBe(25_001);
+    expect(contactFindMany).toHaveBeenCalledTimes(2);
+    expect(contactFindMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: expect.anything() }),
+    );
   });
 });

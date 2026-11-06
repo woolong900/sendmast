@@ -35,8 +35,8 @@ const DERIVED_CONSTRAINT_HARD_CAP = 1_000_000;
  * accountId and other rule predicates are included.
  */
 const PRISMA_IN_BIND_SAFE_LIMIT = 25_000;
-/** Keep legacy event-recipient lookups small enough for predictable PG plans. */
-const EVENT_RECIPIENT_LOOKUP_CHUNK = 2_000;
+/** Stay below Postgres' bind cap while avoiding hundreds of tiny lookups. */
+const EVENT_RECIPIENT_LOOKUP_CHUNK = 20_000;
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 const consoleLogger: AudienceLogger = { warn: (m) => console.warn(`[audience] ${m}`) };
 
@@ -132,11 +132,38 @@ async function resolveLarge(
   onlyIn: string[] | null,
   notIn: string[],
 ): Promise<Set<string>> {
-  const onlyInSet = onlyIn ? new Set(onlyIn) : null;
   const notInSet = new Set(notIn);
   const out = new Set<string>();
 
-  // Strip our oversized AND clauses; the rest of baseWhere is still valid.
+  // When a derived event/order rule already gave us the candidate ids, query
+  // those ids in bind-safe chunks. Scanning every contact in the account made
+  // large behaviour segments unnecessarily slow (millions of rows for a
+  // six-figure opener set).
+  if (onlyIn) {
+    const ids = [...new Set(onlyIn)].filter((id) => !notInSet.has(id));
+    for (let i = 0; i < ids.length; i += PRISMA_IN_BIND_SAFE_LIMIT) {
+      const chunk = ids.slice(i, i + PRISMA_IN_BIND_SAFE_LIMIT);
+      const rows = await prisma.contact.findMany({
+        where: {
+          ...baseWhere,
+          AND: [
+            ...(Array.isArray(baseWhere.AND)
+              ? baseWhere.AND
+              : baseWhere.AND
+                ? [baseWhere.AND]
+                : []),
+            { id: { in: chunk } },
+          ],
+        },
+        select: { id: true },
+      });
+      for (const row of rows) out.add(row.id);
+    }
+    return out;
+  }
+
+  // A large NOT-IN set without an inclusion set still requires scanning the
+  // tenant's contacts and excluding matches in-app.
   const where: Prisma.ContactWhereInput = { ...baseWhere };
   delete (where as Prisma.ContactWhereInput).AND;
 
@@ -151,7 +178,6 @@ async function resolveLarge(
     });
     if (rows.length === 0) break;
     for (const r of rows) {
-      if (onlyInSet && !onlyInSet.has(r.id)) continue;
       if (notInSet.has(r.id)) continue;
       out.add(r.id);
     }
@@ -162,10 +188,11 @@ async function resolveLarge(
 }
 
 /**
- * Run a single event constraint against ClickHouse. New events carry a
- * contact_id and use the fast path directly. Events written before contact_id
- * enrichment use the zero UUID, so those recipient_ids are resolved through
- * the hot PG recipient table and the ClickHouse cold archive.
+ * Run a single event constraint against ClickHouse. contact_id is the fast
+ * path, but recipient_id is always resolved as a compatibility path: some
+ * production rows contain a non-zero contact_id that no longer corresponds to
+ * a Contact, so limiting the fallback to the zero UUID silently returned 0.
+ * Recipient ids are resolved through the hot PG table and the CH cold archive.
  * account_id is the leading sort key on email_events, so we always filter on
  * it first (perf + tenant isolation defence-in-depth).
  */
@@ -187,9 +214,9 @@ async function contactIdsFromEvent(
   }
 
   let directRows: { contact_id: string }[];
-  let legacyRows: { recipient_id: string }[];
+  let recipientRows: { recipient_id: string }[];
   try {
-    [directRows, legacyRows] = await Promise.all([
+    [directRows, recipientRows] = await Promise.all([
       ctx.ch.query<{ contact_id: string }>(
         `SELECT DISTINCT toString(contact_id) AS contact_id
          FROM sendmast.email_events
@@ -209,7 +236,6 @@ async function contactIdsFromEvent(
            AND event_type = {et:String}
            AND event_time >= parseDateTime64BestEffort({since:String}, 3)
            AND is_bot = 0
-           AND contact_id = toUUID('${ZERO_UUID}')
            AND recipient_id != toUUID('${ZERO_UUID}')
            ${extraFilter}
          LIMIT ${DERIVED_CONSTRAINT_HARD_CAP + 1}`,
@@ -234,24 +260,24 @@ async function contactIdsFromEvent(
     directRows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.contact_id),
   );
 
-  if (legacyRows.length === 0 || contactIds.size >= DERIVED_CONSTRAINT_HARD_CAP) {
+  if (recipientRows.length === 0 || contactIds.size >= DERIVED_CONSTRAINT_HARD_CAP) {
     return contactIds;
   }
-  if (legacyRows.length > DERIVED_CONSTRAINT_HARD_CAP) {
+  if (recipientRows.length > DERIVED_CONSTRAINT_HARD_CAP) {
     logger.warn(
-      `event constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} legacy recipients; truncating`,
+      `event constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} recipients; truncating`,
     );
-    legacyRows = legacyRows.slice(0, DERIVED_CONSTRAINT_HARD_CAP);
+    recipientRows = recipientRows.slice(0, DERIVED_CONSTRAINT_HARD_CAP);
   }
 
   const mapHotRecipients = async (): Promise<string[]> => {
     const mapped: string[] = [];
-    for (let i = 0; i < legacyRows.length; i += EVENT_RECIPIENT_LOOKUP_CHUNK) {
+    for (let i = 0; i < recipientRows.length; i += EVENT_RECIPIENT_LOOKUP_CHUNK) {
       const links = await ctx.prisma.campaignRecipient.findMany({
         where: {
           accountId,
           id: {
-            in: legacyRows.slice(i, i + EVENT_RECIPIENT_LOOKUP_CHUNK).map((r) => r.recipient_id),
+            in: recipientRows.slice(i, i + EVENT_RECIPIENT_LOOKUP_CHUNK).map((r) => r.recipient_id),
           },
         },
         select: { contactId: true },
@@ -278,7 +304,6 @@ async function contactIdsFromEvent(
            AND e.event_type = {et:String}
            AND e.event_time >= parseDateTime64BestEffort({since:String}, 3)
            AND e.is_bot = 0
-           AND e.contact_id = toUUID('${ZERO_UUID}')
            ${ec.campaignId ? 'AND e.campaign_id = {cid:UUID}' : ''}
          LIMIT ${DERIVED_CONSTRAINT_HARD_CAP + 1}`,
         params,
