@@ -68,7 +68,17 @@ DOCKER_BUILDKIT=1 dc_mig build --pull
 
 # Bring up data services first; migrations need them healthy.
 echo "▶ Starting data services"
-dc up -d postgres redis clickhouse minio minio-init
+dc up -d postgres redis clickhouse minio
+
+# minio-init only creates the two buckets + public policy (idempotent) and has
+# long since done that on existing hosts. Its minio/mc image is no longer
+# published on Docker Hub, and the disk-cleanup timer prunes it once the
+# exited container is gone — so a missing image must not block deploys.
+if docker image inspect minio/mc:latest >/dev/null 2>&1; then
+  dc up -d minio-init || echo "⚠ minio-init failed (buckets should already exist); continuing" >&2
+else
+  echo "⚠ minio/mc image not available locally; skipping minio-init (buckets must already exist)" >&2
+fi
 
 echo "▶ Waiting for Postgres + ClickHouse health"
 for svc in sendmast-postgres sendmast-clickhouse; do
