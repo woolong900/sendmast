@@ -35,6 +35,9 @@ const DERIVED_CONSTRAINT_HARD_CAP = 1_000_000;
  * accountId and other rule predicates are included.
  */
 const PRISMA_IN_BIND_SAFE_LIMIT = 25_000;
+/** Keep legacy event-recipient lookups small enough for predictable PG plans. */
+const EVENT_RECIPIENT_LOOKUP_CHUNK = 2_000;
+const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 const consoleLogger: AudienceLogger = { warn: (m) => console.warn(`[audience] ${m}`) };
 
 /**
@@ -159,8 +162,10 @@ async function resolveLarge(
 }
 
 /**
- * Run a single event constraint against ClickHouse and translate the
- * resulting recipient_ids back to contactIds via PG campaign_recipients.
+ * Run a single event constraint against ClickHouse. New events carry a
+ * contact_id and use the fast path directly. Events written before contact_id
+ * enrichment use the zero UUID, so those recipient_ids are resolved through
+ * the hot PG recipient table and the ClickHouse cold archive.
  * account_id is the leading sort key on email_events, so we always filter on
  * it first (perf + tenant isolation defence-in-depth).
  */
@@ -181,22 +186,36 @@ async function contactIdsFromEvent(
     params.cid = ec.campaignId;
   }
 
-  let rows: { contact_id: string }[];
+  let directRows: { contact_id: string }[];
+  let legacyRows: { recipient_id: string }[];
   try {
-    // email_events already stores contact_id. Reading it directly avoids
-    // mapping every recipient_id back through the hot Postgres recipient
-    // table in thousands of bind parameters, and keeps archived events usable.
-    rows = await ctx.ch.query<{ contact_id: string }>(
-      `SELECT DISTINCT toString(contact_id) AS contact_id
-       FROM sendmast.email_events
-       WHERE account_id = {acc:UUID}
-         AND event_type = {et:String}
-         AND event_time >= parseDateTime64BestEffort({since:String}, 3)
-         AND is_bot = 0
-         AND contact_id != toUUID('00000000-0000-0000-0000-000000000000')
-         ${extraFilter}`,
-      params,
-    );
+    [directRows, legacyRows] = await Promise.all([
+      ctx.ch.query<{ contact_id: string }>(
+        `SELECT DISTINCT toString(contact_id) AS contact_id
+         FROM sendmast.email_events
+         WHERE account_id = {acc:UUID}
+           AND event_type = {et:String}
+           AND event_time >= parseDateTime64BestEffort({since:String}, 3)
+           AND is_bot = 0
+           AND contact_id != toUUID('${ZERO_UUID}')
+           ${extraFilter}
+         LIMIT ${DERIVED_CONSTRAINT_HARD_CAP + 1}`,
+        params,
+      ),
+      ctx.ch.query<{ recipient_id: string }>(
+        `SELECT DISTINCT toString(recipient_id) AS recipient_id
+         FROM sendmast.email_events
+         WHERE account_id = {acc:UUID}
+           AND event_type = {et:String}
+           AND event_time >= parseDateTime64BestEffort({since:String}, 3)
+           AND is_bot = 0
+           AND contact_id = toUUID('${ZERO_UUID}')
+           AND recipient_id != toUUID('${ZERO_UUID}')
+           ${extraFilter}
+         LIMIT ${DERIVED_CONSTRAINT_HARD_CAP + 1}`,
+        params,
+      ),
+    ]);
   } catch (err) {
     // CH outage: degrade to empty set so the segment temporarily matches
     // nothing on the event branch instead of failing the whole evaluation.
@@ -206,15 +225,94 @@ async function contactIdsFromEvent(
     return new Set();
   }
 
-  if (rows.length === 0) return new Set();
-  if (rows.length > DERIVED_CONSTRAINT_HARD_CAP) {
+  if (directRows.length > DERIVED_CONSTRAINT_HARD_CAP) {
     logger.warn(
-      `event constraint produced ${rows.length} rows > cap ${DERIVED_CONSTRAINT_HARD_CAP}; truncating`,
+      `event constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} direct contacts; truncating`,
     );
-    rows = rows.slice(0, DERIVED_CONSTRAINT_HARD_CAP);
+  }
+  const contactIds = new Set(
+    directRows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.contact_id),
+  );
+
+  if (legacyRows.length === 0 || contactIds.size >= DERIVED_CONSTRAINT_HARD_CAP) {
+    return contactIds;
+  }
+  if (legacyRows.length > DERIVED_CONSTRAINT_HARD_CAP) {
+    logger.warn(
+      `event constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} legacy recipients; truncating`,
+    );
+    legacyRows = legacyRows.slice(0, DERIVED_CONSTRAINT_HARD_CAP);
   }
 
-  return new Set(rows.map((r) => r.contact_id));
+  const mapHotRecipients = async (): Promise<string[]> => {
+    const mapped: string[] = [];
+    for (let i = 0; i < legacyRows.length; i += EVENT_RECIPIENT_LOOKUP_CHUNK) {
+      const links = await ctx.prisma.campaignRecipient.findMany({
+        where: {
+          accountId,
+          id: {
+            in: legacyRows.slice(i, i + EVENT_RECIPIENT_LOOKUP_CHUNK).map((r) => r.recipient_id),
+          },
+        },
+        select: { contactId: true },
+      });
+      for (const link of links) mapped.push(link.contactId);
+    }
+    return mapped;
+  };
+
+  // A 300-day rule can include campaigns whose PG recipients have already
+  // moved to cold storage. Join the legacy events to that archive in CH so
+  // those contacts are not silently omitted.
+  const mapArchivedRecipients = async (): Promise<string[]> => {
+    try {
+      const rows = await ctx.ch.query<{ contact_id: string }>(
+        `SELECT DISTINCT toString(a.contact_id) AS contact_id
+         FROM sendmast.email_events AS e
+         INNER JOIN (
+           SELECT id, contact_id
+           FROM sendmast.campaign_recipients_archive FINAL
+           WHERE account_id = {acc:UUID}
+         ) AS a ON a.id = e.recipient_id
+         WHERE e.account_id = {acc:UUID}
+           AND e.event_type = {et:String}
+           AND e.event_time >= parseDateTime64BestEffort({since:String}, 3)
+           AND e.is_bot = 0
+           AND e.contact_id = toUUID('${ZERO_UUID}')
+           ${ec.campaignId ? 'AND e.campaign_id = {cid:UUID}' : ''}
+         LIMIT ${DERIVED_CONSTRAINT_HARD_CAP + 1}`,
+        params,
+      );
+      if (rows.length > DERIVED_CONSTRAINT_HARD_CAP) {
+        logger.warn(
+          `event constraint produced more than ${DERIVED_CONSTRAINT_HARD_CAP} archived contacts; truncating`,
+        );
+      }
+      return rows.slice(0, DERIVED_CONSTRAINT_HARD_CAP).map((r) => r.contact_id);
+    } catch (err) {
+      // The hot-table mapping is still useful if the archive is temporarily
+      // unavailable or an older installation has not created it yet.
+      logger.warn(
+        `archived event evaluation failed (${ec.event}, ${ec.campaignId ?? 'any'}): ${(err as Error).message}`,
+      );
+      return [];
+    }
+  };
+
+  const [hotContactIds, archivedContactIds] = await Promise.all([
+    mapHotRecipients(),
+    mapArchivedRecipients(),
+  ]);
+  for (const id of hotContactIds) {
+    if (contactIds.size >= DERIVED_CONSTRAINT_HARD_CAP) break;
+    contactIds.add(id);
+  }
+  for (const id of archivedContactIds) {
+    if (contactIds.size >= DERIVED_CONSTRAINT_HARD_CAP) break;
+    contactIds.add(id);
+  }
+
+  return contactIds;
 }
 
 /**
