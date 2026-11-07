@@ -118,6 +118,21 @@ services:
       redis:
         condition: service_healthy
 
+  # Second consumer for the shared BullMQ send queues. The repeatable tick and
+  # archive jobs are safe with multiple consumers: BullMQ delivers each job to
+  # only one worker, while recipient job ids and DB status updates are idempotent.
+  worker-sender-2:
+    image: sendmast/worker-sender:latest
+    container_name: sendmast-worker-sender-2
+    restart: unless-stopped
+    logging: *default-logging
+    env_file: ../.env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   worker-events:
     build:
       context: ..
