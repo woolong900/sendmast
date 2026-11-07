@@ -251,7 +251,7 @@ function CampaignRow({ c }: { c: CampaignListItem }) {
             </div>
           </div>
           <div className="flex shrink-0 gap-4 sm:gap-7">
-            <StatItem value={c.stats.sent} label="发送" />
+            <StatItem value={c.stats.sent} label="已发送" />
             <StatItem value={c.stats.opened} label="打开" />
             <StatItem value={c.stats.clicked} label="点击" />
           </div>

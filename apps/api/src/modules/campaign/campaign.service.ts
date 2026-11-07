@@ -361,46 +361,21 @@ export class CampaignService {
       this.prisma.campaign.count({ where }),
     ]);
 
-    const materializingIds = rows
-      .filter(
-        (r) =>
-          r.totalRecipients === 0 && (r.status === 'sending' || r.status === 'scheduled'),
-      )
-      .map((r) => r.id);
-    const [stats, materializedGroups] = await Promise.all([
-      this.collectListStats(
-        accountId,
-        rows.map((r) => r.id),
-      ),
-      materializingIds.length > 0
-        ? this.prisma.campaignRecipient.groupBy({
-            by: ['campaignId'],
-            where: { accountId, campaignId: { in: materializingIds } },
-            _count: { _all: true },
-          })
-        : Promise.resolve([]),
-    ]);
-    const materializedCounts = new Map(
-      materializedGroups.map((row) => [row.campaignId, row._count._all] as const),
+    const stats = await this.collectListStats(
+      accountId,
+      rows.map((r) => r.id),
     );
     const items = rows.map((r) => ({
       ...r,
       lists: r.lists.map((cl) => cl.list),
       segments: r.segments.map((cs) => cs.segment),
-      // 发送 = 总投放(totalRecipients),与活动详情口径一致;opened/clicked 来自 CH。
-      stats: {
-        ...(stats[r.id] ?? { sent: 0, opened: 0, clicked: 0 }),
-        sent:
-          r.totalRecipients > 0
-            ? r.totalRecipients
-            : (materializedCounts.get(r.id) ?? r.totalRecipients),
-      },
+      stats: stats[r.id] ?? { sent: 0, opened: 0, clicked: 0 },
     }));
 
     return { items, total, page: query.page, pageSize: query.pageSize };
   }
 
-  /** Fetch sent (PG) + unique open/click (ClickHouse) counts for many campaigns at once. */
+  /** Fetch provider-accepted sends (hot PG/cold CH) + unique open/click counts. */
   private async collectListStats(
     accountId: string,
     ids: string[],
@@ -410,8 +385,45 @@ export class CampaignService {
     const out: Record<string, { sent: number; opened: number; clicked: number }> = {};
     for (const id of ids) out[id] = { sent: 0, opened: 0, clicked: 0 };
 
-    // NB: `sent` (= 总投放) is filled by the caller from each campaign's
-    // totalRecipients, not derived here — see list(). We only fetch CH engagement.
+    const [sentGroups, archivedCampaigns] = await Promise.all([
+      this.prisma.campaignRecipient.groupBy({
+        by: ['campaignId'],
+        where: { accountId, campaignId: { in: ids }, status: 'sent' },
+        _count: { _all: true },
+      }),
+      this.prisma.campaignArchiveState.findMany({
+        where: { campaignId: { in: ids } },
+        select: { campaignId: true },
+      }),
+    ]);
+    for (const row of sentGroups) {
+      const target = out[row.campaignId];
+      if (target) target.sent = row._count._all;
+    }
+
+    // Archived campaign rows have been removed from Postgres. Read their sent
+    // status from the cold archive so older campaigns keep the same metric.
+    const archivedIds = archivedCampaigns.map((row) => row.campaignId);
+    if (archivedIds.length > 0) {
+      try {
+        const rows = await this.ch.query<{ cid: string; sent: string }>(
+          `SELECT toString(campaign_id) AS cid, toString(count()) AS sent
+           FROM sendmast.campaign_recipients_archive FINAL
+           WHERE account_id = {acc:UUID}
+             AND campaign_id IN {ids:Array(UUID)}
+             AND status = 'sent'
+           GROUP BY cid`,
+          { acc: accountId, ids: archivedIds },
+        );
+        for (const row of rows) {
+          const target = out[row.cid];
+          if (target) target.sent = Number(row.sent);
+        }
+      } catch (err) {
+        console.warn('Campaign list sent stats — ClickHouse archive unavailable:', err);
+      }
+    }
+
     // Unique opens / clicks from ClickHouse — one grouped query for all campaigns.
     // account_id is the leading sort key; filtering on it first lets CH skip
     // unrelated tenant data AND enforces tenant isolation defence-in-depth.
@@ -883,7 +895,9 @@ export class CampaignService {
              LIMIT {lim:UInt32}`,
             params,
           )
-          .then((rs) => rs.map(({ order_time_str, ...r }) => ({ ...r, order_time: order_time_str }))),
+          .then((rs) =>
+            rs.map(({ order_time_str, ...r }) => ({ ...r, order_time: order_time_str })),
+          ),
         q.skipTotal
           ? Promise.resolve(null)
           : this.ch
