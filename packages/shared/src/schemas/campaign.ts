@@ -28,7 +28,10 @@ export type EditorMode = z.infer<typeof EditorModeSchema>;
  */
 export const CampaignSenderSchema = z.object({
   fromEmail: z.string().email(),
-  fromName: z.string().min(1).max(80),
+  // An empty configured display name is valid: providers then show the bare
+  // sender address. The API replaces this value from sender_usernames, so the
+  // client must be allowed to submit '' for addresses without a display name.
+  fromName: z.string().max(80),
 });
 export type CampaignSenderInput = z.infer<typeof CampaignSenderSchema>;
 
@@ -36,7 +39,7 @@ export const CreateCampaignSchema = z.object({
   name: z.string().min(1).max(120),
   subject: z.string().min(1).max(200),
   preheader: z.string().max(200).optional(),
-  fromName: z.string().min(1).max(80),
+  fromName: z.string().max(80),
   fromEmail: z.string().email(),
   /**
    * Full sender roster for round-robin sending. When present and non-empty,
@@ -88,13 +91,7 @@ export type ListCampaignsQuery = z.infer<typeof ListCampaignsQuerySchema>;
 // Mirrors Prisma's RecipientStatus enum (packages/db/prisma/schema.prisma).
 // Keep these in sync — adding a value here without updating the enum will
 // fail at the Prisma layer with an unhelpful error.
-export const RecipientStatusSchema = z.enum([
-  'pending',
-  'queued',
-  'sent',
-  'failed',
-  'skipped',
-]);
+export const RecipientStatusSchema = z.enum(['pending', 'queued', 'sent', 'failed', 'skipped']);
 export type RecipientStatusValue = z.infer<typeof RecipientStatusSchema>;
 
 /**
