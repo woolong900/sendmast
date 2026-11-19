@@ -33,9 +33,12 @@ services:
     restart: unless-stopped
     logging: *default-logging
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp" # HTTP/3
+      # Defaults keep the original single-host behaviour.  On a host where an
+      # existing reverse proxy already owns 80/443, set these to loopback
+      # addresses such as 127.0.0.1:18080 and 127.0.0.1:18443.
+      - "${SENDMAST_HTTP_BIND:-0.0.0.0:80}:80"
+      - "${SENDMAST_HTTPS_BIND:-0.0.0.0:443}:443"
+      - "${SENDMAST_HTTPS_BIND:-0.0.0.0:443}:443/udp" # HTTP/3
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in .env.production, e.g. sendmast.example.com}
     volumes:
