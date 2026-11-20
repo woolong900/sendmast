@@ -20,10 +20,22 @@ interface SesIdentityResponse {
 @Injectable()
 export class SesService {
   async createDomain(acct: EmailChannel, domain: string) {
-    const json = await this.request<SesIdentityResponse>(acct, '/v2/email/identities', {
-      method: 'POST',
-      body: JSON.stringify({ EmailIdentity: domain }),
-    });
+    let json: SesIdentityResponse;
+    try {
+      json = await this.request<SesIdentityResponse>(acct, '/v2/email/identities', {
+        method: 'POST',
+        body: JSON.stringify({ EmailIdentity: domain }),
+      });
+    } catch (err) {
+      // The identity may already exist in the SES account (added in the AWS
+      // console, or by an earlier attempt). Adopt it: its DKIM tokens and
+      // verification state are what the tenant needs either way.
+      if (!/already\s*exists/i.test((err as Error).message)) throw err;
+      json = await this.request<SesIdentityResponse>(
+        acct,
+        `/v2/email/identities/${encodeURIComponent(domain)}`,
+      );
+    }
     return {
       records: this.toRecords(json.DkimAttributes?.Tokens ?? []),
       states: this.toStates(json),
