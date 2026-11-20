@@ -21,6 +21,7 @@ interface SesIdentityResponse {
 export class SesService {
   async createDomain(acct: EmailChannel, domain: string) {
     let json: SesIdentityResponse;
+    let identityCreated = true;
     try {
       json = await this.request<SesIdentityResponse>(acct, '/v2/email/identities', {
         method: 'POST',
@@ -31,6 +32,7 @@ export class SesService {
       // console, or by an earlier attempt). Adopt it: its DKIM tokens and
       // verification state are what the tenant needs either way.
       if (!/already\s*exists?/i.test((err as Error).message)) throw err;
+      identityCreated = false;
       json = await this.request<SesIdentityResponse>(
         acct,
         `/v2/email/identities/${encodeURIComponent(domain)}`,
@@ -39,6 +41,7 @@ export class SesService {
     return {
       records: this.toRecords(json.DkimAttributes?.Tokens ?? []),
       states: this.toStates(json),
+      identityCreated,
     };
   }
 
@@ -86,7 +89,8 @@ export class SesService {
     init: { method?: string; body?: string } = {},
   ): Promise<T> {
     if (!acct.sesAccessKeyId) throw new Error(`SES channel ${acct.name}: Access Key ID 未配置`);
-    if (!acct.sesSecretAccessKey) throw new Error(`SES channel ${acct.name}: Secret Access Key 未配置`);
+    if (!acct.sesSecretAccessKey)
+      throw new Error(`SES channel ${acct.name}: Secret Access Key 未配置`);
     const region = acct.sesRegion || 'us-east-1';
     const url = `https://email.${region}.amazonaws.com${path}`;
     const method = init.method ?? 'GET';
@@ -165,7 +169,12 @@ function signAwsRequest(params: {
     credentialScope,
     sha256Hex(canonicalRequest),
   ].join('\n');
-  const signingKey = awsSigningKey(params.secretAccessKey, dateStamp, params.region, params.service);
+  const signingKey = awsSigningKey(
+    params.secretAccessKey,
+    dateStamp,
+    params.region,
+    params.service,
+  );
   const signature = createHmac('sha256', signingKey).update(stringToSign, 'utf8').digest('hex');
   return {
     ...headers,
@@ -183,7 +192,12 @@ function hmac(key: Buffer | string, value: string): Buffer {
   return createHmac('sha256', key).update(value, 'utf8').digest();
 }
 
-function awsSigningKey(secretAccessKey: string, dateStamp: string, region: string, service: string) {
+function awsSigningKey(
+  secretAccessKey: string,
+  dateStamp: string,
+  region: string,
+  service: string,
+) {
   const kDate = hmac(`AWS4${secretAccessKey}`, dateStamp);
   const kRegion = hmac(kDate, region);
   const kService = hmac(kRegion, service);

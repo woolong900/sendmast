@@ -221,6 +221,8 @@ export class SenderDomainService {
             emailChannel.provider === 'cloudflare' && 'providerDomainId' in created
               ? (created.providerDomainId as string | null)
               : undefined,
+          sesIdentityCreated:
+            'identityCreated' in created ? (created.identityCreated as boolean) : undefined,
           provisioningError: null,
           status: allVerified ? 'verified' : 'pending',
           verifiedAt: allVerified ? new Date() : undefined,
@@ -601,14 +603,22 @@ export class SenderDomainService {
         }
       }
     } else if (row.emailChannel.provider === 'ses') {
-      try {
-        await this.ses.deleteDomain(row.emailChannel, row.domain);
-      } catch (err) {
-        const message = (err as Error).message;
-        if (!message.includes('SES API 404')) throw err;
-        this.logger.warn(
-          `SES identity ${row.domain} was not found upstream; deleting local row only.`,
+      if (!row.sesIdentityCreated) {
+        // Adopted from the SES account (or created before we tracked this):
+        // it may be used outside SendMast, so only the local row goes.
+        this.logger.log(
+          `SES identity ${row.domain} was not created by SendMast; deleting local row only.`,
         );
+      } else {
+        try {
+          await this.ses.deleteDomain(row.emailChannel, row.domain);
+        } catch (err) {
+          const message = (err as Error).message;
+          if (!message.includes('SES API 404')) throw err;
+          this.logger.warn(
+            `SES identity ${row.domain} was not found upstream; deleting local row only.`,
+          );
+        }
       }
     } else {
       // Unlink first so the domain isn't referenced by the CommunicationService

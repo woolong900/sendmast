@@ -43,6 +43,18 @@ describe('SesService.createDomain', () => {
       't3._domainkey',
     ]);
     expect(r.states.DKIM?.status).toBe('Verified');
+    expect(r.identityCreated).toBe(false);
+  });
+
+  it('reports a newly created identity', async () => {
+    global.fetch = jest.fn(
+      async () =>
+        new Response(JSON.stringify({ DkimAttributes: { Tokens: ['a', 'b', 'c'] } }), {
+          status: 200,
+        }),
+    ) as never;
+    const r = await new SesService().createDomain(acct, 'new.example');
+    expect(r.identityCreated).toBe(true);
   });
 
   it('still surfaces other SES errors', async () => {

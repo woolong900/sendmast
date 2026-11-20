@@ -486,6 +486,9 @@ model SenderDomain {
   sendgridDomainId      String?            @map("sendgrid_domain_id")
   cloudflareZoneId      String?            @map("cloudflare_zone_id")
   cloudflareSubdomainId String?            @map("cloudflare_subdomain_id")
+  // True only when SendMast itself created the SES email identity. An adopted
+  // identity (already in the SES account) is left in SES when the row is deleted.
+  sesIdentityCreated    Boolean            @default(false) @map("ses_identity_created")
   provisioningError     String?            @map("provisioning_error") @db.Text
   status                SenderDomainStatus @default(pending)
   lastCheckedAt         DateTime?          @map("last_checked_at")
