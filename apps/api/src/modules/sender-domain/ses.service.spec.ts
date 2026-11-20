@@ -19,7 +19,7 @@ describe('SesService.createDomain', () => {
       calls.push({ url: String(url), method: init?.method ?? 'GET' });
       if (init?.method === 'POST') {
         return new Response(
-          JSON.stringify({ message: 'Email identity mzscx.com already exists.' }),
+          JSON.stringify({ message: 'Email identity mzscx.com already exist.' }),
           {
             status: 400,
           },
