@@ -49,4 +49,37 @@ describe('ResendService', () => {
     expect(String(url)).not.toContain('/verify');
     expect(init?.method).toBeUndefined();
   });
+
+  it('starts Resend verification for a domain that has not started', async () => {
+    const body = (status: string) =>
+      new Response(
+        JSON.stringify({
+          id: 'dom_new',
+          status,
+          records: [
+            { record: 'DKIM', type: 'TXT', name: 'resend._domainkey', value: 'p=x', status },
+          ],
+        }),
+        { status: 200 },
+      );
+    const fetchMock = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(body('not_started'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'dom_new' }), { status: 200 }))
+      .mockResolvedValueOnce(body('pending'));
+    const acct = {
+      name: 'Resend',
+      resendApiKey: 're_test',
+      resendApiBaseUrl: 'https://api.resend.test',
+    } as unknown as EmailChannel;
+
+    const states = await new ResendService().verifyDomain(acct, 'dom_new');
+
+    expect(fetchMock.mock.calls.map(([u, i]) => `${i?.method ?? 'GET'} ${u}`)).toEqual([
+      'GET https://api.resend.test/domains/dom_new',
+      'POST https://api.resend.test/domains/dom_new/verify',
+      'GET https://api.resend.test/domains/dom_new',
+    ]);
+    expect(states.DKIM?.status).toBe('VerificationRequested');
+  });
 });

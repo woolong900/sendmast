@@ -23,6 +23,9 @@ interface ResendRecord {
   priority?: number;
 }
 
+// Domain statuses where Resend is not checking DNS and needs a POST /verify.
+const NEEDS_VERIFY = new Set(['not_started', 'failed', 'temporary_failure']);
+
 @Injectable()
 export class ResendService {
   async createDomain(acct: EmailChannel, domain: string) {
@@ -42,9 +45,16 @@ export class ResendService {
   ): Promise<SenderDomainVerificationStates> {
     // Resend's POST /verify is not a harmless status refresh: calling it can
     // move an already-verified domain back to pending while Resend rechecks
-    // DNS. The UI's "检查" button should only observe the current provider
-    // state, so use GET here.
-    const json = await this.getDomain(acct, domainId);
+    // DNS. So observe with GET, and only ask Resend to (re)start checking a
+    // domain it isn't checking at all — a new domain sits in `not_started`
+    // until /verify is called, no matter what DNS says.
+    let json = await this.getDomain(acct, domainId);
+    if (NEEDS_VERIFY.has((json.status ?? '').toLowerCase())) {
+      await this.request(acct, `/domains/${encodeURIComponent(domainId)}/verify`, {
+        method: 'POST',
+      });
+      json = await this.getDomain(acct, domainId);
+    }
     return this.toStates(json);
   }
 
